@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Network 0.2.0
+# Random Toolkits | Windows Network 0.3.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -242,6 +242,7 @@ function Get-AdAvailability {
     if (-not $base.Available) { $reasons += $base.Reason }
     if ($Entry.Roles.Count -gt 0 -and $Context.Role -notin $Entry.Roles) {
         $reasons += "Requires $($Entry.Roles -join ' or '); detected: $($Context.Role)"
+        if ($Context.Role -eq 'Workgroup') { $reasons += 'No AD domain trust exists to test or repair' }
     }
     [pscustomobject]@{Available=($reasons.Count -eq 0); Reason=($reasons -join '; ')}
 }
@@ -270,6 +271,7 @@ function Start-AdMenu {
             Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
         }
         Write-Host ' [0] Back'
+        Write-Host ' Repairs are available from [R] in the main menu.' -ForegroundColor DarkGray
         $answer = Read-Host 'Select'
         if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
         $entry = Get-AdChecks | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
@@ -287,6 +289,135 @@ function Start-AdMenu {
             Invoke-AdCheck $entry.Id $dcName | Format-List | Out-Host
         } catch { Write-Warning $_.Exception.Message }
         $null = Read-Host 'Press Enter to return to AD diagnostics'
+    }
+}
+
+function Get-NetworkRepairs {
+    @(
+        [pscustomobject]@{Key='1'; Id='flush-dns'; Name='Flush local DNS cache'; MinPS='5.0'; Commands=@('ipconfig.exe'); Admin=$true; Roles=@(); Impact='Clears cached DNS answers on this PC. Subsequent lookups query DNS again.'}
+        [pscustomobject]@{Key='2'; Id='renew-dhcp'; Name='Renew IPv4 DHCP lease (select adapter)'; MinPS='5.0'; Commands=@('Get-CimInstance','Invoke-CimMethod'); Admin=$true; Roles=@(); Impact='Renews IPv4 DHCP on ONE adapter. IP/routes may change and remote access may disconnect. No release or static-IP change.'}
+        [pscustomobject]@{Key='3'; Id='resync-time'; Name='Resynchronize local clock'; MinPS='5.0'; Commands=@('w32tm.exe'); Admin=$true; Roles=@(); Impact='Requests local clock synchronization using existing time configuration. May change system time; does not change time servers.'}
+        [pscustomobject]@{Key='4'; Id='repair-trust'; Name='Repair AD computer secure channel'; MinPS='5.0'; Commands=@('Test-ComputerSecureChannel'); Admin=$true; Roles=@('Domain member'); Impact='Rebuilds this member PC/server trust channel with AD. Requires authorized domain credentials and DC connectivity. Does not join a workgroup PC to a domain.'}
+    )
+}
+
+function Get-NetworkDhcpAdapters {
+    Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = TRUE AND DHCPEnabled = TRUE' -ErrorAction Stop |
+        Select-Object InterfaceIndex,Description,IPAddress
+}
+
+function Invoke-NetworkRepair {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    param(
+        [Parameter(Mandatory=$true)][string]$Id,
+        [string]$Controller,
+        [int]$InterfaceIndex = -1
+    )
+    $entry = Get-NetworkRepairs | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
+    if (-not $entry) { throw "Unknown repair: $Id" }
+    $context = Get-AdContext
+    $availability = Get-AdAvailability $entry $context
+    if (-not $availability.Available) { throw $availability.Reason }
+    $targetLabel = $env:COMPUTERNAME
+    $adapter = $null
+    if ($Id -eq 'renew-dhcp') {
+        if ($InterfaceIndex -lt 0) { throw 'Select a DHCP-enabled adapter by its InterfaceIndex.' }
+        $adapters = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "InterfaceIndex = $InterfaceIndex" -ErrorAction Stop)
+        if ($adapters.Count -ne 1 -or -not $adapters[0].DHCPEnabled -or -not $adapters[0].IPEnabled) {
+            throw 'Selected adapter is unavailable, static, or not IP-enabled. No change made.'
+        }
+        $adapter = $adapters[0]
+        $targetLabel += " / adapter $InterfaceIndex ($($adapter.Description))"
+    }
+    if ($Id -eq 'repair-trust') {
+        # Resolve and retain the same controller for precheck, repair, and verification.
+        $Controller = Get-AdController $Controller
+        $targetLabel += " / domain $($context.Domain) / DC $Controller"
+    }
+    Write-Host "Action: $($entry.Name)" -ForegroundColor Yellow
+    Write-Host "Target: $targetLabel"
+    Write-Host $entry.Impact -ForegroundColor Yellow
+    if (-not $PSCmdlet.ShouldProcess($targetLabel, $entry.Name)) { return }
+    if ((Read-Host 'Type REPAIR to apply this change, or press Enter to cancel') -cne 'REPAIR') {
+        [pscustomobject]@{Action=$Id; Status='CANCELLED'; Detail='No changes made.'}
+        return
+    }
+    # Recheck requirements after confirmation, including privilege and current machine role.
+    $availability = Get-AdAvailability $entry (Get-AdContext)
+    if (-not $availability.Available) { throw $availability.Reason }
+    switch ($Id) {
+        'flush-dns' {
+            Invoke-AdNative 'ipconfig.exe' @('/flushdns')
+        }
+        'resync-time' {
+            Invoke-AdNative 'w32tm.exe' @('/resync')
+        }
+        'renew-dhcp' {
+            $current = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "InterfaceIndex = $InterfaceIndex" -ErrorAction Stop)
+            if ($current.Count -ne 1 -or -not $current[0].DHCPEnabled -or -not $current[0].IPEnabled -or $current[0].SettingID -ne $adapter.SettingID) {
+                throw 'Adapter configuration changed; select it again. No change made.'
+            }
+            $result = Invoke-CimMethod -InputObject $current[0] -MethodName RenewDHCPLease -ErrorAction Stop
+            $status = 'WARN'
+            $detail = 'DHCP renewal failed. Check adapter connectivity and DHCP service availability.'
+            if ($result.ReturnValue -eq 0) { $status = 'PASS'; $detail = 'DHCP renewal completed. Re-run adapter overview to inspect addresses.' }
+            elseif ($result.ReturnValue -eq 1) { $status = 'WARN'; $detail = 'Renewal reports success with reboot required. No automatic reboot performed.' }
+            [pscustomobject]@{Action=$Id; Target=$targetLabel; Status=$status; ReturnCode=$result.ReturnValue; Detail=$detail}
+        }
+        'repair-trust' {
+            $before = Test-AdSecureChannel $Controller
+            if ($before.Status -eq 'PASS') {
+                [pscustomobject]@{Action=$Id; Status='SKIPPED'; Detail='Secure channel is already healthy. No repair needed.'}
+                return
+            }
+            $credential = Get-Credential -Message "Domain account authorized to repair $($context.Computer) in $($context.Domain)"
+            if ($null -eq $credential) { throw 'Credential prompt cancelled. No repair attempted.' }
+            try {
+                if ((Get-AdContext).Role -ne 'Domain member') { throw 'Computer role changed. Repair blocked.' }
+                $repaired = Test-ComputerSecureChannel -Repair -Server $Controller -Credential $credential -ErrorAction Stop
+                if (-not $repaired) { throw 'Secure-channel repair reported failure. No automatic retry or domain rejoin attempted.' }
+            } finally { $credential = $null }
+            # Return the actual post-repair result rather than assuming repair means success.
+            Test-AdSecureChannel $Controller
+        }
+    }
+}
+
+function Start-NetworkRepairMenu {
+    while ($true) {
+        Write-Host "`n REPAIR PC | CHANGES SYSTEM STATE | PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+        Write-Host 'Use an elevated PowerShell session. Each action requires confirmation; nothing runs automatically.'
+        $context = Get-AdContext
+        foreach ($entry in Get-NetworkRepairs) {
+            $availability = Get-AdAvailability $entry $context
+            $label = "PS $($entry.MinPS)+; Admin; MODIFIES SYSTEM"
+            if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
+            Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
+        }
+        Write-Host ' [0] Back'
+        $answer = Read-Host 'Select'
+        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        $entry = Get-NetworkRepairs | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
+        if (-not $entry) { Write-Warning 'Unknown selection'; continue }
+        try {
+            $availability = Get-AdAvailability $entry $context
+            if (-not $availability.Available) { throw $availability.Reason }
+            $repairParameters = @{Id=$entry.Id; Confirm=$false}
+            # Dispatcher always requests typed confirmation, even with -Confirm:$false.
+            if ($entry.Id -eq 'repair-trust') {
+                $repairParameters.Controller = (Read-Host 'DC hostname [automatic discovery]').Trim()
+            }
+            if ($entry.Id -eq 'renew-dhcp') {
+                $adapters = @(Get-NetworkDhcpAdapters)
+                if ($adapters.Count -eq 0) { throw 'No active DHCP-enabled IPv4 adapters found.' }
+                $adapters | Format-Table -AutoSize | Out-Host
+                $index = -1
+                if (-not [int]::TryParse((Read-Host 'InterfaceIndex to renew'), [ref]$index) -or $index -notin $adapters.InterfaceIndex) { throw 'Choose an InterfaceIndex from the list.' }
+                $repairParameters.InterfaceIndex = $index
+            }
+            Invoke-NetworkRepair @repairParameters | Format-List | Out-Host
+        } catch { Write-Warning $_.Exception.Message }
+        $null = Read-Host 'Press Enter to return to repairs'
     }
 }
 
@@ -335,8 +466,8 @@ function Invoke-NetworkCheck {
 function Start-NetworkMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.2.0' -ForegroundColor Cyan
-        Write-Host " PowerShell $($PSVersionTable.PSVersion) | READ ONLY"
+        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.3.0' -ForegroundColor Cyan
+        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         foreach ($entry in Get-NetworkChecks) {
             $availability = Get-NetworkAvailability $entry
@@ -346,11 +477,13 @@ function Start-NetworkMenu {
             Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
         }
         Write-Host ' [A] Active Directory diagnostics [PS 5.0+]'
+        Write-Host ' [R] Repair PC [Admin; changes system state]' -ForegroundColor Yellow
         Write-Host ' [0] Exit'
         Write-Host 'Ping can be blocked; a failed probe does not prove an outage.' -ForegroundColor DarkGray
         $selection = Read-Host 'Select'
         if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
         if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
+        if ($selection.Trim() -eq 'R') { Start-NetworkRepairMenu; continue }
         $entry = Get-NetworkChecks | Where-Object { $_.Key -eq $selection.Trim() } | Select-Object -First 1
         if (-not $entry) { Write-Warning 'Unknown selection'; continue }
         try {
