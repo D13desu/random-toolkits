@@ -1,6 +1,6 @@
-# Windows Network Toolkit 0.3.0
+# Windows Network Toolkit 0.4.0
 
-Self-contained Windows network diagnosis and repair. Diagnostic checks are read-only. The separate **[R] Repair PC** menu changes system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways.
+Self-contained Windows network diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways.
 
 ```powershell
 irm https://tools.d0xd.com/win/net/ | iex
@@ -14,6 +14,19 @@ If an old Windows PowerShell session cannot negotiate HTTPS, enable TLS 1.2 for 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 irm https://tools.d0xd.com/win/net/ | iex
 ```
+
+## Menu layout
+
+| Main menu | Checks | Repairs |
+| --- | --- | --- |
+| 1 Overview and quick diagnosis | Adapter/IP overview, combined quick check | None |
+| 2 Connectivity and adapters | Gateway/host connectivity, TCP ports, adapter overview | Renew selected adapter DHCP lease |
+| 3 DNS | DNS lookup | Flush DNS cache |
+| 4 Active Directory and time | Membership, discovery/site, AD DNS, secure channel, time, shares | Repair member trust, resync local time |
+| 5 Routing and proxy | Routes, WinHTTP/user proxy | None |
+| 6 Firewall | Firewall profiles | None |
+
+`0` returns from a submenu or exits the main menu. Unavailable actions remain visible with the reason underneath. Repair entries are yellow and marked `CHANGES SYSTEM`; minimum PowerShell and administrator requirements remain visible. The old `A` shortcut still opens Active Directory. Noninteractive check IDs are unchanged.
 
 ## Checks
 
@@ -32,7 +45,7 @@ Default probe target is `example.com`; prompts allow another hostname/IP. ICMP m
 
 Each menu entry displays its minimum PowerShell version. Missing commands, incompatible versions and administrator requirements are labeled `UNAVAILABLE` and blocked before execution. Runtime access errors return to the menu. No AD PowerShell module or dependency installation is required.
 
-## Repair PC submenu [R]
+## Repairs within each topic
 
 All repairs require administrator access and an `Apply this change? [y/N]` confirmation after displaying the target and effects. Only `y` or `yes` proceeds (case-insensitive); pressing Enter or any other response cancels. The underlying `Invoke-NetworkRepair` function supports `-WhatIf`; `-Confirm:$false` does not bypass this confirmation. Diagnostics never automatically initiate repairs.
 
@@ -47,7 +60,7 @@ A **workgroup computer has no AD trust channel** to test or repair. Joining it t
 
 Repairs report native exit codes or CIM result codes. Successful command completion is not a guarantee that the original problem is fixed; rerun the relevant diagnostics afterward. Secure-channel repair performs its own postcheck. Runtime failures return to the menu without an automatic retry.
 
-## Active Directory submenu [A]
+## Active Directory and time [4]
 
 | Check | Requirements / behavior |
 | --- | --- |
@@ -94,6 +107,8 @@ powershell.exe -NoProfile -File tests/Test-AdToolkit.ps1
 pwsh.exe -NoProfile -File tests/Test-AdToolkit.ps1
 powershell.exe -NoProfile -File tests/Test-NetworkRepairs.ps1
 pwsh.exe -NoProfile -File tests/Test-NetworkRepairs.ps1
+powershell.exe -NoProfile -File tests/Test-NetworkMenus.ps1
+pwsh.exe -NoProfile -File tests/Test-NetworkMenus.ps1
 ```
 
 Tests cover parsing, source/endpoint parity, invalid input, compatibility gates, open/closed loopback TCP ports, adapter enumeration, localhost DNS, and IEX startup/exit. They require no tenant, elevation, package installation or public network probe. Historical Windows installations still need real-device validation.
@@ -101,3 +116,5 @@ Tests cover parsing, source/endpoint parity, invalid input, compatibility gates,
 AD regression tests use simulated CIM/domain responses and native commands. They cover all machine roles, unknown/access-denied detection, unavailable commands, secure-channel gating, healthy/broken trust, DC input validation, read-only native arguments, localized exit errors, partial DNS failures, independent share checks and menu recovery. Tested on PowerShell 5.1 and 7; **not yet validated against a live AD domain**.
 
 Repair tests mock every modifying command: no real cache flush, renewal, resync or trust repair is executed during testing. They verify privilege/role gates, cancellation, WhatIf, exact command arguments, static-adapter rejection, DHCP result handling, credential flow, skipping healthy trust and post-repair verification. Real repair outcomes still require validation in a suitable test environment.
+
+Menu tests verify that every action remains reachable, every category returns to the main menu, DNS repair cancellation preserves the yes/no prompt, and unavailable AD repairs are blocked before collecting inputs. Add or reorganize topics through `Get-NetworkCategories`; diagnostics and repairs continue to use their existing dispatchers and checks.

@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Network 0.3.0
+# Random Toolkits | Windows Network 0.4.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -257,40 +257,7 @@ function Invoke-AdCheck {
     & $entry.Action $context $Controller
 }
 
-function Start-AdMenu {
-    while ($true) {
-        $context = Get-AdContext
-        Write-Host "`n ACTIVE DIRECTORY | READ ONLY | PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
-        Write-Host " $($context.Computer) | $($context.Role) | $($context.Domain)"
-        if ($context.Role -eq 'Unknown') { Write-Warning $context.Detail }
-        foreach ($entry in Get-AdChecks) {
-            $availability = Get-AdAvailability $entry $context
-            $label = "PS $($entry.MinPS)+"
-            if ($entry.Admin) { $label += '; Admin' }
-            if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
-            Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
-        }
-        Write-Host ' [0] Back'
-        Write-Host ' Repairs are available from [R] in the main menu.' -ForegroundColor DarkGray
-        $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
-        $entry = Get-AdChecks | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
-        if (-not $entry) { Write-Warning 'Unknown selection'; continue }
-        try {
-            $availability = Get-AdAvailability $entry $context
-            if (-not $availability.Available) { throw $availability.Reason }
-            $dcName = $null
-            if ($entry.Id -in @('ad-secure','ad-time','ad-shares')) {
-                $dcName = Read-Host 'DC hostname [automatic discovery]'
-                if ($dcName) { $dcName = $dcName.Trim() }
-                if ($dcName) { $null = Get-AdController $dcName }
-            }
-            Write-Host 'Running with current Windows credentials. Domain/DNS/SMB timeouts may take time; Ctrl+C cancels.'
-            Invoke-AdCheck $entry.Id $dcName | Format-List | Out-Host
-        } catch { Write-Warning $_.Exception.Message }
-        $null = Read-Host 'Press Enter to return to AD diagnostics'
-    }
-}
+function Start-AdMenu { Start-NetworkCategory -Id 'ad' }
 
 function Get-NetworkRepairs {
     @(
@@ -384,44 +351,25 @@ function Invoke-NetworkRepair {
     }
 }
 
-function Start-NetworkRepairMenu {
-    while ($true) {
-        Write-Host "`n REPAIR PC | CHANGES SYSTEM STATE | PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
-        Write-Host 'Use an elevated PowerShell session. Each action requires confirmation; nothing runs automatically.'
-        $context = Get-AdContext
-        foreach ($entry in Get-NetworkRepairs) {
-            $availability = Get-AdAvailability $entry $context
-            $label = "PS $($entry.MinPS)+; Admin; MODIFIES SYSTEM"
-            if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
-            Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
-        }
-        Write-Host ' [0] Back'
-        $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
-        $entry = Get-NetworkRepairs | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
-        if (-not $entry) { Write-Warning 'Unknown selection'; continue }
-        try {
-            $availability = Get-AdAvailability $entry $context
-            if (-not $availability.Available) { throw $availability.Reason }
-            $repairParameters = @{Id=$entry.Id; Confirm=$false}
-            # Dispatcher always requests yes/no confirmation, even with -Confirm:$false.
-            if ($entry.Id -eq 'repair-trust') {
-                $repairParameters.Controller = (Read-Host 'DC hostname [automatic discovery]').Trim()
-            }
-            if ($entry.Id -eq 'renew-dhcp') {
-                $adapters = @(Get-NetworkDhcpAdapters)
-                if ($adapters.Count -eq 0) { throw 'No active DHCP-enabled IPv4 adapters found.' }
-                $adapters | Format-Table -AutoSize | Out-Host
-                $index = -1
-                if (-not [int]::TryParse((Read-Host 'InterfaceIndex to renew'), [ref]$index) -or $index -notin $adapters.InterfaceIndex) { throw 'Choose an InterfaceIndex from the list.' }
-                $repairParameters.InterfaceIndex = $index
-            }
-            Invoke-NetworkRepair @repairParameters | Format-List | Out-Host
-        } catch { Write-Warning $_.Exception.Message }
-        $null = Read-Host 'Press Enter to return to repairs'
+function Invoke-InteractiveRepair {
+    param($Entry)
+    $availability = Get-AdAvailability $Entry (Get-AdContext)
+    if (-not $availability.Available) { throw $availability.Reason }
+    $repairParameters = @{Id=$Entry.Id; Confirm=$false}
+    if ($Entry.Id -eq 'repair-trust') {
+        $answer = Read-Host 'DC hostname [automatic discovery]'
+        if ($answer) { $repairParameters.Controller = $answer.Trim() }
     }
+    if ($Entry.Id -eq 'renew-dhcp') {
+        $adapters = @(Get-NetworkDhcpAdapters)
+        if ($adapters.Count -eq 0) { throw 'No active DHCP-enabled IPv4 adapters found.' }
+        $adapters | Format-Table -AutoSize | Out-Host
+        $index = -1
+        if (-not [int]::TryParse((Read-Host 'InterfaceIndex to renew'), [ref]$index) -or $index -notin $adapters.InterfaceIndex) { throw 'Choose an InterfaceIndex from the list.' }
+        $repairParameters.InterfaceIndex = $index
+    }
+    Invoke-NetworkRepair @repairParameters
 }
-
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
@@ -464,51 +412,132 @@ function Invoke-NetworkCheck {
     & $entry.Action $ComputerName $RemotePort
 }
 
-function Start-NetworkMenu {
-    while ($true) {
-        Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.3.0' -ForegroundColor Cyan
-        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
-        Write-Host '============================================' -ForegroundColor Cyan
-        foreach ($entry in Get-NetworkChecks) {
-            $availability = Get-NetworkAvailability $entry
-            $label = "PS $($entry.MinPS)+"
-            if ($entry.Admin) { $label += '; Admin' }
-            if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
-            Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
+function Get-NetworkCategories {
+    @(
+        [pscustomobject]@{Key='1'; Id='overview'; Name='Overview and quick diagnosis'; Checks=@('overview','quick'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview'); AdChecks=@(); Repairs=@('renew-dhcp')}
+        [pscustomobject]@{Key='3'; Id='dns'; Name='DNS'; Checks=@('dns'); AdChecks=@(); Repairs=@('flush-dns')}
+        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares'); Repairs=@('repair-trust','resync-time')}
+        [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
+    )
+}
+
+function Get-NetworkMenuItems {
+    param($Category)
+    $number = 1
+    foreach ($kind in @('Check','AD','Repair')) {
+        $ids = @()
+        $registry = @()
+        switch ($kind) {
+            'Check' { $ids=$Category.Checks; $registry=@(Get-NetworkChecks) }
+            'AD' { $ids=$Category.AdChecks; $registry=@(Get-AdChecks) }
+            'Repair' { $ids=$Category.Repairs; $registry=@(Get-NetworkRepairs) }
         }
-        Write-Host ' [A] Active Directory diagnostics [PS 5.0+]'
-        Write-Host ' [R] Repair PC [Admin; changes system state]' -ForegroundColor Yellow
-        Write-Host ' [0] Exit'
-        Write-Host 'Ping can be blocked; a failed probe does not prove an outage.' -ForegroundColor DarkGray
-        $selection = Read-Host 'Select'
-        if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
-        if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
-        if ($selection.Trim() -eq 'R') { Start-NetworkRepairMenu; continue }
-        $entry = Get-NetworkChecks | Where-Object { $_.Key -eq $selection.Trim() } | Select-Object -First 1
-        if (-not $entry) { Write-Warning 'Unknown selection'; continue }
-        try {
-            $availability = Get-NetworkAvailability $entry
-            if (-not $availability.Available) { throw $availability.Reason }
-            $probeTarget = 'example.com'
-            $probePort = 443
-            if ($entry.Id -in @('connectivity','dns','tcp','quick')) {
-                $answer = Read-Host 'Target hostname or IP [example.com]'
-                if (-not [string]::IsNullOrWhiteSpace($answer)) { $probeTarget = $answer.Trim() }
-                Test-NetworkTarget $probeTarget
-            }
-            if ($entry.Id -eq 'tcp') {
-                $answer = Read-Host 'TCP port [443]'
-                if (-not [string]::IsNullOrWhiteSpace($answer)) {
-                    if (-not [int]::TryParse($answer, [ref]$probePort) -or $probePort -lt 1 -or $probePort -gt 65535) { throw 'Port must be between 1 and 65535.' }
-                }
-            }
-            Invoke-NetworkCheck $entry.Id $probeTarget $probePort | Format-List | Out-Host
-        } catch { Write-Warning $_.Exception.Message }
-        $null = Read-Host 'Press Enter to return to the menu'
+        foreach ($id in $ids) {
+            $entry = $registry | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+            if (-not $entry) { throw "Menu references unknown action: $id" }
+            [pscustomobject]@{Key=[string]$number; Kind=$kind; Entry=$entry}
+            $number++
+        }
     }
 }
 
+function Invoke-InteractiveCheck {
+    param($Item)
+    $entry = $Item.Entry
+    if ($Item.Kind -eq 'Repair') { Invoke-InteractiveRepair $entry; return }
+    if ($Item.Kind -eq 'AD') {
+        $dcName = $null
+        if ($entry.Id -in @('ad-secure','ad-time','ad-shares')) {
+            $answer = Read-Host 'DC hostname [automatic discovery]'
+            if ($answer) { $dcName = $answer.Trim() }
+            if ($dcName) { $null = Get-AdController $dcName }
+        }
+        Invoke-AdCheck $entry.Id $dcName
+        return
+    }
+    $probeTarget = 'example.com'
+    $probePort = 443
+    if ($entry.Id -in @('connectivity','dns','tcp','quick')) {
+        $answer = Read-Host 'Target hostname or IP [example.com]'
+        if (-not [string]::IsNullOrWhiteSpace($answer)) { $probeTarget = $answer.Trim() }
+        Test-NetworkTarget $probeTarget
+    }
+    if ($entry.Id -eq 'tcp') {
+        $answer = Read-Host 'TCP port [443]'
+        if (-not [string]::IsNullOrWhiteSpace($answer)) {
+            if (-not [int]::TryParse($answer, [ref]$probePort) -or $probePort -lt 1 -or $probePort -gt 65535) { throw 'Port must be between 1 and 65535.' }
+        }
+    }
+    Invoke-NetworkCheck $entry.Id $probeTarget $probePort
+}
+
+function Get-NetworkItemAvailability {
+    param($Item,$Context)
+    if ($Item.Kind -eq 'Check') { Get-NetworkAvailability $Item.Entry }
+    else { Get-AdAvailability $Item.Entry $Context }
+}
+
+function Start-NetworkCategory {
+    param([string]$Id)
+    $category = Get-NetworkCategories | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
+    if (-not $category) { throw "Unknown category: $Id" }
+    while ($true) {
+        $context = Get-AdContext
+        Write-Host "`n WINDOWS NETWORK > $($category.Name.ToUpperInvariant())" -ForegroundColor Cyan
+        if ($Id -eq 'ad') {
+            Write-Host " $($context.Computer) | $($context.Role) | $($context.Domain)"
+            if ($context.Role -eq 'Unknown') { Write-Warning $context.Detail }
+        }
+        $items = @(Get-NetworkMenuItems $category)
+        $section = ''
+        foreach ($item in $items) {
+            $heading = 'CHECKS'
+            $color = 'White'
+            if ($item.Kind -eq 'Repair') { $heading = 'REPAIRS - require confirmation'; $color = 'Yellow' }
+            if ($section -ne $heading) { Write-Host "`n $heading" -ForegroundColor $color; $section=$heading }
+            $entry = $item.Entry
+            $availability = Get-NetworkItemAvailability $item $context
+            $label = "PS $($entry.MinPS)+"
+            if ($entry.Admin) { $label += '; Admin' }
+            if ($item.Kind -eq 'Repair') { $label += '; CHANGES SYSTEM' }
+            if (-not $availability.Available) { $label += '; UNAVAILABLE'; $color='DarkGray' }
+            Write-Host " [$($item.Key)] $($entry.Name) [$label]" -ForegroundColor $color
+            if (-not $availability.Available) { Write-Host "     $($availability.Reason)" -ForegroundColor DarkGray }
+        }
+        Write-Host "`n [0] Back"
+        $answer = Read-Host 'Select'
+        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        $item = $items | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
+        if (-not $item) { Write-Warning 'Unknown selection'; continue }
+        try {
+            $availability = Get-NetworkItemAvailability $item (Get-AdContext)
+            if (-not $availability.Available) { throw $availability.Reason }
+            Invoke-InteractiveCheck $item | Format-List | Out-Host
+        } catch { Write-Warning $_.Exception.Message }
+        $null = Read-Host 'Press Enter to return'
+    }
+}
+
+function Start-NetworkMenu {
+    while ($true) {
+        Write-Host "`n============================================" -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.4.0' -ForegroundColor Cyan
+        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
+        Write-Host '============================================' -ForegroundColor Cyan
+        foreach ($category in Get-NetworkCategories) { Write-Host " [$($category.Key)] $($category.Name)" }
+        Write-Host "`n [0] Exit"
+        Write-Host 'Checks and repairs are grouped by topic. Repairs ask before making changes.' -ForegroundColor DarkGray
+        $selection = Read-Host 'Select'
+        if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
+        # Retain the former AD shortcut for existing users.
+        if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
+        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() } | Select-Object -First 1
+        if (-not $category) { Write-Warning 'Unknown selection'; continue }
+        Start-NetworkCategory $category.Id
+    }
+}
 if ($PSVersionTable.PSVersion -lt [version]'5.0') { throw 'Windows PowerShell 5.0+ is required (5.1 recommended).' }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This toolkit requires Windows.' }
 if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }

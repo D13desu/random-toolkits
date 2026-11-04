@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Network Toolkit v0.3.0 | [win/net](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Network Toolkit v0.4.0 | [win/net](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [win/m365](win/m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run Windows network diagnostics
@@ -15,9 +15,9 @@ Personal system administration, investigation, and troubleshooting tools.
 irm https://tools.d0xd.com/win/net/ | iex
 ```
 
-Read-only adapter, gateway/connectivity, DNS, TCP port, routing, proxy and firewall checks. Select **A** for AD membership, DC discovery, AD DNS, member secure channel, time and SYSVOL/NETLOGON diagnostics. The menu labels incompatible or missing tools and prevents running them. See [compatibility, legacy TLS and local execution](win/net/README.md).
+Choose a troubleshooting area: **1 Overview**, **2 Connectivity**, **3 DNS**, **4 Active Directory and time**, **5 Routing and proxy**, or **6 Firewall**. The menu labels incompatible or missing tools and prevents running them. See [compatibility, legacy TLS and local execution](win/net/README.md).
 
-Select **R** to repair: flush DNS, renew one adapter's DHCP lease, resync time, or repair a domain member's secure channel. Repairs require an administrator session and explicit confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
+Repairs appear beside their related checks: DHCP renewal under Connectivity, cache flush under DNS, and trust repair/time resync under Active Directory and time. Repairs require an administrator session and yes/no confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
 
 ## Run M365 Toolkit
 
