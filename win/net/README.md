@@ -1,4 +1,4 @@
-# Windows Toolkit 0.6.1
+# Windows Toolkit 0.6.3
 
 Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
@@ -17,7 +17,7 @@ irm https://tools.d0xd.com/win | iex
 
 ## Menu layout
 
-The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -71,6 +71,17 @@ Noninteractive checks: `printers`, `print-jobs`, `print-ports`, `spooler`, `gp-u
 . ./win/net/Network-Toolkit.ps1 -NoMenu
 Get-PcEventRecords -LogName System -Hours 48 -Ids 7031,7034 -Levels 2,3 -Limit 100
 ```
+
+## Registry tweaks
+
+Root option **7 Registry tweaks** inspects values, applies a tweak, or removes its override to use defaults. Each mutation requires `y`/`yes`, saves a unique `.reg` undo file under `%LOCALAPPDATA%\Random-Toolkits\registry-backups`, then reads back the values. If backup fails, nothing is changed. If a write fails partway through, the error names the undo file. Import it with Registry Editor under the same account (elevated for RDP) to restore the exact previous values, including deleting values that were originally absent. Resetting defaults is distinct from restoring that backup. No unrelated values are removed.
+
+- **Classic Outlook local PST/OST limit:** Office `16.0` current-user preferences, Unicode files only. Choose a whole number of GB (1–1000; default 100). Sets `MaxLargeFileSize` in MB and `WarnLargeFileSize` to 95% of that maximum. This threshold stops adding data; it does not produce an advance warning popup. Close Outlook first. The tool blocks changes when size values exist in the corresponding current-user policy key. Run as the intended Outlook user; elevation under another account targets that account. This does not increase Exchange/Microsoft 365 server mailbox quotas or configure new Outlook. Above 50 GB can reduce performance; archive or reduce cached mail where practical. Resetting after a file has grown beyond the default may prevent adding mail until its size is reduced.
+- **Older RDP redirection warning:** administrator required. Sets `HKLM\Software\Policies\Microsoft\Windows NT\Terminal Services\Client\RedirectionWarningDialogVersion` to DWORD `1`. This machine-wide compatibility setting reduces the newer resource-consent protection for connections opened from RDP files; it does not turn off certificate validation or NLA. Use for trusted connections. Microsoft may remove support in a future update. Reset deletes the override; managed policy can reapply it. Start a new connection after changing it.
+
+Sources: [Microsoft Outlook size configuration](https://learn.microsoft.com/en-us/microsoft-365-apps/outlook/data-files/configure-size-limit-outlook-data-files), [Microsoft RDP warning documentation](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/remotepc/understanding-security-warnings), and the [requested LazyAdmin walkthrough](https://lazyadmin.nl/it/fix-remote-desktop-security-warning/).
+
+`Invoke-PcRegistryTweak outlook -SizeGB 100 -WhatIf` previews a change after dot-sourcing with `-NoMenu`. Both apply and reset support `-WhatIf`. `tests/Test-RegistryTweaks.ps1` tests cancellation, preview, values, backup contents, defaults, elevation, policy gating and backup failure with mocked writes. Live registry changes are not exercised.
 
 ## Checks
 

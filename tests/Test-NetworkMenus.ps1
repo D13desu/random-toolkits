@@ -18,9 +18,9 @@ foreach ($category in @($categories | Where-Object { $_.Id -in @('overview','con
 $script:Answers.Enqueue('0')
 Start-NetworkMenu
 Assert-True ($script:Answers.Count -eq 0) 'Every network category returns to the network menu'
-foreach ($answer in @('1','0','2','0','3','0','4','0','5','0','6','0','0')) { $script:Answers.Enqueue($answer) }
+foreach ($answer in @('1','0','2','0','3','0','4','0','5','0','6','0','7','0','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
-Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates all six sections and returns'
+Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates all seven sections and returns'
 $script:Output.Clear()
 foreach ($answer in @('3','2','n','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu
