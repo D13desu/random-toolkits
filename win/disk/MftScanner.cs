@@ -1,12 +1,20 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV6 {
+namespace RandomToolkits.DiskV7 {
+ public class MftStream { public string Name; public long Allocated; public bool Known; }
  public class MftName { public ulong Parent; public string Name; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
   public bool HasAttributeList, HasStandardInformation;
   public ulong BaseReference; public ushort LinkCount; public uint ReparseTag;
+  public int NameAttributeCount;
   public string ExtensionIssue;
+  public long UnnamedAllocated, Allocated;
+  public bool UnnamedAllocationKnown=true, AllocationKnown, AllocationListKnown;
+  public string AllocationIssue;
+  public System.Collections.Generic.List<MftStream> NamedStreams;
+  public System.Collections.Generic.List<string> ExpectedStreams;
+  public System.Collections.Generic.List<ulong> ExtensionReferences;
   public long Bytes; public System.Collections.Generic.List<MftName> Names = new System.Collections.Generic.List<MftName>();
  }
  public class MftScanner {
@@ -46,7 +54,22 @@ namespace RandomToolkits.DiskV6 {
      r.HasStandardInformation=true;
      if((U32(b,p+value+32)&0x400)!=0) r.Reparse=true;
     }
-    if(type==0x20) r.HasAttributeList=true;
+    if(type==0x20) {
+     r.HasAttributeList=true;
+     if(!nonresident && size>0) {
+      r.ExpectedStreams=new System.Collections.Generic.List<string>();int q=p+value, limit=q+size;
+      r.ExtensionReferences=new System.Collections.Generic.List<ulong>();
+      while(q<limit) {
+       Need(limit-q>=26);int entryLength=U16(b,q+4), chars=b[q+6], nameOffset=b[q+7];
+       Need(entryLength>=26 && entryLength%8==0 && entryLength<=limit-q);
+       Need(chars==0 || (nameOffset>=26 && nameOffset+chars*2<=entryLength));
+       if(U32(b,q)==0x80 && U64(b,q+8)==0) r.ExpectedStreams.Add(chars==0?"":System.Text.Encoding.Unicode.GetString(b,q+nameOffset,chars*2));
+       ulong reference=U64(b,q+16);if(reference!=r.Reference && !r.ExtensionReferences.Contains(reference)) r.ExtensionReferences.Add(reference);
+       q+=entryLength;
+      }
+      r.AllocationListKnown=true;
+     }
+    }
     if(type==0xc0) {
      r.Reparse=true;
      if(!nonresident) {Need(size>=8 && U16(b,p+value+4)<=size-8);r.ReparseTag=U32(b,p+value);}
@@ -54,16 +77,33 @@ namespace RandomToolkits.DiskV6 {
     if(type==0x30) {
      Need(!nonresident && size>=66); int v=p+value, chars=b[v+64];
      Need(chars>0 && 66+chars*2<=size && b[v+65]<=3);
+     r.NameAttributeCount++;
      if(b[v+65]!=2) { // DOS-only short name is an alias, not another hard link
       string name=System.Text.Encoding.Unicode.GetString(b,v+66,chars*2);
       Need(name.IndexOfAny(new char[]{'\\','/',':','\0'})<0 && name!="..");
       r.Names.Add(new MftName {Parent=U64(b,v),Name=name});
      }
     }
-    if(type==0x80 && b[p+9]==0) {
+    if(type==0x80) {
      if(!nonresident || U64(b,p+16)==0) {
-      Need(!r.HasData); r.HasData=true;
-      r.Bytes=nonresident?System.BitConverter.ToInt64(b,p+48):size; Need(r.Bytes>=0);
+      string streamName=b[p+9]==0?"":System.Text.Encoding.Unicode.GetString(b,p+U16(b,p+10),b[p+9]*2);
+      // Resident DATA consumes its padded payload slot inside the MFT record.
+      // Windows reports that slot as stream allocation even without separate clusters.
+      long allocation=nonresident?0:length-value;bool known=true;
+      if(nonresident) {
+       ushort flags=U16(b,p+12);bool packed=(flags&0x8001)!=0;
+       if((flags&0xff)!=0 && (flags&0xff)!=1) known=false;
+       else if(packed && (length<72 || U16(b,p+32)<72)) known=false;
+       else {allocation=System.BitConverter.ToInt64(b,p+(packed?64:40));if(allocation<0) {known=false;allocation=0;}}
+      }
+      if(streamName.Length==0) {
+       Need(!r.HasData); r.HasData=true;
+       r.Bytes=nonresident?System.BitConverter.ToInt64(b,p+48):size; Need(r.Bytes>=0);
+       r.UnnamedAllocated=allocation;r.UnnamedAllocationKnown=known;
+      } else {
+       if(r.NamedStreams==null) r.NamedStreams=new System.Collections.Generic.List<MftStream>();
+       r.NamedStreams.Add(new MftStream {Name=streamName,Allocated=allocation,Known=known});
+      }
      }
     }
     p+=length;
@@ -75,15 +115,37 @@ namespace RandomToolkits.DiskV6 {
    // This is the base-only view; Assemble validates and joins extension metadata.
    r.Unsupported=r.HasAttributeList && (!r.Directory || !r.HasStandardInformation || r.Names.Count!=1);
    if(!r.Directory && !r.HasData) r.Unsupported=true;
+   CalculateAllocation(r);
    return r;
   }
-  public static bool IncludeReparse(MftRecord r) {
-   if(!r.Reparse) return true;
-   // Only known metadata-bearing filters. Never follow a name surrogate or
-   // interpret an unknown filter's payload. No file content is opened/hydrated.
-   if((r.ReparseTag&0x20000000U)!=0) return false;
-   return (r.ReparseTag==0x80000017U && !r.Directory) || (r.ReparseTag&0xffff0fffU)==0x9000001aU;
+  public static void CalculateAllocation(MftRecord r) {
+   r.Allocated=0;r.AllocationKnown=true;r.AllocationIssue=null;
+   if(!r.HasAttributeList && r.NamedStreams==null) {
+    r.AllocationKnown=r.UnnamedAllocationKnown && (r.Directory || r.HasData);
+    if(r.HasData && r.UnnamedAllocationKnown) r.Allocated=r.UnnamedAllocated;
+    if(!r.AllocationKnown) r.AllocationIssue="Unnamed stream allocation unavailable.";
+    return;
+   }
+   var streams=new System.Collections.Generic.Dictionary<string,MftStream>(System.StringComparer.Ordinal);
+   if(r.HasData) streams.Add("",new MftStream {Name="",Allocated=r.UnnamedAllocated,Known=r.UnnamedAllocationKnown});
+   if(r.NamedStreams!=null) foreach(MftStream stream in r.NamedStreams) {
+    if(streams.ContainsKey(stream.Name)) {streams[stream.Name]=new MftStream {Name=stream.Name,Known=false};}
+    else streams.Add(stream.Name,stream);
+   }
+   foreach(MftStream stream in streams.Values) {
+    if(stream.Known) r.Allocated=checked(r.Allocated+stream.Allocated);
+    else {r.AllocationKnown=false;r.AllocationIssue="Missing, conflicting or unsupported stream allocation header.";}
+   }
+   if(r.HasAttributeList) {
+    if(!r.AllocationListKnown || r.ExpectedStreams==null) {r.AllocationKnown=false;r.AllocationIssue="Attribute list is nonresident or unavailable; stream completeness is unknown.";}
+    else {
+     var expected=new System.Collections.Generic.HashSet<string>(r.ExpectedStreams,System.StringComparer.Ordinal);
+     if(expected.Count!=r.ExpectedStreams.Count || !expected.SetEquals(streams.Keys)) {r.AllocationKnown=false;r.AllocationIssue="Data stream list does not match the assembled initial extents.";}
+    }
+   }
+   if(!r.Directory && !r.HasData) {r.AllocationKnown=false;r.AllocationIssue="Unnamed data metadata unavailable.";}
   }
+  public static bool IsContainer(MftRecord r) {return r.Reparse && (r.ReparseTag==0x80000018U || r.ReparseTag==0x90001018U);}
   static string Tag(MftRecord r) {return r.ReparseTag==0?"UnknownTag":"0x"+r.ReparseTag.ToString("X8");}
   public static MftRecord[] Assemble(MftRecord[] records) {
    var result=new System.Collections.Generic.List<MftRecord>();
@@ -92,7 +154,8 @@ namespace RandomToolkits.DiskV6 {
     if(r==null || r.BaseReference!=0 || bases.ContainsKey(r.Reference)) continue;
     if(!r.HasAttributeList) {result.Add(r);continue;}
     // Clone only records being assembled; repeated builds must not append names twice.
-    var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes};
+    var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,NameAttributeCount=r.NameAttributeCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes,UnnamedAllocated=r.UnnamedAllocated,UnnamedAllocationKnown=r.UnnamedAllocationKnown,AllocationListKnown=r.AllocationListKnown,ExpectedStreams=r.ExpectedStreams};
+    if(r.NamedStreams!=null) copy.NamedStreams=new System.Collections.Generic.List<MftStream>(r.NamedStreams);
     copy.Names.AddRange(r.Names);bases.Add(copy.Reference,copy);result.Add(copy);
    }
    foreach(MftRecord extra in records) {
@@ -101,7 +164,7 @@ namespace RandomToolkits.DiskV6 {
     // Match the entire reference including sequence; never attach a stale extent
     // to a reused record slot. Missing data/names are detected below.
     if(!bases.TryGetValue(extra.BaseReference,out owner) || !owner.HasAttributeList) continue;
-    owner.Names.AddRange(extra.Names);owner.Reparse|=extra.Reparse;
+    owner.Names.AddRange(extra.Names);owner.NameAttributeCount+=extra.NameAttributeCount;owner.Reparse|=extra.Reparse;
     if(extra.ReparseTag!=0) {
      if(owner.ReparseTag!=0 && owner.ReparseTag!=extra.ReparseTag) owner.ExtensionIssue="Conflicting reparse tags in extension records.";
      owner.ReparseTag=extra.ReparseTag;
@@ -109,8 +172,9 @@ namespace RandomToolkits.DiskV6 {
     if(extra.HasStandardInformation) owner.ExtensionIssue="Unexpected standard information in an extension record.";
     if(extra.HasData) {
      if(owner.HasData) owner.ExtensionIssue="Multiple initial unnamed data attributes.";
-     else {owner.HasData=true;owner.Bytes=extra.Bytes;}
+     else {owner.HasData=true;owner.Bytes=extra.Bytes;owner.UnnamedAllocated=extra.UnnamedAllocated;owner.UnnamedAllocationKnown=extra.UnnamedAllocationKnown;}
     }
+    if(extra.NamedStreams!=null) {if(owner.NamedStreams==null) owner.NamedStreams=new System.Collections.Generic.List<MftStream>();owner.NamedStreams.AddRange(extra.NamedStreams);}
    }
    foreach(MftRecord r in bases.Values) {
     if(!r.HasAttributeList) continue;
@@ -118,10 +182,12 @@ namespace RandomToolkits.DiskV6 {
     var names=new System.Collections.Generic.List<MftName>();
     foreach(MftName n in r.Names) if(unique.Add(n.Parent.ToString()+":"+n.Name)) names.Add(n);
     r.Names=names;
-    // Logical size only needs the first DATA extent. Names must reconcile with
-    // the base hard-link count, and reparse flags must come from base standard info.
+    // NTFS's header count includes separate DOS FILE_NAME attributes. Retain
+    // those in the completeness check but never display/count them as extra files.
     r.Unsupported=r.ExtensionIssue!=null || !r.HasStandardInformation || r.Names.Count==0 ||
-      (r.Directory ? r.Names.Count!=1 : (!r.HasData || r.LinkCount==0 || r.Names.Count!=r.LinkCount));
+      (r.Directory ? r.Names.Count!=1 : (!r.HasData || r.LinkCount==0 || r.NameAttributeCount!=r.LinkCount));
+    CalculateAllocation(r);
+    if(r.ExtensionIssue!=null) {r.AllocationKnown=false;r.AllocationIssue=r.ExtensionIssue;}
    }
    return result.ToArray();
   }
@@ -137,6 +203,9 @@ namespace RandomToolkits.DiskV6 {
   // Deterministic ownership: a hard-linked file is charged to its first ordinal path only.
   // Other links remain visible with zero charged bytes, labelled LINK.
   public static Scan Build(string root,MftRecord[] records,bool cancelled) {
+   // This is a graph of local MFT parent IDs. Reparse payloads and target paths
+   // are never followed. Their own local DATA allocation can therefore be counted
+   // even when the tag is unknown, without traversing a junction or hydrating data.
    records=Assemble(records);
    Scan s=new Scan {Root=root,Engine="Experimental NTFS MFT records",Cancelled=cancelled};
    s.CachedRows=new System.Collections.Generic.Dictionary<string,System.Collections.Generic.List<Row>>(System.StringComparer.OrdinalIgnoreCase);
@@ -160,7 +229,6 @@ namespace RandomToolkits.DiskV6 {
     while(!paths.ContainsKey(cur.Reference)) {
      if(blocked.TryGetValue(cur.Reference,out failure)) {valid=false;break;}
      if(!seen.Add(cur.Reference)) failure=new Issue {Category="DirectoryCycle",Reason="Parent cycle at "+Describe(cur)};
-     else if(!IncludeReparse(cur)) failure=new Issue {Category="DirectoryReparse-"+Tag(cur),Reason="Link or unsupported reparse directory excluded ("+Tag(cur)+"): "+Describe(cur)};
      else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Incomplete/conflicting extension metadata: "+Describe(cur)+"; "+(cur.ExtensionIssue??"missing name or base standard flags")};
      else if(cur.Names.Count!=1) failure=new Issue {Category="DirectoryNames",Reason="Expected one directory name; found "+cur.Names.Count+" on "+Describe(cur)};
      if(failure!=null) {blocked[cur.Reference]=failure;valid=false;break;}
@@ -181,15 +249,17 @@ namespace RandomToolkits.DiskV6 {
     for(int i=chain.Count-1;i>=0;i--) {
      MftRecord r=chain[i]; string parent=paths[r.Names[0].Parent]; string path=parent.TrimEnd('\\')+"\\"+r.Names[0].Name;
      if(s.Nodes.ContainsKey(path)) {valid=false;break;}
-     paths.Add(r.Reference,path); s.Nodes.Add(path,new Node {Path=path,Parent=parent});
+     paths.Add(r.Reference,path); s.Nodes.Add(path,new Node {Path=path,Parent=parent,Allocated=r.Allocated,AllocationUnknown=!r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null});
      s.Nodes[parent].Children.Add(path); s.CachedRows.Add(path,new System.Collections.Generic.List<Row>());
+     if(r.Reparse) {s.MftReparseDirectories++;if(r.ReparseTag==0) s.MftUnknownTags++;}
+     if(!r.AllocationKnown) {s.MftUnknownAllocations++;Issue(s,Describe(r),r.AllocationIssue,"AllocationUnknown");}
     }
     if(!valid) {s.MftOmittedDirectories++;Issue(s,Describe(start),"Duplicate directory path; volume may have changed during scan.","DuplicateDirectory");}
    }
    var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
-    if(!IncludeReparse(r) || r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),!IncludeReparse(r)?"Link or unsupported reparse file excluded ("+Tag(r)+").":"Incomplete/conflicting names, standard flags or unnamed data; "+r.ExtensionIssue,!IncludeReparse(r)?"FileReparse-"+Tag(r):"FileUnsupported");continue;}
+    if(r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),"Incomplete/conflicting metadata: data="+r.HasData+", standardInfo="+r.HasStandardInformation+", name attributes="+r.NameAttributeCount+", header count="+r.LinkCount+"; "+r.ExtensionIssue,"FileUnsupported");continue;}
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
     string linkFailure=null;
     foreach(MftName n in r.Names) {
@@ -204,11 +274,15 @@ namespace RandomToolkits.DiskV6 {
     foreach(var pair in names) {
      if(!occupied.Add(pair.Key)) {if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
      long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);
+     long allocated=charged?0:r.Allocated;node.Allocated=checked(node.Allocated+allocated);
      if(!charged) {
       node.Files++;s.Files++;
       if(r.Reparse && (r.ReparseTag&0xffff0fffU)==0x9000001aU) {s.MftCloudFiles++;s.MftCloudBytes=checked(s.MftCloudBytes+r.Bytes);}
+      if(IsContainer(r)) {s.MftContainerFiles++;s.MftContainerBytes=checked(s.MftContainerBytes+r.Bytes);s.MftContainerAllocated=checked(s.MftContainerAllocated+r.Allocated);}
+      if(r.Reparse) {s.MftReparseFiles++;if(r.ReparseTag==0) s.MftUnknownTags++;}
+      if(!r.AllocationKnown) {node.AllocationUnknown=true;s.MftUnknownAllocations++;Issue(s,Describe(r),r.AllocationIssue,"AllocationUnknown");}
      }
-     s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":"FILE",Bytes=bytes}); charged=true;
+     s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":(IsContainer(r)?"WCI":(r.Reparse?"RP":"FILE")),Bytes=bytes,Allocated=allocated,AllocationUnknown=!charged && !r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null}); charged=true;
     }
     if(!charged) s.MftOmittedFiles++;
     // At most one diagnostic per file: do not count each missing parent and then count the file again.
@@ -216,19 +290,42 @@ namespace RandomToolkits.DiskV6 {
    }
    var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);
    order.Sort(delegate(Node a,Node b){return b.Path.Length.CompareTo(a.Path.Length);});
-   foreach(Node n in order) if(n.Parent!=null) {Node parent=s.Nodes[n.Parent];parent.Bytes=checked(parent.Bytes+n.Bytes);parent.Files+=n.Files;}
+   foreach(Node n in order) if(n.Parent!=null) {Node parent=s.Nodes[n.Parent];parent.Bytes=checked(parent.Bytes+n.Bytes);parent.Allocated=checked(parent.Allocated+n.Allocated);parent.AllocationUnknown|=n.AllocationUnknown;parent.Files+=n.Files;}
    // Unresolved records cannot reliably be attributed to a folder: conservatively flag all totals.
    if(cancelled) Issue(s,root,"Cancelled: only records read so far are included; unresolved paths are omitted.");
    if(s.IssueCount>0) foreach(Node n in s.Nodes.Values) n.Partial=true;
    foreach(Node n in s.Nodes.Values) {
-    foreach(string p in n.Children) {Node child=s.Nodes[p];s.CachedRows[n.Path].Add(new Row {Name=System.IO.Path.GetFileName(p),Path=p,Kind="DIR",Bytes=child.Bytes,Partial=child.Partial});}
-    s.CachedRows[n.Path].Sort(delegate(Row a,Row b){int c=b.Bytes.CompareTo(a.Bytes);return c!=0?c:System.StringComparer.Ordinal.Compare(a.Name,b.Name);});
+    foreach(string p in n.Children) {Node child=s.Nodes[p];s.CachedRows[n.Path].Add(new Row {Name=System.IO.Path.GetFileName(p),Path=p,Kind="DIR",Bytes=child.Bytes,Allocated=child.Allocated,AllocationUnknown=child.AllocationUnknown,Partial=child.Partial,ReparseTag=child.ReparseTag});}
+    s.CachedRows[n.Path].Sort(delegate(Row a,Row b){int c=b.Allocated.CompareTo(a.Allocated);return c!=0?c:System.StringComparer.Ordinal.Compare(a.Name,b.Name);});
    }
    s.Finished=System.DateTime.Now; return s;
   }
   public static MftScanner Start(string root) {
    MftScanner w=new MftScanner();w.Result.Root=root;
    var t=new System.Threading.Thread(w.Run);t.IsBackground=true;t.Start();return w;
+  }
+  // Targeted validation of newly created fixture files, not a whole-volume scan.
+  public static MftRecord[] ReadRecordsForValidation(string root,ulong[] references) {
+   if(root.Length!=3 || root[1]!=':' || root[2]!='\\' || references.Length>128) throw new System.ArgumentException("Invalid bounded record request.");
+   var records=new System.Collections.Generic.List<MftRecord>();var seen=new System.Collections.Generic.HashSet<ulong>();
+   var queue=new System.Collections.Generic.Queue<ulong>(references);
+   using(var handle=CreateFileW(@"\\.\"+root.Substring(0,2),0x80000000,7,System.IntPtr.Zero,3,0,System.IntPtr.Zero)) {
+    if(handle.IsInvalid) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    byte[] volume=new byte[128];int returned;
+    if(!DeviceIoControl(handle,0x90064,null,0,volume,volume.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    Need(returned>=104 && U16(volume,100)==3 && U16(volume,102)<=1);
+    int recordSize=checked((int)U32(volume,48));Need(recordSize>=512 && recordSize<=65536);byte[] output=new byte[recordSize+16];
+    while(queue.Count>0) {
+     ulong reference=queue.Dequeue();if(!seen.Add(reference)) continue;Need(seen.Count<=128);
+     byte[] input=System.BitConverter.GetBytes(reference&IndexMask);
+     if(!DeviceIoControl(handle,0x90068,input,8,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+     Need(returned>=12 && (U64(output,0)&IndexMask)==(reference&IndexMask));int size=checked((int)U32(output,8));Need(size>=48 && size<=recordSize && size<=returned-12);
+     byte[] bytes=new byte[size];System.Buffer.BlockCopy(output,12,bytes,0,size);MftRecord r=Parse(bytes,reference&IndexMask);
+     Need(r!=null && ((reference>>48)==0 || r.Reference==reference));records.Add(r);
+     if(r.ExtensionReferences!=null) foreach(ulong extra in r.ExtensionReferences) queue.Enqueue(extra);
+    }
+   }
+   return Assemble(records.ToArray());
   }
   // Bounded read-only diagnostic: inspect one record and its parent chain, not a full scan.
   public static string[] Inspect(string root,ulong index) {
@@ -296,6 +393,7 @@ namespace RandomToolkits.DiskV6 {
       if(actual==0) break;next=actual-1;
      }
      Result=Build(root,records.ToArray(),CancelRequested);Result.Started=started;
+     try {var drive=new System.IO.DriveInfo(root);Result.VolumeUsed=drive.TotalSize-drive.TotalFreeSpace;} catch { }
      if(CancelRequested && !Result.Cancelled) {
       Result.Cancelled=true;Issue(Result,root,"Cancellation requested during tree reconstruction.");
       foreach(Node n in Result.Nodes.Values) n.Partial=true;

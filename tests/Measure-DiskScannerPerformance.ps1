@@ -25,7 +25,7 @@ foreach ($engine in @('Native','PowerShell','PowerShell','Native','Native','Powe
 }
 $native=@($measurements | Where-Object Engine -eq Native | Sort-Object Milliseconds)[1].Milliseconds
 $fallback=@($measurements | Where-Object Engine -eq PowerShell | Sort-Object Milliseconds)[1].Milliseconds
-$worker=[RandomToolkits.DiskV6.Scanner]::Start($root)
+$worker=[RandomToolkits.DiskV7.Scanner]::Start($root)
 $worker.CancelRequested=$true
 while (-not $worker.Done) { Start-Sleep -Milliseconds 10 }
 if ($worker.Error -or -not $worker.Result.Cancelled -or -not $worker.Result.Nodes[$root].Partial) { throw 'Cancellation did not produce marked partial results' }
