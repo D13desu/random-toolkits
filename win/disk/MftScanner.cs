@@ -1,10 +1,12 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV5 {
+namespace RandomToolkits.DiskV6 {
  public class MftName { public ulong Parent; public string Name; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
   public bool HasAttributeList, HasStandardInformation;
+  public ulong BaseReference; public ushort LinkCount; public uint ReparseTag;
+  public string ExtensionIssue;
   public long Bytes; public System.Collections.Generic.List<MftName> Names = new System.Collections.Generic.List<MftName>();
  }
  public class MftScanner {
@@ -24,10 +26,10 @@ namespace RandomToolkits.DiskV5 {
   // The FSCTL returns a filesystem-managed record. It does not require raw-sector USA fixups.
   public static MftRecord Parse(byte[] b,ulong index) {
    Need(b!=null && b.Length>=48 && U32(b,0)==0x454c4946);
-   if((U16(b,22)&1)==0 || U64(b,32)!=0) return null; // unused or extension: base record exclusions cover extensions
+   if((U16(b,22)&1)==0) return null;
    int used=checked((int)U32(b,24)), p=U16(b,20);
    Need(used<=b.Length && used>=48 && p>=48 && p<=used-4);
-   MftRecord r=new MftRecord {Reference=(index&IndexMask)|((ulong)U16(b,16)<<48),Directory=(U16(b,22)&2)!=0};
+   MftRecord r=new MftRecord {Reference=(index&IndexMask)|((ulong)U16(b,16)<<48),Directory=(U16(b,22)&2)!=0,BaseReference=U64(b,32),LinkCount=U16(b,18)};
    bool end=false;
    while(p<=used-4) {
     uint type=U32(b,p); if(type==0xffffffff) {end=true;break;}
@@ -45,7 +47,10 @@ namespace RandomToolkits.DiskV5 {
      if((U32(b,p+value+32)&0x400)!=0) r.Reparse=true;
     }
     if(type==0x20) r.HasAttributeList=true;
-    if(type==0xc0) r.Reparse=true;
+    if(type==0xc0) {
+     r.Reparse=true;
+     if(!nonresident) {Need(size>=8 && U16(b,p+value+4)<=size-8);r.ReparseTag=U32(b,p+value);}
+    }
     if(type==0x30) {
      Need(!nonresident && size>=66); int v=p+value, chars=b[v+64];
      Need(chars>0 && 66+chars*2<=size && b[v+65]<=3);
@@ -67,10 +72,58 @@ namespace RandomToolkits.DiskV5 {
    // Directory sizes come from child records, not the directory's index extents.
    // A usable base filename plus authoritative reparse flags is sufficient to
    // connect this directory to the tree, even when its index spans extensions.
-   // Files still need full extension resolution for names/data: keep excluding them.
+   // This is the base-only view; Assemble validates and joins extension metadata.
    r.Unsupported=r.HasAttributeList && (!r.Directory || !r.HasStandardInformation || r.Names.Count!=1);
    if(!r.Directory && !r.HasData) r.Unsupported=true;
    return r;
+  }
+  public static bool IncludeReparse(MftRecord r) {
+   if(!r.Reparse) return true;
+   // Only known metadata-bearing filters. Never follow a name surrogate or
+   // interpret an unknown filter's payload. No file content is opened/hydrated.
+   if((r.ReparseTag&0x20000000U)!=0) return false;
+   return (r.ReparseTag==0x80000017U && !r.Directory) || (r.ReparseTag&0xffff0fffU)==0x9000001aU;
+  }
+  static string Tag(MftRecord r) {return r.ReparseTag==0?"UnknownTag":"0x"+r.ReparseTag.ToString("X8");}
+  public static MftRecord[] Assemble(MftRecord[] records) {
+   var result=new System.Collections.Generic.List<MftRecord>();
+   var bases=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
+   foreach(MftRecord r in records) {
+    if(r==null || r.BaseReference!=0 || bases.ContainsKey(r.Reference)) continue;
+    if(!r.HasAttributeList) {result.Add(r);continue;}
+    // Clone only records being assembled; repeated builds must not append names twice.
+    var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes};
+    copy.Names.AddRange(r.Names);bases.Add(copy.Reference,copy);result.Add(copy);
+   }
+   foreach(MftRecord extra in records) {
+    if(extra==null || extra.BaseReference==0) continue;
+    MftRecord owner;
+    // Match the entire reference including sequence; never attach a stale extent
+    // to a reused record slot. Missing data/names are detected below.
+    if(!bases.TryGetValue(extra.BaseReference,out owner) || !owner.HasAttributeList) continue;
+    owner.Names.AddRange(extra.Names);owner.Reparse|=extra.Reparse;
+    if(extra.ReparseTag!=0) {
+     if(owner.ReparseTag!=0 && owner.ReparseTag!=extra.ReparseTag) owner.ExtensionIssue="Conflicting reparse tags in extension records.";
+     owner.ReparseTag=extra.ReparseTag;
+    }
+    if(extra.HasStandardInformation) owner.ExtensionIssue="Unexpected standard information in an extension record.";
+    if(extra.HasData) {
+     if(owner.HasData) owner.ExtensionIssue="Multiple initial unnamed data attributes.";
+     else {owner.HasData=true;owner.Bytes=extra.Bytes;}
+    }
+   }
+   foreach(MftRecord r in bases.Values) {
+    if(!r.HasAttributeList) continue;
+    var unique=new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+    var names=new System.Collections.Generic.List<MftName>();
+    foreach(MftName n in r.Names) if(unique.Add(n.Parent.ToString()+":"+n.Name)) names.Add(n);
+    r.Names=names;
+    // Logical size only needs the first DATA extent. Names must reconcile with
+    // the base hard-link count, and reparse flags must come from base standard info.
+    r.Unsupported=r.ExtensionIssue!=null || !r.HasStandardInformation || r.Names.Count==0 ||
+      (r.Directory ? r.Names.Count!=1 : (!r.HasData || r.LinkCount==0 || r.Names.Count!=r.LinkCount));
+   }
+   return result.ToArray();
   }
   static void Issue(Scan scan,string path,string reason,string category="Other") {
    scan.IssueCount++; scan.Nodes[scan.Root].Partial=true;
@@ -84,6 +137,7 @@ namespace RandomToolkits.DiskV5 {
   // Deterministic ownership: a hard-linked file is charged to its first ordinal path only.
   // Other links remain visible with zero charged bytes, labelled LINK.
   public static Scan Build(string root,MftRecord[] records,bool cancelled) {
+   records=Assemble(records);
    Scan s=new Scan {Root=root,Engine="Experimental NTFS MFT records",Cancelled=cancelled};
    s.CachedRows=new System.Collections.Generic.Dictionary<string,System.Collections.Generic.List<Row>>(System.StringComparer.OrdinalIgnoreCase);
    s.Nodes.Add(root,new Node {Path=root}); s.CachedRows.Add(root,new System.Collections.Generic.List<Row>());
@@ -106,15 +160,16 @@ namespace RandomToolkits.DiskV5 {
     while(!paths.ContainsKey(cur.Reference)) {
      if(blocked.TryGetValue(cur.Reference,out failure)) {valid=false;break;}
      if(!seen.Add(cur.Reference)) failure=new Issue {Category="DirectoryCycle",Reason="Parent cycle at "+Describe(cur)};
-     else if(cur.Reparse) failure=new Issue {Category="DirectoryReparse",Reason="Reparse directory excluded: "+Describe(cur)};
-     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Directory with extensions lacks a single base filename or standard reparse flags: "+Describe(cur)};
+     else if(!IncludeReparse(cur)) failure=new Issue {Category="DirectoryReparse-"+Tag(cur),Reason="Link or unsupported reparse directory excluded ("+Tag(cur)+"): "+Describe(cur)};
+     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Incomplete/conflicting extension metadata: "+Describe(cur)+"; "+(cur.ExtensionIssue??"missing name or base standard flags")};
      else if(cur.Names.Count!=1) failure=new Issue {Category="DirectoryNames",Reason="Expected one directory name; found "+cur.Names.Count+" on "+Describe(cur)};
      if(failure!=null) {blocked[cur.Reference]=failure;valid=false;break;}
      chain.Add(cur); ulong parent=cur.Names[0].Parent;
      if(paths.ContainsKey(parent)) break;
      MftRecord parentRecord;
      if(!dirs.TryGetValue(parent,out parentRecord)) {
-      failure=new Issue {Category="DirectoryParentMissing",Reason=Describe(cur)+" requires absent parent MFT #"+(parent&IndexMask)+" (sequence "+(parent>>48)+"). Parent may be excluded, changed or unparsed."};valid=false;break;
+      bool metadata=(parent&IndexMask)<16;
+      failure=new Issue {Category=metadata?"DirectorySystemMetadata":"DirectoryParentMissing",Reason=Describe(cur)+" requires parent MFT #"+(parent&IndexMask)+" (sequence "+(parent>>48)+"). "+(metadata?"NTFS system metadata tree intentionally excluded.":"Parent absent, changed or unparsed.")};valid=false;break;
      }
      cur=parentRecord;
     }
@@ -134,7 +189,7 @@ namespace RandomToolkits.DiskV5 {
    var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
-    if(r.Reparse || r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),r.Reparse?"Reparse file excluded.":"Attribute list or missing unnamed data; file excluded.",r.Reparse?"FileReparse":"FileUnsupported");continue;}
+    if(!IncludeReparse(r) || r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),!IncludeReparse(r)?"Link or unsupported reparse file excluded ("+Tag(r)+").":"Incomplete/conflicting names, standard flags or unnamed data; "+r.ExtensionIssue,!IncludeReparse(r)?"FileReparse-"+Tag(r):"FileUnsupported");continue;}
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
     string linkFailure=null;
     foreach(MftName n in r.Names) {
@@ -149,7 +204,10 @@ namespace RandomToolkits.DiskV5 {
     foreach(var pair in names) {
      if(!occupied.Add(pair.Key)) {if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
      long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);
-     if(!charged) {node.Files++;s.Files++;}
+     if(!charged) {
+      node.Files++;s.Files++;
+      if(r.Reparse && (r.ReparseTag&0xffff0fffU)==0x9000001aU) {s.MftCloudFiles++;s.MftCloudBytes=checked(s.MftCloudBytes+r.Bytes);}
+     }
      s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":"FILE",Bytes=bytes}); charged=true;
     }
     if(!charged) s.MftOmittedFiles++;
@@ -194,7 +252,8 @@ namespace RandomToolkits.DiskV5 {
      MftRecord r;
      try {r=Parse(record,actual);} catch(System.Exception ex) {lines.Add("Parse failed: "+ex.Message);break;}
      if(r==null) {lines.Add("Extension or unused record; no standalone path.");break;}
-     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; unsupported="+r.Unsupported+"; attributeList="+r.HasAttributeList+"; standardInfo="+r.HasStandardInformation+"; data="+r.HasData+"; names="+r.Names.Count);
+     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; tag="+Tag(r)+"; baseOnlyUnsupported="+r.Unsupported+"; attributeList="+r.HasAttributeList+"; standardInfo="+r.HasStandardInformation+"; data="+r.HasData+"; names="+r.Names.Count+"; links="+r.LinkCount);
+     if(r.HasAttributeList) lines.Add("Base-record view only: a full scan assembles names/data from matching extension records.");
      foreach(MftName n in r.Names) lines.Add("  Name="+n.Name+"; parent #"+(n.Parent&IndexMask)+"; parent sequence="+(n.Parent>>48));
      if(expectedReference!=0 && r.Reference!=expectedReference) {lines.Add("Parent sequence mismatch: record was reused or changed.");break;}
      if(actual==5 || r.Names.Count!=1) break;
@@ -230,7 +289,7 @@ namespace RandomToolkits.DiskV5 {
       Need(returned>=12);ulong actual=U64(output,0)&IndexMask;int size=checked((int)U32(output,8));
       Need(actual<=next && size>=48 && size<=recordSize && size<=returned-12);
       byte[] record=new byte[size];System.Buffer.BlockCopy(output,12,record,0,size);
-      try {MftRecord r=Parse(record,actual);if(r!=null && actual!=5) {records.Add(r);if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}
+      try {MftRecord r=Parse(record,actual);if(r!=null && actual!=5) {records.Add(r);if(r.BaseReference==0) {if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}}
       catch(System.IO.InvalidDataException ex) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": "+ex.Message);}
       catch(System.OverflowException) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": oversized record field.");}
       System.Threading.Interlocked.Increment(ref RecordsSeen);
