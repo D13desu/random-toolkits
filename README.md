@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Network Toolkit v0.1.0 | [win/net](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Network Toolkit v0.2.0 | [win/net](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [win/m365](win/m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run Windows network diagnostics
@@ -15,7 +15,7 @@ Personal system administration, investigation, and troubleshooting tools.
 irm https://tools.d0xd.com/win/net/ | iex
 ```
 
-Read-only adapter, gateway/connectivity, DNS, TCP port, routing, proxy and firewall checks. The menu labels incompatible or missing tools and prevents running them. See [compatibility, legacy TLS and local execution](win/net/README.md).
+Read-only adapter, gateway/connectivity, DNS, TCP port, routing, proxy and firewall checks. Select **A** for AD membership, DC discovery, AD DNS, member secure channel, time and SYSVOL/NETLOGON diagnostics. The menu labels incompatible or missing tools and prevents running them. See [compatibility, legacy TLS and local execution](win/net/README.md).
 
 ## Run M365 Toolkit
 

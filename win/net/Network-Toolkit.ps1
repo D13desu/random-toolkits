@@ -1,11 +1,12 @@
-# Random Toolkits | Windows Network 0.1.0
+# Random Toolkits | Windows Network 0.2.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
     [switch]$NoMenu,
     [string]$Check,
     [string]$Target = 'example.com',
-    [ValidateRange(1,65535)][int]$Port = 443
+    [ValidateRange(1,65535)][int]$Port = 443,
+    [string]$DomainController
 )
 
 function Test-NetworkTarget {
@@ -112,6 +113,183 @@ function Get-NetworkFirewall {
     Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction
 }
 
+function Get-AdContext {
+    try {
+        $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $role = 'Unknown'
+        if ($null -ne $computer.DomainRole) {
+            if ($computer.PartOfDomain -and [int]$computer.DomainRole -in @(4,5)) { $role = 'Domain controller' }
+            elseif ($computer.PartOfDomain -and [int]$computer.DomainRole -in @(1,3)) { $role = 'Domain member' }
+            elseif (-not $computer.PartOfDomain -and [int]$computer.DomainRole -in @(0,2)) { $role = 'Workgroup' }
+        }
+        [pscustomobject]@{Computer=$computer.Name; Domain=$computer.Domain; Role=$role; Detail='Local Windows domain membership (Entra join is not AD domain membership).'}
+    } catch {
+        [pscustomobject]@{Computer=$env:COMPUTERNAME; Domain=$null; Role='Unknown'; Detail=$_.Exception.Message}
+    }
+}
+
+function Invoke-AdNative {
+    param([string]$Command, [string[]]$Arguments)
+    $output = & $Command @Arguments 2>&1
+    $code = $LASTEXITCODE
+    $status = 'PASS'
+    if ($code -ne 0) { $status = 'WARN' }
+    # Preserve localized output. Exit status is not proof of overall AD health.
+    [pscustomobject]@{Test=$Command; Arguments=($Arguments -join ' '); Status=$status; ExitCode=$code; Detail=($output -join [Environment]::NewLine)}
+}
+
+function Get-AdController {
+    param([string]$Requested)
+    if ($Requested) {
+        Test-NetworkTarget $Requested
+        if ([Uri]::CheckHostName($Requested) -ne [UriHostNameType]::Dns) { throw 'Use a DC hostname, not an IP address, for authenticated domain checks.' }
+        return $Requested
+    }
+    Add-Type -AssemblyName System.DirectoryServices -ErrorAction Stop
+    $domainObject = $null
+    $dcObject = $null
+    try {
+        $domainObject = [DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
+        $dcObject = $domainObject.FindDomainController()
+        $dcObject.Name
+    } finally {
+        if ($dcObject) { $dcObject.Dispose() }
+        if ($domainObject) { $domainObject.Dispose() }
+    }
+}
+
+function Get-AdDiscovery {
+    param($Context)
+    Test-NetworkTarget $Context.Domain
+    Invoke-AdNative 'nltest.exe' @('/dsgetdc:' + $Context.Domain)
+    Invoke-AdNative 'nltest.exe' @('/dsgetsite')
+}
+
+function Get-AdDns {
+    param($Context)
+    Test-NetworkTarget $Context.Domain
+    foreach ($prefix in @('_ldap._tcp.dc._msdcs.', '_kerberos._tcp.')) {
+        $name = $prefix + $Context.Domain
+        try {
+            $records = @(Resolve-DnsName -Name $name -Type SRV -DnsOnly -ErrorAction Stop | Where-Object { $_.Type -eq 'SRV' })
+            if ($records.Count -eq 0) { throw 'No SRV records returned.' }
+            foreach ($record in $records) {
+                [pscustomobject]@{Test='AD SRV'; Query=$name; Status='PASS'; Target=$record.NameTarget; Port=$record.Port; Priority=$record.Priority; Weight=$record.Weight}
+            }
+            foreach ($dcName in @($records.NameTarget | Select-Object -Unique)) {
+                try {
+                    $addresses = @(Resolve-DnsName -Name $dcName -DnsOnly -ErrorAction Stop | Where-Object { $_.IPAddress })
+                    if ($addresses.Count -eq 0) { throw 'No address records returned.' }
+                    [pscustomobject]@{Test='DC address'; Target=$dcName; Status='PASS'; Detail=($addresses.IPAddress -join ', ')}
+                } catch { [pscustomobject]@{Test='DC address'; Target=$dcName; Status='WARN'; Detail=$_.Exception.Message} }
+            }
+        } catch { [pscustomobject]@{Test='AD SRV'; Query=$name; Status='WARN'; Detail=$_.Exception.Message} }
+    }
+}
+
+function Test-AdSecureChannel {
+    param([string]$Controller)
+    # Recheck role even when called directly; this command is invalid on DCs.
+    $context = Get-AdContext
+    if ($context.Role -ne 'Domain member') { throw 'Secure-channel testing applies only to domain-member computers; not DCs, workgroups, or unknown roles.' }
+    $parameters = @{ErrorAction='Stop'}
+    if ($Controller) { $parameters.Server = Get-AdController $Controller }
+    $healthy = Test-ComputerSecureChannel @parameters
+    $status = 'WARN'
+    if ($healthy) { $status = 'PASS' }
+    $serverLabel = 'Automatically selected'
+    if ($Controller) { $serverLabel = $Controller }
+    [pscustomobject]@{Test='Computer secure channel'; Target=$serverLabel; Status=$status; Detail="Secure channel healthy: $healthy. No repair attempted."}
+}
+
+function Get-AdTime {
+    param([string]$Controller)
+    Invoke-AdNative 'w32tm.exe' @('/query','/source')
+    Invoke-AdNative 'w32tm.exe' @('/query','/status')
+    $dcName = Get-AdController $Controller
+    Invoke-AdNative 'w32tm.exe' @('/stripchart',('/computer:' + $dcName),'/samples:3','/dataonly')
+}
+
+function Test-AdShares {
+    param([string]$Controller)
+    $dcName = Get-AdController $Controller
+    foreach ($share in @('SYSVOL','NETLOGON')) {
+        $path = '\\' + $dcName + '\' + $share
+        try {
+            $null = Get-Item -LiteralPath $path -ErrorAction Stop
+            [pscustomobject]@{Test='Share access'; Target=$path; Status='PASS'; Detail='Share root accessible using current Windows credentials; contents/replication not validated.'}
+        } catch {
+            [pscustomobject]@{Test='Share access'; Target=$path; Status='WARN'; Detail=$_.Exception.Message}
+        }
+    }
+}
+
+function Get-AdChecks {
+    @(
+        [pscustomobject]@{Key='1'; Id='ad-context'; Name='Domain membership and machine role'; MinPS='5.0'; Commands=@('Get-CimInstance'); Admin=$false; Roles=@(); Action={param($c,$dc) $c}}
+        [pscustomobject]@{Key='2'; Id='ad-discovery'; Name='DC discovery and AD site'; MinPS='5.0'; Commands=@('nltest.exe'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdDiscovery $c}}
+        [pscustomobject]@{Key='3'; Id='ad-dns'; Name='AD LDAP / Kerberos SRV and DC addresses'; MinPS='5.0'; Commands=@('Resolve-DnsName'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdDns $c}}
+        [pscustomobject]@{Key='4'; Id='ad-secure'; Name='Computer secure channel (no repair)'; MinPS='5.0'; Commands=@('Test-ComputerSecureChannel'); Admin=$false; Roles=@('Domain member'); Action={param($c,$dc) Test-AdSecureChannel $dc}}
+        [pscustomobject]@{Key='5'; Id='ad-time'; Name='Time source / status and DC offset'; MinPS='5.0'; Commands=@('w32tm.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdTime $dc}}
+        [pscustomobject]@{Key='6'; Id='ad-shares'; Name='SYSVOL and NETLOGON access'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Test-AdShares $dc}}
+    )
+}
+
+function Get-AdAvailability {
+    param($Entry, $Context)
+    $base = Get-NetworkAvailability $Entry
+    $reasons = @()
+    if (-not $base.Available) { $reasons += $base.Reason }
+    if ($Entry.Roles.Count -gt 0 -and $Context.Role -notin $Entry.Roles) {
+        $reasons += "Requires $($Entry.Roles -join ' or '); detected: $($Context.Role)"
+    }
+    [pscustomobject]@{Available=($reasons.Count -eq 0); Reason=($reasons -join '; ')}
+}
+
+function Invoke-AdCheck {
+    param([string]$Id, [string]$Controller)
+    $entry = Get-AdChecks | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
+    if (-not $entry) { throw "Unknown AD check: $Id" }
+    $context = Get-AdContext
+    $availability = Get-AdAvailability $entry $context
+    if (-not $availability.Available) { throw $availability.Reason }
+    & $entry.Action $context $Controller
+}
+
+function Start-AdMenu {
+    while ($true) {
+        $context = Get-AdContext
+        Write-Host "`n ACTIVE DIRECTORY | READ ONLY | PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
+        Write-Host " $($context.Computer) | $($context.Role) | $($context.Domain)"
+        if ($context.Role -eq 'Unknown') { Write-Warning $context.Detail }
+        foreach ($entry in Get-AdChecks) {
+            $availability = Get-AdAvailability $entry $context
+            $label = "PS $($entry.MinPS)+"
+            if ($entry.Admin) { $label += '; Admin' }
+            if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
+            Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
+        }
+        Write-Host ' [0] Back'
+        $answer = Read-Host 'Select'
+        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        $entry = Get-AdChecks | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
+        if (-not $entry) { Write-Warning 'Unknown selection'; continue }
+        try {
+            $availability = Get-AdAvailability $entry $context
+            if (-not $availability.Available) { throw $availability.Reason }
+            $dcName = $null
+            if ($entry.Id -in @('ad-secure','ad-time','ad-shares')) {
+                $dcName = Read-Host 'DC hostname [automatic discovery]'
+                if ($dcName) { $dcName = $dcName.Trim() }
+                if ($dcName) { $null = Get-AdController $dcName }
+            }
+            Write-Host 'Running with current Windows credentials. Domain/DNS/SMB timeouts may take time; Ctrl+C cancels.'
+            Invoke-AdCheck $entry.Id $dcName | Format-List | Out-Host
+        } catch { Write-Warning $_.Exception.Message }
+        $null = Read-Host 'Press Enter to return to AD diagnostics'
+    }
+}
+
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
@@ -157,7 +335,7 @@ function Invoke-NetworkCheck {
 function Start-NetworkMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.1.0' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.2.0' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | READ ONLY"
         Write-Host '============================================' -ForegroundColor Cyan
         foreach ($entry in Get-NetworkChecks) {
@@ -167,10 +345,12 @@ function Start-NetworkMenu {
             if (-not $availability.Available) { $label = 'UNAVAILABLE: ' + $availability.Reason }
             Write-Host " [$($entry.Key)] $($entry.Name) [$label]"
         }
+        Write-Host ' [A] Active Directory diagnostics [PS 5.0+]'
         Write-Host ' [0] Exit'
         Write-Host 'Ping can be blocked; a failed probe does not prove an outage.' -ForegroundColor DarkGray
         $selection = Read-Host 'Select'
         if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
+        if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
         $entry = Get-NetworkChecks | Where-Object { $_.Key -eq $selection.Trim() } | Select-Object -First 1
         if (-not $entry) { Write-Warning 'Unknown selection'; continue }
         try {
@@ -197,5 +377,6 @@ function Start-NetworkMenu {
 
 if ($PSVersionTable.PSVersion -lt [version]'5.0') { throw 'Windows PowerShell 5.0+ is required (5.1 recommended).' }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This toolkit requires Windows.' }
-if ($Check) { Invoke-NetworkCheck $Check $Target $Port }
+if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }
+elseif ($Check) { Invoke-NetworkCheck $Check $Target $Port }
 elseif (-not $NoMenu) { Start-NetworkMenu }
