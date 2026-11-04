@@ -29,5 +29,18 @@ Assert-True ([IO.File]::ReadAllBytes((Join-Path $root 'small.bin')).Length -eq 1
 $script:Answers.Enqueue('0')
 Get-Content -Raw (Join-Path $PSScriptRoot '../win/disk/index.html') | Invoke-Expression
 Assert-True ($script:Answers.Count -eq 0) 'Standalone IEX launcher opens and exits'
+$fallback=Measure-DiskTree -LiteralPath $root -Engine PowerShell
+Assert-True ($fallback.Files -eq $scan.Files -and $fallback.Nodes[$root].Bytes -eq $scan.Nodes[$root].Bytes -and $fallback.IssueCount -eq $scan.IssueCount) 'Native and fallback agree on totals and exclusions'
+$longRoot=Join-Path $env:TEMP ('toolkit-long-test-'+[guid]::NewGuid().ToString('N'))
+$longPath=$longRoot
+for ($i=0; $i -lt 5; $i++) { $longPath=Join-Path $longPath ('directory-'+('x'*50)) }
+$null=[IO.Directory]::CreateDirectory(('\\?\'+$longPath))
+[IO.File]::WriteAllBytes(('\\?\'+$longPath+'\unicode-'+[char]0x00f1+'.bin'),[byte[]]::new(33))
+$longScan=Measure-DiskTree -LiteralPath $longRoot -Engine Native
+Assert-True ($longScan.Files -eq 1 -and $longScan.Nodes[$longRoot].Bytes -eq 33) 'Native scanner supports Unicode and paths beyond MAX_PATH'
+Assert-True (@(Get-DiskChildren $longScan $longPath)[0].Bytes -eq 33) 'Long-path file listing uses native metadata'
+function Initialize-DiskScanner { throw 'Simulated Add-Type restriction' }
+$auto=Measure-DiskTree -LiteralPath $root
+Assert-True ($auto.Nodes[$root].Bytes -eq 3089 -and @(Get-DiskChildren $auto $root).Count -eq 3) 'Restricted compilation falls back to working PowerShell scanner'
 # Leave this small isolated fixture in TEMP; no recursive deletion through a junction.
 Write-Output "Disk tests passed on PowerShell $($PSVersionTable.PSVersion). Fixture: $root"
