@@ -1,6 +1,8 @@
-# Random Toolkits | Disk Usage 0.4.0 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.4.1 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
+
+$script:DiskUsageVersion = '0.4.1'
 
 function Format-DiskSize {
     param([double]$Bytes)
@@ -85,7 +87,7 @@ function Measure-DiskTreeFallback {
                         }
                     } catch { $node.Partial=$true; Add-DiskScanIssue $scan $itemPath $_.Exception.Message }
                     if ($timer.ElapsedMilliseconds -ge 250) {
-                        Write-Progress -Activity 'Scanning disk usage (read-only)' -Status ("{0:N0} files | {1:N0} folders | {2}" -f $scan.Files,$scan.Nodes.Count,$directory)
+                        Write-Progress -Activity "Disk Usage $script:DiskUsageVersion | Scanning (read-only)" -Status ("{0:N0} files | {1:N0} folders | {2}" -f $scan.Files,$scan.Nodes.Count,$directory)
                         $timer.Restart()
                     }
                 }
@@ -103,7 +105,7 @@ function Measure-DiskTreeFallback {
         }
         $scan.Finished = Get-Date
         return $scan
-    } finally { Write-Progress -Activity 'Scanning disk usage (read-only)' -Completed; $timer.Stop() }
+    } finally { Write-Progress -Activity "Disk Usage $script:DiskUsageVersion | Scanning (read-only)" -Completed; $timer.Stop() }
 }
 
 function Initialize-DiskScanner {
@@ -704,9 +706,9 @@ function Measure-DiskTree {
     $lastPreview=0L
     try {
         while (-not $worker.Done) {
-            Write-Progress -Activity 'Fast disk scan (read-only)' -Status ("{0:N0} files | {1:N0} folders | {2} found | {3:N1}s" -f $worker.FilesSeen,$worker.DirectoriesSeen,(Format-DiskSize $worker.BytesSeen),$timer.Elapsed.TotalSeconds)
+            Write-Progress -Activity "Disk Usage $script:DiskUsageVersion | Fast scan (read-only)" -Status ("{0:N0} files | {1:N0} folders | {2} found | {3:N1}s" -f $worker.FilesSeen,$worker.DirectoriesSeen,(Format-DiskSize $worker.BytesSeen),$timer.Elapsed.TotalSeconds)
             if ($timer.ElapsedMilliseconds-$lastPreview -ge 3000) {
-                Write-Host ("`nLIVE / INCOMPLETE: {0:N0} files, {1} found so far. Q stops and shows partial results." -f $worker.FilesSeen,(Format-DiskSize $worker.BytesSeen)) -ForegroundColor Cyan
+                Write-Host ("`nDISK USAGE $script:DiskUsageVersion | LIVE / INCOMPLETE: {0:N0} files, {1} found so far. Q stops and shows partial results." -f $worker.FilesSeen,(Format-DiskSize $worker.BytesSeen)) -ForegroundColor Cyan
                 foreach ($row in $worker.Snapshot()) { Write-Host (' {0,12}  {1}' -f (Format-DiskSize $row.Bytes),$row.Name) }
                 $lastPreview=$timer.ElapsedMilliseconds
             }
@@ -724,7 +726,7 @@ function Measure-DiskTree {
         return $worker.Result
     } finally {
         $worker.CancelRequested=$true
-        Write-Progress -Activity 'Fast disk scan (read-only)' -Completed
+        Write-Progress -Activity "Disk Usage $script:DiskUsageVersion | Fast scan (read-only)" -Completed
         $timer.Stop()
     }
 }
@@ -770,7 +772,7 @@ function Show-DiskScan {
         if ($loadedPath -ne $current) { $rows = @(Get-DiskChildren $Scan $current); $loadedPath=$current }
         $pages = [math]::Max(1,[math]::Ceiling($rows.Count/20.0))
         $page = [math]::Min($page,$pages-1)
-        Write-Host "`n DISK USAGE | $current" -ForegroundColor Cyan
+        Write-Host "`n DISK USAGE $script:DiskUsageVersion | $current" -ForegroundColor Cyan
         if ($Scan.PSObject.Properties['Engine']) { Write-Host ('Engine: '+$Scan.Engine) -ForegroundColor DarkGray }
         if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) {
             Write-Host 'MFT: sorted by known On disk allocation across data streams. Hard links charged once; LINK rows show zero charged bytes.' -ForegroundColor Yellow
@@ -831,7 +833,7 @@ function Start-DiskUsage {
     if ($InitialPath) { Show-DiskScan (Measure-DiskTree $InitialPath) }
     while ($true) {
         $drives = @(Get-DiskDrives | Sort-Object Used -Descending)
-        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.4.0 | READ ONLY" -ForegroundColor Cyan
+        Write-Host "`n RANDOM TOOLKITS | DISK USAGE $script:DiskUsageVersion | READ ONLY" -ForegroundColor Cyan
         for ($i=0; $i -lt $drives.Count; $i++) {
             $drive=$drives[$i]
             Write-Host (' [{0}] {1} {2} | Total {3} | Used {4} | Free {5} | {6}' -f ($i+1),$drive.Drive,$drive.Type,(Format-DiskSize $drive.Total),(Format-DiskSize $drive.Used),(Format-DiskSize $drive.Free),$drive.Detail)
