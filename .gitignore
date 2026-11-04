@@ -1,0 +1,10 @@
+# Investigation results can contain sensitive tenant data and email content.
+**/reports/
+
+# Local credentials and configuration.
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
