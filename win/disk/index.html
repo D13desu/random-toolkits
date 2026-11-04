@@ -1,4 +1,4 @@
-# Random Toolkits | Disk Usage 0.3.0 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.3.1 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
 
@@ -90,7 +90,7 @@ function Measure-DiskTreeFallback {
 }
 
 function Initialize-DiskScanner {
-    if ('RandomToolkits.DiskV3.Scanner' -as [type]) { return }
+    if ('RandomToolkits.DiskV4.Scanner' -as [type]) { return }
     Write-Host 'Preparing native scanner (compiled once per PowerShell process)...' -ForegroundColor DarkGray
     Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
@@ -99,15 +99,17 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Threading;
-namespace RandomToolkits.DiskV3 {
+namespace RandomToolkits.DiskV4 {
  public class Node {
   public string Path, Parent; public long Bytes, Files, SeenBytes;
   public bool Partial; public List<string> Children = new List<string>();
   internal Node Top;
  }
- public class Issue { public string Path, Reason; }
+ public class Issue { public string Path, Reason, Category; }
  public class Row { public string Name, Path, Kind; public long Bytes; public bool Partial; }
  public class Scan {
+  public Dictionary<string,int> IssueCounts = new Dictionary<string,int>();
+  public long MftOmittedFiles, MftOmittedDirectories, MftRecordErrors, MftRecordsRead;
   public Dictionary<string,List<Row>> CachedRows;
   public string Root; public Dictionary<string,Node> Nodes = new Dictionary<string,Node>(StringComparer.OrdinalIgnoreCase);
   public long Files; public int IssueCount; public List<Issue> Issues = new List<Issue>();
@@ -228,7 +230,7 @@ namespace RandomToolkits.DiskV3 {
 // BEGIN EMBEDDED MFT SCANNER
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV3 {
+namespace RandomToolkits.DiskV4 {
  public class MftName { public ulong Parent; public string Name; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
@@ -286,9 +288,14 @@ namespace RandomToolkits.DiskV3 {
    Need(end); if(!r.Directory && !r.HasData) r.Unsupported=true;
    return r;
   }
-  static void Issue(Scan scan,string path,string reason) {
+  static void Issue(Scan scan,string path,string reason,string category="Other") {
    scan.IssueCount++; scan.Nodes[scan.Root].Partial=true;
-   if(scan.Issues.Count<100) scan.Issues.Add(new Issue {Path=path,Reason=reason});
+   int count;scan.IssueCounts.TryGetValue(category,out count);scan.IssueCounts[category]=count+1;
+   // Reserve examples for every cause instead of filling all slots with one repeated failure.
+   if(count<4 && scan.Issues.Count<100) scan.Issues.Add(new Issue {Path=path,Reason=reason,Category=category});
+  }
+  static string Describe(MftRecord r) {
+   return "MFT #"+(r.Reference&IndexMask)+" (sequence "+(r.Reference>>48)+", name: "+(r.Names.Count==0?"<none>":r.Names[0].Name)+")";
   }
   // Deterministic ownership: a hard-linked file is charged to its first ordinal path only.
   // Other links remain visible with zero charged bytes, labelled LINK.
@@ -299,6 +306,7 @@ namespace RandomToolkits.DiskV3 {
    var dirs=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
    var paths=new System.Collections.Generic.Dictionary<ulong,string>();
    var pending=new System.Collections.Generic.List<MftRecord>();
+   var blocked=new System.Collections.Generic.Dictionary<ulong,Issue>();
    foreach(MftRecord r in records) {
     if(r==null) continue;
     if((r.Reference&IndexMask)==5) {paths[r.Reference]=root;continue;}
@@ -310,39 +318,59 @@ namespace RandomToolkits.DiskV3 {
    foreach(MftRecord start in pending) {
     if(paths.ContainsKey(start.Reference)) continue;
     var chain=new System.Collections.Generic.List<MftRecord>(); var seen=new System.Collections.Generic.HashSet<ulong>();
-    MftRecord cur=start; bool valid=true;
+    MftRecord cur=start; bool valid=true;Issue failure=null;
     while(!paths.ContainsKey(cur.Reference)) {
-     if(!seen.Add(cur.Reference) || cur.Reparse || cur.Unsupported || cur.Names.Count!=1) {valid=false;break;}
+     if(blocked.TryGetValue(cur.Reference,out failure)) {valid=false;break;}
+     if(!seen.Add(cur.Reference)) failure=new Issue {Category="DirectoryCycle",Reason="Parent cycle at "+Describe(cur)};
+     else if(cur.Reparse) failure=new Issue {Category="DirectoryReparse",Reason="Reparse directory excluded: "+Describe(cur)};
+     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Directory requires extension records: "+Describe(cur)};
+     else if(cur.Names.Count!=1) failure=new Issue {Category="DirectoryNames",Reason="Expected one directory name; found "+cur.Names.Count+" on "+Describe(cur)};
+     if(failure!=null) {blocked[cur.Reference]=failure;valid=false;break;}
      chain.Add(cur); ulong parent=cur.Names[0].Parent;
      if(paths.ContainsKey(parent)) break;
-     if(!dirs.TryGetValue(parent,out cur)) {valid=false;break;}
+     MftRecord parentRecord;
+     if(!dirs.TryGetValue(parent,out parentRecord)) {
+      failure=new Issue {Category="DirectoryParentMissing",Reason=Describe(cur)+" requires absent parent MFT #"+(parent&IndexMask)+" (sequence "+(parent>>48)+"). Parent may be excluded, changed or unparsed."};valid=false;break;
+     }
+     cur=parentRecord;
     }
-    if(!valid) {Issue(s,"MFT #"+(start.Reference&IndexMask),"Directory excluded: reparse point, attribute list, missing/reused parent or cycle.");continue;}
+    if(!valid) {
+     foreach(MftRecord r in chain) blocked[r.Reference]=failure;
+     blocked[start.Reference]=failure;s.MftOmittedDirectories++;
+     Issue(s,Describe(start),failure.Reason,failure.Category);continue;
+    }
     for(int i=chain.Count-1;i>=0;i--) {
      MftRecord r=chain[i]; string parent=paths[r.Names[0].Parent]; string path=parent.TrimEnd('\\')+"\\"+r.Names[0].Name;
      if(s.Nodes.ContainsKey(path)) {valid=false;break;}
      paths.Add(r.Reference,path); s.Nodes.Add(path,new Node {Path=path,Parent=parent});
      s.Nodes[parent].Children.Add(path); s.CachedRows.Add(path,new System.Collections.Generic.List<Row>());
     }
-    if(!valid) Issue(s,root,"Duplicate directory path; volume may have changed during scan.");
+    if(!valid) {s.MftOmittedDirectories++;Issue(s,Describe(start),"Duplicate directory path; volume may have changed during scan.","DuplicateDirectory");}
    }
    var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
-    if(r.Reparse || r.Unsupported) {Issue(s,"MFT #"+(r.Reference&IndexMask),"File excluded: reparse point, attribute list or missing unnamed data.");continue;}
+    if(r.Reparse || r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),r.Reparse?"Reparse file excluded.":"Attribute list or missing unnamed data; file excluded.",r.Reparse?"FileReparse":"FileUnsupported");continue;}
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
+    string linkFailure=null;
     foreach(MftName n in r.Names) {
-     string parent; if(!paths.TryGetValue(n.Parent,out parent)) {Issue(s,n.Name,"Missing/excluded/reused parent; link skipped.");continue;}
+     string parent; if(!paths.TryGetValue(n.Parent,out parent)) {
+      Issue cause;
+      if(linkFailure==null) linkFailure="Unresolved parent MFT #"+(n.Parent&IndexMask)+" (sequence "+(n.Parent>>48)+") for "+n.Name+(blocked.TryGetValue(n.Parent,out cause)?"; "+cause.Reason:"; parent absent or changed.");
+      continue;
+     }
      string path=parent.TrimEnd('\\')+"\\"+n.Name; names[path]=parent;
     }
     bool charged=false;
     foreach(var pair in names) {
-     if(!occupied.Add(pair.Key)) {Issue(s,pair.Key,"Duplicate path; file may have changed during scanning.");continue;}
+     if(!occupied.Add(pair.Key)) {if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
      long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);
      if(!charged) {node.Files++;s.Files++;}
      s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":"FILE",Bytes=bytes}); charged=true;
     }
-    if(names.Count==0) Issue(s,"MFT #"+(r.Reference&IndexMask),"No resolvable filename; file omitted.");
+    if(!charged) s.MftOmittedFiles++;
+    // At most one diagnostic per file: do not count each missing parent and then count the file again.
+    if(linkFailure!=null || !charged) Issue(s,Describe(r),linkFailure??"No resolvable filename; file omitted.",charged?"PartialFileLinks":"FilePathUnresolved");
    }
    var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);
    order.Sort(delegate(Node a,Node b){return b.Path.Length.CompareTo(a.Path.Length);});
@@ -359,6 +387,38 @@ namespace RandomToolkits.DiskV3 {
   public static MftScanner Start(string root) {
    MftScanner w=new MftScanner();w.Result.Root=root;
    var t=new System.Threading.Thread(w.Run);t.IsBackground=true;t.Start();return w;
+  }
+  // Bounded read-only diagnostic: inspect one record and its parent chain, not a full scan.
+  public static string[] Inspect(string root,ulong index) {
+   if(root.Length!=3 || root[1]!=':' || root[2]!='\\') throw new System.ArgumentException("Select a local drive root.");
+   var lines=new System.Collections.Generic.List<string>();var seen=new System.Collections.Generic.HashSet<ulong>();
+   using(var handle=CreateFileW(@"\\.\"+root.Substring(0,2),0x80000000,7,System.IntPtr.Zero,3,0,System.IntPtr.Zero)) {
+    if(handle.IsInvalid) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    byte[] volume=new byte[128];int returned;
+    if(!DeviceIoControl(handle,0x90064,null,0,volume,volume.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    Need(returned>=104 && U16(volume,100)==3 && U16(volume,102)<=1);
+    int recordSize=checked((int)U32(volume,48));Need(recordSize>=512 && recordSize<=65536);
+    byte[] output=new byte[recordSize+16];ulong expectedReference=0;
+    for(int depth=0;depth<64;depth++) {
+     if(!seen.Add(index)) {lines.Add("Parent cycle detected.");break;}
+     byte[] input=System.BitConverter.GetBytes(index);
+     if(!DeviceIoControl(handle,0x90068,input,8,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+     Need(returned>=12);ulong actual=U64(output,0)&IndexMask;int size=checked((int)U32(output,8));Need(size>=48 && size<=recordSize && size<=returned-12);
+     byte[] record=new byte[size];System.Buffer.BlockCopy(output,12,record,0,size);
+     lines.Add("Requested #"+index+"; returned #"+actual+"; header record number="+U32(record,44)+"; flags="+U16(record,22)+"; base reference="+U64(record,32));
+     if(actual!=index) {lines.Add("Requested record no longer in use; stopping at nearest record returned by Windows.");break;}
+     MftRecord r;
+     try {r=Parse(record,actual);} catch(System.Exception ex) {lines.Add("Parse failed: "+ex.Message);break;}
+     if(r==null) {lines.Add("Extension or unused record; no standalone path.");break;}
+     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; unsupported="+r.Unsupported+"; data="+r.HasData+"; names="+r.Names.Count);
+     foreach(MftName n in r.Names) lines.Add("  Name="+n.Name+"; parent #"+(n.Parent&IndexMask)+"; parent sequence="+(n.Parent>>48));
+     if(expectedReference!=0 && r.Reference!=expectedReference) {lines.Add("Parent sequence mismatch: record was reused or changed.");break;}
+     if(actual==5 || r.Names.Count!=1) break;
+     expectedReference=r.Names[0].Parent;index=expectedReference&IndexMask;
+     if(depth==63) lines.Add("Stopped at diagnostic depth limit (64).");
+    }
+   }
+   return lines.ToArray();
   }
   void Run() {
    string root=Result.Root; System.DateTime started=System.DateTime.Now;
@@ -399,10 +459,12 @@ namespace RandomToolkits.DiskV3 {
       foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;
      }
      if(errorCount>0) {
-      Result.IssueCount+=errorCount;foreach(Node n in Result.Nodes.Values) n.Partial=true;
-      foreach(string e in errors) if(Result.Issues.Count<100) Result.Issues.Add(new Issue {Path=root,Reason=e});
+      foreach(string e in errors) Issue(Result,root,e,"RecordParseFailure");
+      Result.IssueCount+=errorCount-errors.Count;Result.IssueCounts["RecordParseFailure"]=errorCount;
+      foreach(Node n in Result.Nodes.Values) n.Partial=true;
       foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;
      }
+     Result.MftRecordErrors=errorCount;Result.MftRecordsRead=RecordsSeen;
     }
    } catch(System.Exception ex) {Error=ex.Message;}
    finally {Done=true;}
@@ -442,8 +504,8 @@ function Measure-DiskTree {
     if (($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Select the real directory, not a junction or symbolic link.' }
     if ($Engine -eq 'Mft') {
         Write-Host 'EXPERIMENTAL: reading MFT records. Whole volume; metadata may include protected filenames. No filesystem snapshot.' -ForegroundColor Yellow
-        $worker=[RandomToolkits.DiskV3.MftScanner]::Start($root.FullName)
-    } else { $worker=[RandomToolkits.DiskV3.Scanner]::Start($root.FullName) }
+        $worker=[RandomToolkits.DiskV4.MftScanner]::Start($root.FullName)
+    } else { $worker=[RandomToolkits.DiskV4.Scanner]::Start($root.FullName) }
     $timer=[Diagnostics.Stopwatch]::StartNew()
     $lastPreview=0L
     try {
@@ -476,8 +538,8 @@ function Measure-DiskTree {
 function Get-DiskChildren {
     param($Scan,[string]$LiteralPath)
     if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) { return $Scan.CachedRows[$LiteralPath].ToArray() }
-    if ($Scan.GetType().FullName -eq 'RandomToolkits.DiskV3.Scan') {
-        try { return [RandomToolkits.DiskV3.Scanner]::Children($Scan,$LiteralPath) }
+    if ($Scan.GetType().FullName -eq 'RandomToolkits.DiskV4.Scan') {
+        try { return [RandomToolkits.DiskV4.Scanner]::Children($Scan,$LiteralPath) }
         catch {
             Write-Warning ('Cannot read the current file listing; showing cached folders only: '+$_.Exception.Message)
             foreach ($childPath in $Scan.Nodes[$LiteralPath].Children) {
@@ -517,7 +579,10 @@ function Show-DiskScan {
         Write-Host "`n DISK USAGE | $current" -ForegroundColor Cyan
         if ($Scan.PSObject.Properties['Engine']) { Write-Host ('Engine: '+$Scan.Engine) -ForegroundColor DarkGray }
         if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) { Write-Host 'MFT: unique logical bytes. Hard links charged once to first ordinal path; LINK rows have zero charged bytes. Metadata/streams excluded.' -ForegroundColor Yellow }
-        Write-Host ("Logical size: {0} | Files: {1:N0} | Scan exclusions/errors: {2}" -f (Format-DiskSize $node.Bytes),$node.Files,$Scan.IssueCount)
+        Write-Host ("Included logical size: {0} | Files: {1:N0} | Scan diagnostics: {2:N0}" -f (Format-DiskSize $node.Bytes),$node.Files,$Scan.IssueCount)
+        if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) {
+            Write-Host ("Volume-wide omissions: {0:N0} files | {1:N0} directories | {2:N0} unparsed records. Press E for causes." -f $Scan.MftOmittedFiles,$Scan.MftOmittedDirectories,$Scan.MftRecordErrors) -ForegroundColor Yellow
+        }
         if ($node.Partial) { Write-Host 'PARTIAL TOTAL: inaccessible or excluded entries exist below this folder.' -ForegroundColor Yellow }
         Write-Host 'Folder totals and current listing are cached. Rescan after filesystem changes.' -ForegroundColor DarkGray
         for ($i=($page*20); $i -lt [math]::Min($rows.Count,($page+1)*20); $i++) {
@@ -533,7 +598,13 @@ function Show-DiskScan {
             'U' { if ($node.Parent) { $current=$node.Parent; $page=0 }; continue browse }
             'N' { $page=[math]::Min($pages-1,$page+1); continue browse }
             'P' { $page=[math]::Max(0,$page-1); continue browse }
-            'E' { $Scan.Issues | Format-List | Out-Host; Write-Host "Showing up to 100 of $($Scan.IssueCount) exclusions/errors."; continue browse }
+            'E' {
+                if ($Scan.PSObject.Properties['IssueCounts'] -and $Scan.IssueCounts.Count -gt 0) {
+                    $Scan.IssueCounts.GetEnumerator() | Sort-Object Value -Descending | Format-Table @{Label='Cause';Expression={$_.Key}},@{Label='Count';Expression={$_.Value}} -AutoSize | Out-Host
+                    Write-Host 'Examples below are sampled by cause; an excluded ancestor can affect many descendants.'
+                }
+                $Scan.Issues | Format-List | Out-Host; Write-Host ("Showing {0} examples from {1:N0} diagnostics." -f $Scan.Issues.Count,$Scan.IssueCount); continue browse
+            }
             'R' { $engine='Auto'; if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) { $engine='Mft' }; $Scan=Measure-DiskTree $Scan.Root -Engine $engine; $current=$Scan.Root; $page=0; $loadedPath=$null; continue browse }
         }
         $number=0
@@ -550,7 +621,7 @@ function Start-DiskUsage {
     if ($InitialPath) { Show-DiskScan (Measure-DiskTree $InitialPath) }
     while ($true) {
         $drives = @(Get-DiskDrives | Sort-Object Used -Descending)
-        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.0 | READ ONLY" -ForegroundColor Cyan
+        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.1 | READ ONLY" -ForegroundColor Cyan
         for ($i=0; $i -lt $drives.Count; $i++) {
             $drive=$drives[$i]
             Write-Host (' [{0}] {1} {2} | Total {3} | Used {4} | Free {5} | {6}' -f ($i+1),$drive.Drive,$drive.Type,(Format-DiskSize $drive.Total),(Format-DiskSize $drive.Used),(Format-DiskSize $drive.Free),$drive.Detail)
@@ -559,10 +630,22 @@ function Start-DiskUsage {
         $mftLabel=' [M] Experimental MFT scan (local NTFS drive root)'
         if (-not ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { $mftLabel+=' [UNAVAILABLE: Requires administrator]' }
         Write-Host $mftLabel
+        Write-Host ' [D] Diagnose an MFT record and its parents (local NTFS, admin; no full scan)'
         Write-Host 'Native metadata scan with live partial totals. Q: stop and browse partial results; Ctrl+C: exit. Links are skipped.' -ForegroundColor DarkGray
         $answer=Read-Host 'Select drive or F'
         if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
         try {
+            if ($answer.Trim() -eq 'D') {
+                $diagnosticRoot=Read-Host 'NTFS drive root (for example C:\)'
+                $reason=Get-DiskMftUnavailableReason $diagnosticRoot
+                if ($reason) { Write-Warning $reason; continue }
+                $recordText=Read-Host 'MFT record number from E (digits only)'
+                $recordNumber=[uint64]0
+                if (-not [uint64]::TryParse($recordText,[ref]$recordNumber) -or $recordNumber -gt 281474976710655) { throw 'Enter a valid MFT record number.' }
+                Initialize-DiskScanner
+                [RandomToolkits.DiskV4.MftScanner]::Inspect([IO.Path]::GetFullPath($diagnosticRoot),$recordNumber) | Out-Host
+                continue
+            }
             $scanPath=$null; $engine='Auto'
             if ($answer.Trim() -eq 'M') { $scanPath=Read-Host 'NTFS drive root (for example C:\)'; $engine='Mft'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
             elseif ($answer.Trim() -eq 'F') { $scanPath=Read-Host 'Folder path'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }

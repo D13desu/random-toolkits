@@ -22,52 +22,62 @@ function Record([int]$id,[string]$name,[uint64]$parent,[long]$size=0,[switch]$Di
 }
 $rootRef=[uint64]281474976710661 # sequence 1, record 5
 $dirRef=[uint64]281474976710676 # sequence 1, record 20
-$root=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 5 '.' $rootRef -Directory),5)
-$dir=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 20 'folder' $rootRef -Directory),20)
+$root=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 5 '.' $rootRef -Directory),5)
+$dir=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 20 'folder' $rootRef -Directory),20)
 $residentBytes=Record 21 'small.bin' $dirRef 17 -Resident
-$small=[RandomToolkits.DiskV3.MftScanner]::Parse($residentBytes,21)
-$sparse=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 22 'sparse.bin' $dirRef 1000000 -Flags 0x8000),22)
-$compressed=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 23 'compressed.bin' $rootRef 10000 -Flags 1),23)
+$small=[RandomToolkits.DiskV4.MftScanner]::Parse($residentBytes,21)
+$sparse=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 22 'sparse.bin' $dirRef 1000000 -Flags 0x8000),22)
+$compressed=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 23 'compressed.bin' $rootRef 10000 -Flags 1),23)
 Assert ($small.Bytes -eq 17 -and $sparse.Bytes -eq 1000000 -and $compressed.Bytes -eq 10000) 'Resident, sparse and compressed data use logical length, not allocation or stale filename size'
-$alias=New-Object RandomToolkits.DiskV3.MftName; $alias.Parent=$rootRef; $alias.Name='alias.bin'; $small.Names.Add($alias)
-$scan=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($small,$compressed,$dir,$sparse,$root),$false)
+$alias=New-Object RandomToolkits.DiskV4.MftName; $alias.Parent=$rootRef; $alias.Name='alias.bin'; $small.Names.Add($alias)
+$scan=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($small,$compressed,$dir,$sparse,$root),$false)
 Assert ($scan.Nodes['Z:\'].Bytes -eq 1010017 -and $scan.Files -eq 3 -and $scan.IssueCount -eq 0) 'Unordered records reconstruct folders and charge each hard-linked file once'
 Assert ($scan.Nodes['Z:\folder'].Bytes -eq 1000000) 'Hardlink ownership is deterministic by ordinal full path'
 Assert (@(Get-DiskChildren $scan 'Z:\folder' | Where-Object Kind -eq LINK).Count -eq 1) 'Uncharged hardlink remains visible as LINK'
-$short=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 24 'SHORT~1' $rootRef 5 -NameSpace 2),24)
+$short=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 24 'SHORT~1' $rootRef 5 -NameSpace 2),24)
 Assert ($short.Names.Count -eq 0) 'DOS-only short names are excluded'
-$extended=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 25 'extended.bin' $rootRef 50 -AttributeList),25)
-$partial=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$extended),$false)
+$extended=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 25 'extended.bin' $rootRef 50 -AttributeList),25)
+$partial=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$extended),$false)
 Assert ($partial.Files -eq 0 -and $partial.IssueCount -eq 1 -and $partial.Nodes['Z:\'].Partial) 'Attribute-list files are explicitly excluded instead of silently undercounted'
-$stale=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 26 'stale.bin' ([uint64]562949953421332) 50),26)
-$partial=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$dir,$stale),$false)
+$stale=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 26 'stale.bin' ([uint64]562949953421332) 50),26)
+$partial=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$dir,$stale),$false)
 Assert ($partial.Files -eq 0 -and $partial.Nodes['Z:\folder'].Partial) 'Reused parent sequence is rejected and unresolved totals marked partial'
+Assert ($partial.IssueCount -eq 1 -and $partial.MftOmittedFiles -eq 1 -and $partial.IssueCounts['FilePathUnresolved'] -eq 1) 'An unresolved file counts once, not once per link plus once per missing file'
 $dir.Reparse=$true
-$partial=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$dir,$sparse),$false)
+$partial=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$dir,$sparse),$false)
 Assert ($partial.Nodes.Count -eq 1 -and $partial.Files -eq 0 -and $partial.IssueCount -gt 0) 'Reparse directories and descendants are not traversed'
+Assert ($partial.MftOmittedDirectories -eq 1 -and $partial.MftOmittedFiles -eq 1 -and $partial.Issues[0].Reason -match 'folder' -and $partial.IssueCounts['DirectoryReparse'] -eq 1) 'Diagnostics identify the blocking ancestor and separate file and directory omissions'
 $dir.Reparse=$false; $dir.Names[0].Parent=$dirRef
-$partial=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$dir),$false)
+$partial=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$dir),$false)
 Assert ($partial.Nodes.Count -eq 1 -and $partial.IssueCount -gt 0) 'Parent cycles terminate and are reported'
+Assert ($partial.IssueCounts['DirectoryCycle'] -eq 1) 'Cycle has its own diagnostic cause'
 $dir.Names[0].Parent=$rootRef
-$partial=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$dir,$small),$true)
+$partial=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$dir,$small),$true)
 Assert ($partial.Cancelled -and $partial.Nodes['Z:\folder'].Partial) 'Cancellation flags every cached total incomplete'
-$unicode=[RandomToolkits.DiskV3.MftScanner]::Parse((Record 27 ('file-'+[char]0x00f1) $rootRef 2),27)
+$unicode=[RandomToolkits.DiskV4.MftScanner]::Parse((Record 27 ('file-'+[char]0x00f1) $rootRef 2),27)
 Assert ($unicode.Names[0].Name -eq ('file-'+[char]0x00f1)) 'Unicode names decode correctly'
-$duplicates=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',@($root,$compressed,$compressed),$false)
+$duplicates=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',@($root,$compressed,$compressed),$false)
 Assert ($duplicates.Nodes['Z:\'].Bytes -eq 10000 -and $duplicates.IssueCount -gt 0) 'Concurrent duplicate paths are reported without double charging'
-$longRecords=New-Object 'System.Collections.Generic.List[RandomToolkits.DiskV3.MftRecord]'
+$longRecords=New-Object 'System.Collections.Generic.List[RandomToolkits.DiskV4.MftRecord]'
 $longRecords.Add($root); $parent=$rootRef
 for ($i=30; $i -lt 34; $i++) {
-    $entry=[RandomToolkits.DiskV3.MftScanner]::Parse((Record $i ('directory-'+('x'*100)) $parent -Directory),$i)
+    $entry=[RandomToolkits.DiskV4.MftScanner]::Parse((Record $i ('directory-'+('x'*100)) $parent -Directory),$i)
     $longRecords.Add($entry); $parent=$entry.Reference
 }
-$longRecords.Add([RandomToolkits.DiskV3.MftScanner]::Parse((Record 34 'leaf.bin' $parent 11),34))
-$longScan=[RandomToolkits.DiskV3.MftScanner]::Build('Z:\',$longRecords.ToArray(),$false)
+$longRecords.Add([RandomToolkits.DiskV4.MftScanner]::Parse((Record 34 'leaf.bin' $parent 11),34))
+$longScan=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',$longRecords.ToArray(),$false)
 Assert ($longScan.Nodes['Z:\'].Bytes -eq 11 -and @($longScan.Nodes.Keys | Where-Object Length -gt 260).Count -gt 0 -and $longScan.IssueCount -eq 0) 'MFT tree reconstruction supports paths beyond MAX_PATH'
 Assert ((Get-DiskMftUnavailableReason '\\server\share\') -like '*local drive root*') 'Network shares are rejected before raw-volume access'
+$many=New-Object 'System.Collections.Generic.List[RandomToolkits.DiskV4.MftRecord]'
+$many.Add($root);$many.Add($extended)
+for ($i=100; $i -lt 120; $i++) { $many.Add([RandomToolkits.DiskV4.MftScanner]::Parse((Record $i ('lost-'+$i) ([uint64]562949953421332) 1),$i)) }
+$summary=[RandomToolkits.DiskV4.MftScanner]::Build('Z:\',$many.ToArray(),$false)
+Assert ($summary.IssueCount -eq 21 -and $summary.MftOmittedFiles -eq 21 -and $summary.Issues.Count -eq 5 -and $summary.IssueCounts.Count -eq 2) 'Repeated failures retain representative examples from each cause and exact unique-file omission count'
+$sum=0; foreach ($count in $summary.IssueCounts.Values) { $sum+=$count }
+Assert ($sum -eq $summary.IssueCount) 'Cause counts reconcile to total diagnostics'
 foreach ($offset in @(0,20,24,60,72,76)) {
     $bad=[byte[]]$residentBytes.Clone(); Put $bad $offset ([uint32]0x7fffffff); $rejected=$false
-    try { $null=[RandomToolkits.DiskV3.MftScanner]::Parse($bad,21) } catch { $rejected=$true }
+    try { $null=[RandomToolkits.DiskV4.MftScanner]::Parse($bad,21) } catch { $rejected=$true }
     Assert $rejected "Malformed record at offset $offset rejected"
 }
 $source=Get-Content (Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1') -Raw

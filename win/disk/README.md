@@ -1,4 +1,4 @@
-# Disk Usage 0.3.0
+# Disk Usage 0.3.1
 
 Read-only, ncdu-inspired console explorer for PowerShell 5.0+. Tested on Windows PowerShell 5.1 and PowerShell 7. No modules or administrator rights are required; elevated access can reduce permission-related omissions.
 
@@ -43,5 +43,11 @@ Validation: `tests/Test-MftScanner.ps1` passes on PowerShell 5.1 and 7 using syn
 For the next validation stage, run `tests/Test-MftLive.ps1` in an administrator PowerShell from this checkout. It creates a small isolated fixture on the TEMP volume with a hard link, sparse/compressed data, Unicode and a long path; scans that volume's MFT and checks exact expected fixture totals. It retains the fixture and never modifies existing files. Add `-CompareWholeVolume` to also time a full native scan; whole-volume totals may differ because of hard links and permissions. Automatic MFT selection remains disabled until live validation and useful performance improvement are demonstrated.
 
 Maintain the C# source in `MftScanner.cs`, then run `tests/Sync-DiskMft.ps1` to embed it and refresh the raw Pages endpoint. No extra runtime download is introduced.
+
+### Diagnosing incomplete MFT scans
+
+Version 0.3.1 counts an unresolved file once, instead of once per missing parent link plus again for the omitted file. The display separately reports omitted files, omitted directories and unparsed records. **E** groups diagnostics by specific cause and keeps up to four examples per cause, so repeated directory failures cannot hide all other causes. An ancestor exclusion can affect many descendants; counts represent affected records, not necessarily independent disk faults. `Included logical size` is not a complete volume total when omissions exist.
+
+To investigate without rescanning the drive, return to the drive menu and choose **D**, enter the NTFS drive root and a record number from the errors (digits only). This administrator-only diagnostic reads at most 64 records along that record's parent chain. It shows names, references, sequence numbers, name counts, reparse/extension flags and parser failures. It does not modify the drive. A record can change or be reused between the scan and this inspection; that condition is reported where detected. This diagnostic improvement does not establish the cause of an older generic exclusion message or guarantee that its missing totals are fixed.
 
 Regression tests: `tests/Test-DiskUsage.ps1` in both shells. Tests use isolated temporary trees to verify nested totals, hidden files, empty folders, sorting, reparse-loop exclusion, navigation, no file changes, IEX startup, native/fallback parity, restricted-compilation fallback, Unicode and paths longer than MAX_PATH. They do not scan entire production drives.

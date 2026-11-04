@@ -1,6 +1,6 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV3 {
+namespace RandomToolkits.DiskV4 {
  public class MftName { public ulong Parent; public string Name; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
@@ -58,9 +58,14 @@ namespace RandomToolkits.DiskV3 {
    Need(end); if(!r.Directory && !r.HasData) r.Unsupported=true;
    return r;
   }
-  static void Issue(Scan scan,string path,string reason) {
+  static void Issue(Scan scan,string path,string reason,string category="Other") {
    scan.IssueCount++; scan.Nodes[scan.Root].Partial=true;
-   if(scan.Issues.Count<100) scan.Issues.Add(new Issue {Path=path,Reason=reason});
+   int count;scan.IssueCounts.TryGetValue(category,out count);scan.IssueCounts[category]=count+1;
+   // Reserve examples for every cause instead of filling all slots with one repeated failure.
+   if(count<4 && scan.Issues.Count<100) scan.Issues.Add(new Issue {Path=path,Reason=reason,Category=category});
+  }
+  static string Describe(MftRecord r) {
+   return "MFT #"+(r.Reference&IndexMask)+" (sequence "+(r.Reference>>48)+", name: "+(r.Names.Count==0?"<none>":r.Names[0].Name)+")";
   }
   // Deterministic ownership: a hard-linked file is charged to its first ordinal path only.
   // Other links remain visible with zero charged bytes, labelled LINK.
@@ -71,6 +76,7 @@ namespace RandomToolkits.DiskV3 {
    var dirs=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
    var paths=new System.Collections.Generic.Dictionary<ulong,string>();
    var pending=new System.Collections.Generic.List<MftRecord>();
+   var blocked=new System.Collections.Generic.Dictionary<ulong,Issue>();
    foreach(MftRecord r in records) {
     if(r==null) continue;
     if((r.Reference&IndexMask)==5) {paths[r.Reference]=root;continue;}
@@ -82,39 +88,59 @@ namespace RandomToolkits.DiskV3 {
    foreach(MftRecord start in pending) {
     if(paths.ContainsKey(start.Reference)) continue;
     var chain=new System.Collections.Generic.List<MftRecord>(); var seen=new System.Collections.Generic.HashSet<ulong>();
-    MftRecord cur=start; bool valid=true;
+    MftRecord cur=start; bool valid=true;Issue failure=null;
     while(!paths.ContainsKey(cur.Reference)) {
-     if(!seen.Add(cur.Reference) || cur.Reparse || cur.Unsupported || cur.Names.Count!=1) {valid=false;break;}
+     if(blocked.TryGetValue(cur.Reference,out failure)) {valid=false;break;}
+     if(!seen.Add(cur.Reference)) failure=new Issue {Category="DirectoryCycle",Reason="Parent cycle at "+Describe(cur)};
+     else if(cur.Reparse) failure=new Issue {Category="DirectoryReparse",Reason="Reparse directory excluded: "+Describe(cur)};
+     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Directory requires extension records: "+Describe(cur)};
+     else if(cur.Names.Count!=1) failure=new Issue {Category="DirectoryNames",Reason="Expected one directory name; found "+cur.Names.Count+" on "+Describe(cur)};
+     if(failure!=null) {blocked[cur.Reference]=failure;valid=false;break;}
      chain.Add(cur); ulong parent=cur.Names[0].Parent;
      if(paths.ContainsKey(parent)) break;
-     if(!dirs.TryGetValue(parent,out cur)) {valid=false;break;}
+     MftRecord parentRecord;
+     if(!dirs.TryGetValue(parent,out parentRecord)) {
+      failure=new Issue {Category="DirectoryParentMissing",Reason=Describe(cur)+" requires absent parent MFT #"+(parent&IndexMask)+" (sequence "+(parent>>48)+"). Parent may be excluded, changed or unparsed."};valid=false;break;
+     }
+     cur=parentRecord;
     }
-    if(!valid) {Issue(s,"MFT #"+(start.Reference&IndexMask),"Directory excluded: reparse point, attribute list, missing/reused parent or cycle.");continue;}
+    if(!valid) {
+     foreach(MftRecord r in chain) blocked[r.Reference]=failure;
+     blocked[start.Reference]=failure;s.MftOmittedDirectories++;
+     Issue(s,Describe(start),failure.Reason,failure.Category);continue;
+    }
     for(int i=chain.Count-1;i>=0;i--) {
      MftRecord r=chain[i]; string parent=paths[r.Names[0].Parent]; string path=parent.TrimEnd('\\')+"\\"+r.Names[0].Name;
      if(s.Nodes.ContainsKey(path)) {valid=false;break;}
      paths.Add(r.Reference,path); s.Nodes.Add(path,new Node {Path=path,Parent=parent});
      s.Nodes[parent].Children.Add(path); s.CachedRows.Add(path,new System.Collections.Generic.List<Row>());
     }
-    if(!valid) Issue(s,root,"Duplicate directory path; volume may have changed during scan.");
+    if(!valid) {s.MftOmittedDirectories++;Issue(s,Describe(start),"Duplicate directory path; volume may have changed during scan.","DuplicateDirectory");}
    }
    var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
-    if(r.Reparse || r.Unsupported) {Issue(s,"MFT #"+(r.Reference&IndexMask),"File excluded: reparse point, attribute list or missing unnamed data.");continue;}
+    if(r.Reparse || r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),r.Reparse?"Reparse file excluded.":"Attribute list or missing unnamed data; file excluded.",r.Reparse?"FileReparse":"FileUnsupported");continue;}
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
+    string linkFailure=null;
     foreach(MftName n in r.Names) {
-     string parent; if(!paths.TryGetValue(n.Parent,out parent)) {Issue(s,n.Name,"Missing/excluded/reused parent; link skipped.");continue;}
+     string parent; if(!paths.TryGetValue(n.Parent,out parent)) {
+      Issue cause;
+      if(linkFailure==null) linkFailure="Unresolved parent MFT #"+(n.Parent&IndexMask)+" (sequence "+(n.Parent>>48)+") for "+n.Name+(blocked.TryGetValue(n.Parent,out cause)?"; "+cause.Reason:"; parent absent or changed.");
+      continue;
+     }
      string path=parent.TrimEnd('\\')+"\\"+n.Name; names[path]=parent;
     }
     bool charged=false;
     foreach(var pair in names) {
-     if(!occupied.Add(pair.Key)) {Issue(s,pair.Key,"Duplicate path; file may have changed during scanning.");continue;}
+     if(!occupied.Add(pair.Key)) {if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
      long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);
      if(!charged) {node.Files++;s.Files++;}
      s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":"FILE",Bytes=bytes}); charged=true;
     }
-    if(names.Count==0) Issue(s,"MFT #"+(r.Reference&IndexMask),"No resolvable filename; file omitted.");
+    if(!charged) s.MftOmittedFiles++;
+    // At most one diagnostic per file: do not count each missing parent and then count the file again.
+    if(linkFailure!=null || !charged) Issue(s,Describe(r),linkFailure??"No resolvable filename; file omitted.",charged?"PartialFileLinks":"FilePathUnresolved");
    }
    var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);
    order.Sort(delegate(Node a,Node b){return b.Path.Length.CompareTo(a.Path.Length);});
@@ -131,6 +157,38 @@ namespace RandomToolkits.DiskV3 {
   public static MftScanner Start(string root) {
    MftScanner w=new MftScanner();w.Result.Root=root;
    var t=new System.Threading.Thread(w.Run);t.IsBackground=true;t.Start();return w;
+  }
+  // Bounded read-only diagnostic: inspect one record and its parent chain, not a full scan.
+  public static string[] Inspect(string root,ulong index) {
+   if(root.Length!=3 || root[1]!=':' || root[2]!='\\') throw new System.ArgumentException("Select a local drive root.");
+   var lines=new System.Collections.Generic.List<string>();var seen=new System.Collections.Generic.HashSet<ulong>();
+   using(var handle=CreateFileW(@"\\.\"+root.Substring(0,2),0x80000000,7,System.IntPtr.Zero,3,0,System.IntPtr.Zero)) {
+    if(handle.IsInvalid) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    byte[] volume=new byte[128];int returned;
+    if(!DeviceIoControl(handle,0x90064,null,0,volume,volume.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+    Need(returned>=104 && U16(volume,100)==3 && U16(volume,102)<=1);
+    int recordSize=checked((int)U32(volume,48));Need(recordSize>=512 && recordSize<=65536);
+    byte[] output=new byte[recordSize+16];ulong expectedReference=0;
+    for(int depth=0;depth<64;depth++) {
+     if(!seen.Add(index)) {lines.Add("Parent cycle detected.");break;}
+     byte[] input=System.BitConverter.GetBytes(index);
+     if(!DeviceIoControl(handle,0x90068,input,8,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+     Need(returned>=12);ulong actual=U64(output,0)&IndexMask;int size=checked((int)U32(output,8));Need(size>=48 && size<=recordSize && size<=returned-12);
+     byte[] record=new byte[size];System.Buffer.BlockCopy(output,12,record,0,size);
+     lines.Add("Requested #"+index+"; returned #"+actual+"; header record number="+U32(record,44)+"; flags="+U16(record,22)+"; base reference="+U64(record,32));
+     if(actual!=index) {lines.Add("Requested record no longer in use; stopping at nearest record returned by Windows.");break;}
+     MftRecord r;
+     try {r=Parse(record,actual);} catch(System.Exception ex) {lines.Add("Parse failed: "+ex.Message);break;}
+     if(r==null) {lines.Add("Extension or unused record; no standalone path.");break;}
+     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; unsupported="+r.Unsupported+"; data="+r.HasData+"; names="+r.Names.Count);
+     foreach(MftName n in r.Names) lines.Add("  Name="+n.Name+"; parent #"+(n.Parent&IndexMask)+"; parent sequence="+(n.Parent>>48));
+     if(expectedReference!=0 && r.Reference!=expectedReference) {lines.Add("Parent sequence mismatch: record was reused or changed.");break;}
+     if(actual==5 || r.Names.Count!=1) break;
+     expectedReference=r.Names[0].Parent;index=expectedReference&IndexMask;
+     if(depth==63) lines.Add("Stopped at diagnostic depth limit (64).");
+    }
+   }
+   return lines.ToArray();
   }
   void Run() {
    string root=Result.Root; System.DateTime started=System.DateTime.Now;
@@ -171,10 +229,12 @@ namespace RandomToolkits.DiskV3 {
       foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;
      }
      if(errorCount>0) {
-      Result.IssueCount+=errorCount;foreach(Node n in Result.Nodes.Values) n.Partial=true;
-      foreach(string e in errors) if(Result.Issues.Count<100) Result.Issues.Add(new Issue {Path=root,Reason=e});
+      foreach(string e in errors) Issue(Result,root,e,"RecordParseFailure");
+      Result.IssueCount+=errorCount-errors.Count;Result.IssueCounts["RecordParseFailure"]=errorCount;
+      foreach(Node n in Result.Nodes.Values) n.Partial=true;
       foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;
      }
+     Result.MftRecordErrors=errorCount;Result.MftRecordsRead=RecordsSeen;
     }
    } catch(System.Exception ex) {Error=ex.Message;}
    finally {Done=true;}
