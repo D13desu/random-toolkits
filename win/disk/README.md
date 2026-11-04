@@ -1,4 +1,4 @@
-# Disk Usage 0.2.0
+# Disk Usage 0.3.0
 
 Read-only, ncdu-inspired console explorer for PowerShell 5.0+. Tested on Windows PowerShell 5.1 and PowerShell 7. No modules or administrator rights are required; elevated access can reduce permission-related omissions.
 
@@ -18,7 +18,7 @@ The default Windows engine compiles an embedded C# scanner once per process with
 
 If compilation is restricted, Auto mode warns and uses the original PowerShell scanner. For local comparison after dot-sourcing with `-NoMenu`, use `Measure-DiskTree -LiteralPath PATH -Engine Native` or `-Engine PowerShell`. The fallback lacks live preview/Q-to-partial; Ctrl+C still exits.
 
-This is **not an MFT reader**. [WizTree reads the NTFS Master File Table directly](https://diskanalyzer.com/), which avoids directory-by-directory traversal and can be substantially faster for whole NTFS volumes. This toolkit continues to use permission-respecting enumeration without raw volume access or administrator requirements. It reports logical sizes with the limitations below.
+The default engine uses directory enumeration. An opt-in **M** option now reads NTFS MFT records; see its experimental limitations below. It is not selected by Auto mode.
 
 Measured on the development PC with PowerShell 7.6.5: 20,000 files in 40 folders, warm filesystem cache, three samples per engine with alternating order. Median native time **108.6 ms**, old PowerShell time **1,595.3 ms** (**14.7x**); all totals agreed. Separate one-time compilation: **4,830.3 ms**. This synthetic result includes polling overhead and is not a promised whole-drive speedup. Reproduce with `tests/Measure-DiskScannerPerformance.ps1`; the optional benchmark creates a small-file fixture in TEMP and tests cancellation without deleting it automatically.
 
@@ -27,5 +27,21 @@ Junctions, symlinks, mounted-folder reparse points and cloud reparse placeholder
 These are **logical sizes**, not allocated disk space. Hard links count per pathname; compression, sparse files, filesystem metadata, snapshots, protected files and excluded cloud placeholders can make totals differ from drive used space. Directory/file totals can also differ when the filesystem changes during a scan.
 
 The source is `Disk-Usage.ps1`; copy it byte-for-byte to `index.html` after edits for Pages. The network toolkit downloads a checksum-verified, commit-pinned copy when its disk explorer option is selected; update that pin when releasing a new explorer version.
+
+## Experimental MFT engine
+
+From the same Windows launcher, choose **Storage > Open disk usage explorer > M**, then enter a local NTFS drive root such as `C:\`. Open PowerShell as administrator first; unavailable elevation is labelled in the menu. Local API: `Measure-DiskTree 'C:\' -Engine Mft` after dot-sourcing with `-NoMenu`. Folder paths, network shares, other filesystems, missing elevation and API failures fall back with a warning to the standard scanner. Auto continues to select the existing scanner.
+
+The embedded C# helper opens a volume with read access and calls [FSCTL_GET_NTFS_VOLUME_DATA](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-ntfs_volume_data_buffer) and [FSCTL_GET_NTFS_FILE_RECORD](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_get_ntfs_file_record). It scans in-use records in descending order, parses unnamed data lengths and filename/parent references, validates parent sequence numbers, and reconstructs the directory tree without opening individual files. Supports NTFS 3.0/3.1. No raw-sector reads, disk writes, filesystem locks, journal creation or automatic elevation. Elevated volume metadata can include names of files that ordinary directory permissions hide.
+
+This first implementation makes one filesystem-control request per record, **not a bulk sequential MFT read like a specialized disk analyzer may use**. Real-drive speed has not been measured in the development session because it lacks an elevated token. Do not assume it is faster than the native scanner yet. Memory scales with all file names and folders on the volume, potentially hundreds of MB or more on large volumes. Progress during collection is provisional; cached folder/file listings become available after reconstruction.
+
+MFT results show **unique logical bytes**. Hard links are charged once to the first ordinal full path; other links remain visible as `LINK` with zero charged bytes. Therefore folder ownership can differ from directory enumeration, which counts every pathname. Sparse and compressed files use logical data length, not physical allocation. Named streams and NTFS system records are excluded. Files or directories with attribute lists (extension records), reparse points, malformed records, cycles and missing/reused parents are excluded and reported. Any unresolved exclusion conservatively marks all folder totals partial. A live scan is not an atomic snapshot: changes during scanning can affect results. **R** preserves the selected engine; **Q** returns incomplete results where paths can be resolved.
+
+Validation: `tests/Test-MftScanner.ps1` passes on PowerShell 5.1 and 7 using synthetic NTFS records for resident/nonresident logical sizes, compression/sparse flags, hard links, DOS aliases, Unicode, malformed bounds, reparse exclusions, attribute-list exclusions, stale parent references, cycles, cancellation and fallback. These do **not** substitute for testing real volume records.
+
+For the next validation stage, run `tests/Test-MftLive.ps1` in an administrator PowerShell from this checkout. It creates a small isolated fixture on the TEMP volume with a hard link, sparse/compressed data, Unicode and a long path; scans that volume's MFT and checks exact expected fixture totals. It retains the fixture and never modifies existing files. Add `-CompareWholeVolume` to also time a full native scan; whole-volume totals may differ because of hard links and permissions. Automatic MFT selection remains disabled until live validation and useful performance improvement are demonstrated.
+
+Maintain the C# source in `MftScanner.cs`, then run `tests/Sync-DiskMft.ps1` to embed it and refresh the raw Pages endpoint. No extra runtime download is introduced.
 
 Regression tests: `tests/Test-DiskUsage.ps1` in both shells. Tests use isolated temporary trees to verify nested totals, hidden files, empty folders, sorting, reparse-loop exclusion, navigation, no file changes, IEX startup, native/fallback parity, restricted-compilation fallback, Unicode and paths longer than MAX_PATH. They do not scan entire production drives.
