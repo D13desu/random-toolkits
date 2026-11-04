@@ -1,4 +1,4 @@
-# Random Toolkits | Disk Usage 0.3.1 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.3.2 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
 
@@ -90,7 +90,7 @@ function Measure-DiskTreeFallback {
 }
 
 function Initialize-DiskScanner {
-    if ('RandomToolkits.DiskV4.Scanner' -as [type]) { return }
+    if ('RandomToolkits.DiskV5.Scanner' -as [type]) { return }
     Write-Host 'Preparing native scanner (compiled once per PowerShell process)...' -ForegroundColor DarkGray
     Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
@@ -99,7 +99,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Threading;
-namespace RandomToolkits.DiskV4 {
+namespace RandomToolkits.DiskV5 {
  public class Node {
   public string Path, Parent; public long Bytes, Files, SeenBytes;
   public bool Partial; public List<string> Children = new List<string>();
@@ -230,10 +230,11 @@ namespace RandomToolkits.DiskV4 {
 // BEGIN EMBEDDED MFT SCANNER
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV4 {
+namespace RandomToolkits.DiskV5 {
  public class MftName { public ulong Parent; public string Name; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
+  public bool HasAttributeList, HasStandardInformation;
   public long Bytes; public System.Collections.Generic.List<MftName> Names = new System.Collections.Generic.List<MftName>();
  }
  public class MftScanner {
@@ -266,7 +267,14 @@ namespace RandomToolkits.DiskV4 {
     if(b[p+9]!=0) {int no=U16(b,p+10);Need(no>=min && no+b[p+9]*2<=length);}
     int value=0, size=0;
     if(!nonresident) {size=checked((int)U32(b,p+16));value=U16(b,p+20);Need(value>=24 && value<=length && size<=length-value);}
-    if(type==0x20) r.Unsupported=true; // Attribute lists may move names/data into extension records; omit whole file.
+    if(type==0x10) {
+     // Standard information is resident in the base record. Its file attributes
+     // identify reparses even when the reparse payload is in an extension record.
+     Need(!nonresident && b[p+9]==0 && size>=36 && !r.HasStandardInformation);
+     r.HasStandardInformation=true;
+     if((U32(b,p+value+32)&0x400)!=0) r.Reparse=true;
+    }
+    if(type==0x20) r.HasAttributeList=true;
     if(type==0xc0) r.Reparse=true;
     if(type==0x30) {
      Need(!nonresident && size>=66); int v=p+value, chars=b[v+64];
@@ -285,7 +293,13 @@ namespace RandomToolkits.DiskV4 {
     }
     p+=length;
    }
-   Need(end); if(!r.Directory && !r.HasData) r.Unsupported=true;
+   Need(end);
+   // Directory sizes come from child records, not the directory's index extents.
+   // A usable base filename plus authoritative reparse flags is sufficient to
+   // connect this directory to the tree, even when its index spans extensions.
+   // Files still need full extension resolution for names/data: keep excluding them.
+   r.Unsupported=r.HasAttributeList && (!r.Directory || !r.HasStandardInformation || r.Names.Count!=1);
+   if(!r.Directory && !r.HasData) r.Unsupported=true;
    return r;
   }
   static void Issue(Scan scan,string path,string reason,string category="Other") {
@@ -323,7 +337,7 @@ namespace RandomToolkits.DiskV4 {
      if(blocked.TryGetValue(cur.Reference,out failure)) {valid=false;break;}
      if(!seen.Add(cur.Reference)) failure=new Issue {Category="DirectoryCycle",Reason="Parent cycle at "+Describe(cur)};
      else if(cur.Reparse) failure=new Issue {Category="DirectoryReparse",Reason="Reparse directory excluded: "+Describe(cur)};
-     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Directory requires extension records: "+Describe(cur)};
+     else if(cur.Unsupported) failure=new Issue {Category="DirectoryAttributeList",Reason="Directory with extensions lacks a single base filename or standard reparse flags: "+Describe(cur)};
      else if(cur.Names.Count!=1) failure=new Issue {Category="DirectoryNames",Reason="Expected one directory name; found "+cur.Names.Count+" on "+Describe(cur)};
      if(failure!=null) {blocked[cur.Reference]=failure;valid=false;break;}
      chain.Add(cur); ulong parent=cur.Names[0].Parent;
@@ -410,7 +424,7 @@ namespace RandomToolkits.DiskV4 {
      MftRecord r;
      try {r=Parse(record,actual);} catch(System.Exception ex) {lines.Add("Parse failed: "+ex.Message);break;}
      if(r==null) {lines.Add("Extension or unused record; no standalone path.");break;}
-     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; unsupported="+r.Unsupported+"; data="+r.HasData+"; names="+r.Names.Count);
+     lines.Add(Describe(r)+"; directory="+r.Directory+"; reparse="+r.Reparse+"; unsupported="+r.Unsupported+"; attributeList="+r.HasAttributeList+"; standardInfo="+r.HasStandardInformation+"; data="+r.HasData+"; names="+r.Names.Count);
      foreach(MftName n in r.Names) lines.Add("  Name="+n.Name+"; parent #"+(n.Parent&IndexMask)+"; parent sequence="+(n.Parent>>48));
      if(expectedReference!=0 && r.Reference!=expectedReference) {lines.Add("Parent sequence mismatch: record was reused or changed.");break;}
      if(actual==5 || r.Names.Count!=1) break;
@@ -504,8 +518,8 @@ function Measure-DiskTree {
     if (($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Select the real directory, not a junction or symbolic link.' }
     if ($Engine -eq 'Mft') {
         Write-Host 'EXPERIMENTAL: reading MFT records. Whole volume; metadata may include protected filenames. No filesystem snapshot.' -ForegroundColor Yellow
-        $worker=[RandomToolkits.DiskV4.MftScanner]::Start($root.FullName)
-    } else { $worker=[RandomToolkits.DiskV4.Scanner]::Start($root.FullName) }
+        $worker=[RandomToolkits.DiskV5.MftScanner]::Start($root.FullName)
+    } else { $worker=[RandomToolkits.DiskV5.Scanner]::Start($root.FullName) }
     $timer=[Diagnostics.Stopwatch]::StartNew()
     $lastPreview=0L
     try {
@@ -538,8 +552,8 @@ function Measure-DiskTree {
 function Get-DiskChildren {
     param($Scan,[string]$LiteralPath)
     if ($Scan.PSObject.Properties['CachedRows'] -and $null -ne $Scan.CachedRows) { return $Scan.CachedRows[$LiteralPath].ToArray() }
-    if ($Scan.GetType().FullName -eq 'RandomToolkits.DiskV4.Scan') {
-        try { return [RandomToolkits.DiskV4.Scanner]::Children($Scan,$LiteralPath) }
+    if ($Scan.GetType().FullName -eq 'RandomToolkits.DiskV5.Scan') {
+        try { return [RandomToolkits.DiskV5.Scanner]::Children($Scan,$LiteralPath) }
         catch {
             Write-Warning ('Cannot read the current file listing; showing cached folders only: '+$_.Exception.Message)
             foreach ($childPath in $Scan.Nodes[$LiteralPath].Children) {
@@ -621,7 +635,7 @@ function Start-DiskUsage {
     if ($InitialPath) { Show-DiskScan (Measure-DiskTree $InitialPath) }
     while ($true) {
         $drives = @(Get-DiskDrives | Sort-Object Used -Descending)
-        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.1 | READ ONLY" -ForegroundColor Cyan
+        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.2 | READ ONLY" -ForegroundColor Cyan
         for ($i=0; $i -lt $drives.Count; $i++) {
             $drive=$drives[$i]
             Write-Host (' [{0}] {1} {2} | Total {3} | Used {4} | Free {5} | {6}' -f ($i+1),$drive.Drive,$drive.Type,(Format-DiskSize $drive.Total),(Format-DiskSize $drive.Used),(Format-DiskSize $drive.Free),$drive.Detail)
@@ -643,7 +657,7 @@ function Start-DiskUsage {
                 $recordNumber=[uint64]0
                 if (-not [uint64]::TryParse($recordText,[ref]$recordNumber) -or $recordNumber -gt 281474976710655) { throw 'Enter a valid MFT record number.' }
                 Initialize-DiskScanner
-                [RandomToolkits.DiskV4.MftScanner]::Inspect([IO.Path]::GetFullPath($diagnosticRoot),$recordNumber) | Out-Host
+                [RandomToolkits.DiskV5.MftScanner]::Inspect([IO.Path]::GetFullPath($diagnosticRoot),$recordNumber) | Out-Host
                 continue
             }
             $scanPath=$null; $engine='Auto'
