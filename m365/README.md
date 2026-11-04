@@ -18,6 +18,12 @@ Read-only Microsoft 365 investigation toolkit, based on the supplied v0.3.4.
 - **Not validated against a live Microsoft 365 tenant or PowerShell parser in this environment.** Test in a nonproduction tenant before operational use.
 
 ## Run
+In PowerShell 7.4+:
+
+```powershell
+irm https://tools.d0xd.com/m365/ | iex
+```
+
 Run `Start-M365-Toolkit.cmd` on Windows, or `pwsh -File ./M365-Toolkit.ps1` on PowerShell 7.4+.
 
 ## v0.3.7 Identity Protection

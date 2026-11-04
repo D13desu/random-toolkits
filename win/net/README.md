@@ -17,7 +17,7 @@ irm https://tools.d0xd.com/win | iex
 
 ## Menu layout
 
-The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**. M365 remains separate at `/win/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
