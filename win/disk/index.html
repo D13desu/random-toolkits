@@ -1,4 +1,4 @@
-# Random Toolkits | Disk Usage 0.3.3 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.3.4 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
 
@@ -23,6 +23,15 @@ function Add-DiskScanIssue {
     param($Scan,[string]$ItemPath,[string]$Reason)
     $Scan.IssueCount++
     if ($Scan.Issues.Count -lt 100) { $Scan.Issues.Add([pscustomobject]@{Path=$ItemPath;Reason=$Reason}) }
+}
+
+function Read-DiskDriveRoot {
+    param([string]$DefaultDrive)
+    $prompt='NTFS drive root (for example C:\)'
+    if ($DefaultDrive) { $prompt="NTFS drive root [Enter = $DefaultDrive]" }
+    $answer=Read-Host $prompt
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $DefaultDrive }
+    return $answer.Trim()
 }
 
 function Measure-DiskTreeFallback {
@@ -698,7 +707,7 @@ function Start-DiskUsage {
     if ($InitialPath) { Show-DiskScan (Measure-DiskTree $InitialPath) }
     while ($true) {
         $drives = @(Get-DiskDrives | Sort-Object Used -Descending)
-        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.3 | READ ONLY" -ForegroundColor Cyan
+        Write-Host "`n RANDOM TOOLKITS | DISK USAGE 0.3.4 | READ ONLY" -ForegroundColor Cyan
         for ($i=0; $i -lt $drives.Count; $i++) {
             $drive=$drives[$i]
             Write-Host (' [{0}] {1} {2} | Total {3} | Used {4} | Free {5} | {6}' -f ($i+1),$drive.Drive,$drive.Type,(Format-DiskSize $drive.Total),(Format-DiskSize $drive.Used),(Format-DiskSize $drive.Free),$drive.Detail)
@@ -709,11 +718,14 @@ function Start-DiskUsage {
         Write-Host $mftLabel
         Write-Host ' [D] Diagnose an MFT record and its parents (local NTFS, admin; no full scan)'
         Write-Host 'Native metadata scan with live partial totals. Q: stop and browse partial results; Ctrl+C: exit. Links are skipped.' -ForegroundColor DarkGray
-        $answer=Read-Host 'Select drive or F'
+        $defaultDrive=$null
+        if ($drives.Count -gt 0) { $defaultDrive=$drives[0].Drive }
+        $answer=Read-Host 'Select drive or F/M/D'
         if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
         try {
             if ($answer.Trim() -eq 'D') {
-                $diagnosticRoot=Read-Host 'NTFS drive root (for example C:\)'
+                $diagnosticRoot=Read-DiskDriveRoot $defaultDrive
+                if ([string]::IsNullOrWhiteSpace($diagnosticRoot)) { continue }
                 $reason=Get-DiskMftUnavailableReason $diagnosticRoot
                 if ($reason) { Write-Warning $reason; continue }
                 $recordText=Read-Host 'MFT record number from E (digits only)'
@@ -724,7 +736,7 @@ function Start-DiskUsage {
                 continue
             }
             $scanPath=$null; $engine='Auto'
-            if ($answer.Trim() -eq 'M') { $scanPath=Read-Host 'NTFS drive root (for example C:\)'; $engine='Mft'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
+            if ($answer.Trim() -eq 'M') { $scanPath=Read-DiskDriveRoot $defaultDrive; $engine='Mft'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
             elseif ($answer.Trim() -eq 'F') { $scanPath=Read-Host 'Folder path'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
             else {
                 $number=0

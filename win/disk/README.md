@@ -1,4 +1,4 @@
-# Disk Usage 0.3.3
+# Disk Usage 0.3.4
 
 Read-only, ncdu-inspired console explorer for PowerShell 5.0+. Tested on Windows PowerShell 5.1 and PowerShell 7. No modules or administrator rights are required; elevated access can reduce permission-related omissions.
 
@@ -61,3 +61,5 @@ MFT mode distinguishes known [cloud and WOF reparse tags](https://learn.microsof
 The scan retains extension records and joins them to their exact base reference including the sequence number. It reconstructs names and initial unnamed DATA metadata without reading file contents or interpreting allocation runlists. Missing or conflicting metadata remains partial. This is targeted logical-size support, not a general NTFS parser or allocated-space accounting engine. NTFS system metadata trees are now labelled separately from missing user-directory parents. D remains a bounded base-record inspection; a full scan is needed to join extension records.
 
 Tests cover cloud-tag variants, WOF, unknown tags, junctions/symlinks, extension-only names/data, stale base references, missing hard-link names and conflicting initial data extents in PowerShell 5.1 and 7. Live drive totals still require verification after upgrading.
+
+In 0.3.4, the M and D drive-root prompts show the first listed drive as their default. Press Enter to select it, or type another drive root. Existing NTFS/elevation checks still apply.
