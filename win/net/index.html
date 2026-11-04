@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Network 0.4.0
+# Random Toolkits | Windows Toolkit 0.5.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -111,6 +111,73 @@ function Get-NetworkProxy {
 
 function Get-NetworkFirewall {
     Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction
+}
+
+function Get-PcPowerPlans {
+    $lines = & powercfg.exe /list 2>&1
+    if ($LASTEXITCODE -ne 0) { throw ($lines -join ' ') }
+    foreach ($line in $lines) {
+        if ([string]$line -match '(?i)([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\s+\((.*)\)') {
+            [pscustomobject]@{Guid=$Matches[1];Name=$Matches[2];Active=([string]$line -match '\*\s*$')}
+        }
+    }
+}
+
+function Get-PcPowerOverview {
+    $enclosures = @(Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop)
+    $batteries = @(Get-CimInstance Win32_Battery -ErrorAction Stop)
+    $portable = @($enclosures.ChassisTypes | Where-Object { $_ -in @(8,9,10,11,14,30,31,32) }).Count -gt 0
+    $device = 'Desktop / other (reported chassis)'
+    if ($portable) { $device = 'Laptop / portable (reported chassis)' }
+    elseif ($batteries.Count -gt 0) { $device = 'Battery detected; chassis not identified as portable' }
+    $plans = @(Get-PcPowerPlans)
+    $active = $plans | Where-Object Active | Select-Object -First 1
+    $high = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+    $assessment = 'Active plan is not the standard High performance plan. Custom plans may be equivalent; power mode overlays are separate.'
+    if ($active.Guid -eq $high) { $assessment = 'Standard High performance plan is active.' }
+    elseif ($portable) { $assessment = 'Laptop is not using standard High performance. Consider it on AC for performance troubleshooting; Balanced can be appropriate for battery/heat.' }
+    if ($high -notin $plans.Guid) { $assessment += ' High performance is not exposed on this device; no plan is created or forced.' }
+    [pscustomobject]@{Device=$device;ChassisCodes=($enclosures.ChassisTypes -join ', ');BatteryCount=$batteries.Count;ActivePlan=$active.Name;PlanGuid=$active.Guid;Assessment=$assessment}
+    foreach ($battery in $batteries) {
+        [pscustomobject]@{Battery=$battery.Name;ChargePercent=$battery.EstimatedChargeRemaining;BatteryStatusCode=$battery.BatteryStatus;Detail='Battery/chassis values are firmware-reported; battery presence alone does not prove a laptop.'}
+    }
+    $plans
+}
+
+function Get-PcNicPower {
+    foreach ($adapter in @(Get-NetAdapter -Physical -ErrorAction Stop)) {
+        try {
+            $pm = Get-NetAdapterPowerManagement -Name ([WildcardPattern]::Escape($adapter.Name)) -ErrorAction Stop
+            [pscustomobject]@{Adapter=$adapter.Name;InterfaceIndex=$adapter.InterfaceIndex;Status=$adapter.Status;AllowComputerToTurnOffDevice=[string]$pm.AllowComputerToTurnOffDevice;SelectiveSuspend=[string]$pm.SelectiveSuspend;DeviceSleepOnDisconnect=[string]$pm.DeviceSleepOnDisconnect;Detail='Unsupported/blank settings are driver limitations. Disabling NIC sleep does not prevent the PC itself from sleeping.'}
+        } catch { [pscustomobject]@{Adapter=$adapter.Name;InterfaceIndex=$adapter.InterfaceIndex;Status='UNAVAILABLE';Detail=$_.Exception.Message} }
+    }
+}
+
+function Get-PcQualityChecks {
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    [pscustomobject]@{Check='Uptime';Value=((Get-Date)-$os.LastBootUpTime).ToString();Detail='Long uptime can help explain pending maintenance; it is not itself a fault.'}
+    foreach ($disk in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -ErrorAction Stop)) {
+        if ($disk.Size -gt 0) {
+            $percent = [math]::Round(100*$disk.FreeSpace/$disk.Size,1)
+            $status='PASS'; if ($percent -lt 10) { $status='WARN' }
+            [pscustomobject]@{Check='Free disk space';Drive=$disk.DeviceID;FreeGiB=[math]::Round($disk.FreeSpace/1GB,2);FreePercent=$percent;Status=$status;Detail='Warning threshold: less than 10% free; use Disk usage to inspect.'}
+        }
+    }
+    foreach ($registryPath in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')) {
+        [pscustomobject]@{Check='Reboot indicator';Path=$registryPath;Present=(Test-Path -LiteralPath $registryPath -ErrorAction Stop);Detail='Checks common Windows servicing markers only; absence does not prove no restart is needed.'}
+    }
+}
+
+function Start-PcDiskExplorer {
+    $revision='fd1e4b3f2da31661c0de4c0ae6f5df37d2e09a95'
+    $expected='87DF702459AFEF64884E41613022D51C7060F52182491BF1D3CE3196468D618B'
+    $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
+    try {
+        Write-Host 'Downloading verified Disk Usage 0.1.0 from D13desu/random-toolkits...'
+        Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/D13desu/random-toolkits/$revision/win/disk/Disk-Usage.ps1" -OutFile $download -TimeoutSec 60 -ErrorAction Stop
+        if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $expected) { throw 'Disk explorer checksum mismatch. Script not executed.' }
+        & $download
+    } finally { if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force } }
 }
 
 function Get-AdContext {
@@ -261,6 +328,8 @@ function Start-AdMenu { Start-NetworkCategory -Id 'ad' }
 
 function Get-NetworkRepairs {
     @(
+        [pscustomobject]@{Key='5'; Id='set-power-plan'; Name='Select an available power plan'; MinPS='5.0'; Commands=@('powercfg.exe'); Admin=$true; Roles=@(); Impact='Changes the active plan for this PC, including its AC/battery sleep and performance settings. High performance may increase battery drain, heat and fan noise. Note the previous plan to switch back.'}
+        [pscustomobject]@{Key='6'; Id='nic-awake'; Name='Disable supported NIC sleep settings'; MinPS='5.0'; Commands=@('Get-NetAdapter','Get-NetAdapterPowerManagement','Set-NetAdapterPowerManagement'); Admin=$true; Roles=@(); Impact='Disables supported sleep settings on ONE physical NIC. May increase power use. No automatic NIC restart; a later adapter restart or reboot may be needed. Wake-on-LAN settings are preserved.'}
         [pscustomobject]@{Key='1'; Id='flush-dns'; Name='Flush local DNS cache'; MinPS='5.0'; Commands=@('ipconfig.exe'); Admin=$true; Roles=@(); Impact='Clears cached DNS answers on this PC. Subsequent lookups query DNS again.'}
         [pscustomobject]@{Key='2'; Id='renew-dhcp'; Name='Renew IPv4 DHCP lease (select adapter)'; MinPS='5.0'; Commands=@('Get-CimInstance','Invoke-CimMethod'); Admin=$true; Roles=@(); Impact='Renews IPv4 DHCP on ONE adapter. IP/routes may change and remote access may disconnect. No release or static-IP change.'}
         [pscustomobject]@{Key='3'; Id='resync-time'; Name='Resynchronize local clock'; MinPS='5.0'; Commands=@('w32tm.exe'); Admin=$true; Roles=@(); Impact='Requests local clock synchronization using existing time configuration. May change system time; does not change time servers.'}
@@ -278,7 +347,8 @@ function Invoke-NetworkRepair {
     param(
         [Parameter(Mandatory=$true)][string]$Id,
         [string]$Controller,
-        [int]$InterfaceIndex = -1
+        [int]$InterfaceIndex = -1,
+        [string]$PlanGuid
     )
     $entry = Get-NetworkRepairs | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
     if (-not $entry) { throw "Unknown repair: $Id" }
@@ -287,6 +357,23 @@ function Invoke-NetworkRepair {
     if (-not $availability.Available) { throw $availability.Reason }
     $targetLabel = $env:COMPUTERNAME
     $adapter = $null
+    $powerManagement = $null
+    if ($Id -eq 'set-power-plan') {
+        $plans = @(Get-PcPowerPlans)
+        $selected = $plans | Where-Object { $_.Guid -eq $PlanGuid } | Select-Object -First 1
+        if (-not $selected) { throw 'Select a plan listed by powercfg. This tool does not create unsupported plans.' }
+        $previous = $plans | Where-Object Active | Select-Object -First 1
+        $targetLabel += " / $($previous.Name) [$($previous.Guid)] -> $($selected.Name) [$($selected.Guid)]"
+    }
+    if ($Id -eq 'nic-awake') {
+        $adapter = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.InterfaceIndex -eq $InterfaceIndex })
+        if ($adapter.Count -ne 1) { throw 'Select exactly one physical adapter by InterfaceIndex.' }
+        $adapter=$adapter[0]
+        $powerManagement = Get-NetAdapterPowerManagement -Name ([WildcardPattern]::Escape($adapter.Name)) -ErrorAction Stop
+        $supported = @('AllowComputerToTurnOffDevice','SelectiveSuspend','DeviceSleepOnDisconnect' | Where-Object { [string]$powerManagement.$_ -in @('Enabled','Disabled') })
+        if ($supported.Count -eq 0) { throw 'This NIC driver exposes no supported sleep settings. No change made.' }
+        $targetLabel += " / $($adapter.Name) [$InterfaceIndex] / " + (($supported | ForEach-Object { "$_=$($powerManagement.$_)" }) -join ', ')
+    }
     if ($Id -eq 'renew-dhcp') {
         if ($InterfaceIndex -lt 0) { throw 'Select a DHCP-enabled adapter by its InterfaceIndex.' }
         $adapters = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "InterfaceIndex = $InterfaceIndex" -ErrorAction Stop)
@@ -314,6 +401,31 @@ function Invoke-NetworkRepair {
     $availability = Get-AdAvailability $entry (Get-AdContext)
     if (-not $availability.Available) { throw $availability.Reason }
     switch ($Id) {
+        'set-power-plan' {
+            $result = Invoke-AdNative 'powercfg.exe' @('/setactive',$selected.Guid)
+            $result
+            if ($result.ExitCode -eq 0) {
+                $now = @(Get-PcPowerPlans | Where-Object Active)
+                if ($selected.Guid -notin $now.Guid) { throw 'Windows did not report the requested plan as active. Policy or hardware may override it.' }
+                $now
+            }
+        }
+        'nic-awake' {
+            $currentAdapter = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.InterfaceIndex -eq $InterfaceIndex })
+            if ($currentAdapter.Count -ne 1 -or $currentAdapter[0].InterfaceGuid -ne $adapter.InterfaceGuid) { throw 'Adapter changed; select it again.' }
+            $powerManagement = Get-NetAdapterPowerManagement -Name ([WildcardPattern]::Escape($currentAdapter[0].Name)) -ErrorAction Stop
+            $settings = @{InputObject=$powerManagement;NoRestart=$true;ErrorAction='Stop'}
+            if ('AllowComputerToTurnOffDevice' -in $supported) { $powerManagement.AllowComputerToTurnOffDevice='Disabled' }
+            foreach ($feature in @('SelectiveSuspend','DeviceSleepOnDisconnect')) {
+                if ($feature -in $supported) { $settings[$feature]='Disabled' }
+            }
+            Set-NetAdapterPowerManagement @settings | Out-Null
+            $after = Get-NetAdapterPowerManagement -Name ([WildcardPattern]::Escape($currentAdapter[0].Name)) -ErrorAction Stop
+            foreach ($feature in $supported) {
+                $status='WARN'; if ([string]$after.$feature -eq 'Disabled') { $status='PASS' }
+                [pscustomobject]@{Adapter=$adapter.Name;Setting=$feature;Value=[string]$after.$feature;Status=$status;Detail='Configuration read-back only. No NIC restart performed; reboot/restart may be needed to apply. Check driver if setting did not persist.'}
+            }
+        }
         'flush-dns' {
             Invoke-AdNative 'ipconfig.exe' @('/flushdns')
         }
@@ -356,6 +468,20 @@ function Invoke-InteractiveRepair {
     $availability = Get-AdAvailability $Entry (Get-AdContext)
     if (-not $availability.Available) { throw $availability.Reason }
     $repairParameters = @{Id=$Entry.Id; Confirm=$false}
+    if ($Entry.Id -eq 'set-power-plan') {
+        $plans=@(Get-PcPowerPlans)
+        for ($i=0; $i -lt $plans.Count; $i++) { Write-Host " [$($i+1)] $($plans[$i].Name) | Active: $($plans[$i].Active) | $($plans[$i].Guid)" }
+        $number=0
+        if (-not [int]::TryParse((Read-Host 'Plan number'),[ref]$number) -or $number -lt 1 -or $number -gt $plans.Count) { throw 'Choose a listed plan.' }
+        $repairParameters.PlanGuid=$plans[$number-1].Guid
+    }
+    if ($Entry.Id -eq 'nic-awake') {
+        $nics=@(Get-NetAdapter -Physical -ErrorAction Stop)
+        $nics | Select-Object InterfaceIndex,Name,Status,InterfaceDescription | Format-Table -AutoSize | Out-Host
+        $index=-1
+        if (-not [int]::TryParse((Read-Host 'NIC InterfaceIndex'),[ref]$index) -or $index -notin $nics.InterfaceIndex) { throw 'Choose a listed physical NIC.' }
+        $repairParameters.InterfaceIndex=$index
+    }
     if ($Entry.Id -eq 'repair-trust') {
         $answer = Read-Host 'DC hostname [automatic discovery]'
         if ($answer) { $repairParameters.Controller = $answer.Trim() }
@@ -373,6 +499,12 @@ function Invoke-InteractiveRepair {
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
+        [pscustomobject]@{Key='power';Id='power';Name='Laptop / battery / active power plan';MinPS='5.0';Commands=@('Get-CimInstance','powercfg.exe');Admin=$false;Action={param($t,$p) Get-PcPowerOverview}}
+        [pscustomobject]@{Key='nic-power';Id='nic-power';Name='NIC sleep and power-saving settings';MinPS='5.0';Commands=@('Get-NetAdapter','Get-NetAdapterPowerManagement');Admin=$false;Action={param($t,$p) Get-PcNicPower}}
+        [pscustomobject]@{Key='sleep';Id='sleep';Name='Sleep states and AC/battery timeouts';MinPS='5.0';Commands=@('powercfg.exe');Admin=$false;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/a'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_SLEEP'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_VIDEO')}}
+        [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
+        [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
+        [pscustomobject]@{Key='disk';Id='disk';Name='Open disk usage explorer (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -420,6 +552,8 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares'); Repairs=@('repair-trust','resync-time')}
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
+        [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorer'; Checks=@('disk'); AdChecks=@(); Repairs=@()}
     )
 }
 
@@ -485,7 +619,7 @@ function Start-NetworkCategory {
     if (-not $category) { throw "Unknown category: $Id" }
     while ($true) {
         $context = Get-AdContext
-        Write-Host "`n WINDOWS NETWORK > $($category.Name.ToUpperInvariant())" -ForegroundColor Cyan
+        Write-Host "`n WINDOWS TOOLKIT > $($category.Name.ToUpperInvariant())" -ForegroundColor Cyan
         if ($Id -eq 'ad') {
             Write-Host " $($context.Computer) | $($context.Role) | $($context.Domain)"
             if ($context.Role -eq 'Unknown') { Write-Warning $context.Detail }
@@ -523,23 +657,45 @@ function Start-NetworkCategory {
 function Start-NetworkMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS NETWORK 0.4.0' -ForegroundColor Cyan
+        Write-Host ' WINDOWS TOOLKIT > NETWORK' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
-        foreach ($category in Get-NetworkCategories) { Write-Host " [$($category.Key)] $($category.Name)" }
-        Write-Host "`n [0] Exit"
+        foreach ($category in @(Get-NetworkCategories | Where-Object { $_.Id -notin @('power','storage') })) { Write-Host " [$($category.Key)] $($category.Name)" }
+        Write-Host "`n [0] Back"
         Write-Host 'Checks and repairs are grouped by topic. Repairs ask before making changes.' -ForegroundColor DarkGray
         $selection = Read-Host 'Select'
         if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
         # Retain the former AD shortcut for existing users.
         if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
-        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() } | Select-Object -First 1
+        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() -and $_.Id -notin @('power','storage') } | Select-Object -First 1
         if (-not $category) { Write-Warning 'Unknown selection'; continue }
         Start-NetworkCategory $category.Id
+    }
+}
+
+function Start-WindowsMenu {
+    while ($true) {
+        Write-Host "`n============================================" -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.5.0' -ForegroundColor Cyan
+        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
+        Write-Host '============================================' -ForegroundColor Cyan
+        Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
+        Write-Host ' [2] Power and device health - battery, plans, NIC sleep'
+        Write-Host ' [3] Storage - drives and folder sizes'
+        Write-Host "`n [0] Exit"
+        Write-Host 'Repair options ask before making changes. M365 remains a separate toolkit.' -ForegroundColor DarkGray
+        $answer = Read-Host 'Select'
+        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        switch ($answer.Trim()) {
+            '1' { Start-NetworkMenu }
+            '2' { Start-NetworkCategory 'power' }
+            '3' { Start-NetworkCategory 'storage' }
+            default { Write-Warning 'Choose a listed section.' }
+        }
     }
 }
 if ($PSVersionTable.PSVersion -lt [version]'5.0') { throw 'Windows PowerShell 5.0+ is required (5.1 recommended).' }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This toolkit requires Windows.' }
 if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }
 elseif ($Check) { Invoke-NetworkCheck $Check $Target $Port }
-elseif (-not $NoMenu) { Start-NetworkMenu }
+elseif (-not $NoMenu) { Start-WindowsMenu }

@@ -1,9 +1,9 @@
-# Windows Network Toolkit 0.4.0
+# Windows Toolkit 0.5.0
 
-Self-contained Windows network diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways.
+Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
 ```powershell
-irm https://tools.d0xd.com/win/net/ | iex
+irm https://tools.d0xd.com/win | iex
 ```
 
 Requires Windows and PowerShell 5.0 or later. Tested with Windows PowerShell 5.1 and PowerShell 7; 5.0 uses the same compatible syntax/APIs but has not been runtime-tested. PowerShell 5.1 is recommended for legacy machines. This does not change the M365 toolkit's PowerShell 7.4+ requirement.
@@ -12,10 +12,12 @@ If an old Windows PowerShell session cannot negotiate HTTPS, enable TLS 1.2 for 
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-irm https://tools.d0xd.com/win/net/ | iex
+irm https://tools.d0xd.com/win | iex
 ```
 
 ## Menu layout
+
+The root menu is **1 Network**, **2 Power and device health**, **3 Storage**. M365 remains separate at `/win/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -27,6 +29,21 @@ irm https://tools.d0xd.com/win/net/ | iex
 | 6 Firewall | Firewall profiles | None |
 
 `0` returns from a submenu or exits the main menu. Unavailable actions remain visible with the reason underneath. Repair entries are yellow and marked `CHANGES SYSTEM`; minimum PowerShell and administrator requirements remain visible. The old `A` shortcut still opens Active Directory. Noninteractive check IDs are unchanged.
+
+## Power and device health
+
+- Laptop/portable detection uses firmware chassis codes, supplemented by battery presence. Battery-only detection is marked ambiguous (for example, UPS-equipped desktops).
+- Shows battery charge/status, active classic power plan and available plans. Flags laptops not using the standard High performance GUID; Balanced/custom plans are not automatically considered faulty. Windows power-mode overlays are separate. Some hardware exposes only Balanced; the toolkit does not create unsupported plans or disable Modern Standby.
+- Displays NIC AllowComputerToTurnOffDevice, SelectiveSuspend and DeviceSleepOnDisconnect where exposed by the driver. Errors are reported as unavailable.
+- Reports supported sleep states, AC/battery sleep/display settings, power requests, last wake reason, uptime, fixed-drive free space (warns below 10%) and two common pending-reboot registry markers. These indicators are not exhaustive diagnoses.
+
+Confirmed administrator repairs can select an existing power plan (previous plan shown for rollback) or disable supported sleep settings on one selected physical NIC. NIC changes preserve Wake-on-LAN and other offloads and pass `NoRestart`; a later manual NIC restart/reboot may be required. Values are read back and failures remain warnings. Keeping a NIC awake does not prevent Windows system sleep. Increased performance/less power saving can increase battery drain, heat and fan noise.
+
+Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check ID: `disk` (opens interactive explorer). Power repair IDs: `set-power-plan`, `nic-awake`.
+
+## Storage
+
+Choose **Storage > Open disk usage explorer**. It lists drive total/used/free space and scans a chosen drive or folder. Drill into folders ordered by size, navigate up, page through results and rescan. It never deletes files. See [Disk Usage documentation](../disk/README.md) for keys and limitations: totals are logical file sizes, links/cloud placeholders are skipped, and inaccessible trees are marked partial.
 
 ## Checks
 
@@ -96,7 +113,7 @@ Add checks to `Get-NetworkChecks`, supplying minimum PS version, required comman
 
 AD entries live in `Get-AdChecks` and also declare allowed machine roles. Both the menu and noninteractive dispatcher enforce requirements; secure-channel testing additionally rechecks the role immediately before invoking the cmdlet. AD check IDs are `ad-context`, `ad-discovery`, `ad-dns`, `ad-secure`, `ad-time`, and `ad-shares`.
 
-`Network-Toolkit.ps1` is the source. Copy it byte-for-byte to `index.html` after edits. GitHub Pages serves this raw script through the directory index; `/win/net` redirects to `/win/net/`. There are no extra script downloads and no reliance on `$PSScriptRoot` in the launcher.
+`win/net/Network-Toolkit.ps1` remains the source to preserve local script paths. Copy it byte-for-byte to both `win/index.html` and `win/net/index.html` after edits. GitHub Pages serves these raw scripts through directory indexes, including redirects from `/win` and `/win/net`. The Windows launcher does not rely on `$PSScriptRoot`; only the disk tool requires an additional HTTPS download. Update its pinned commit and SHA-256 together when releasing disk changes.
 
 Run the regression checks in both shells:
 
@@ -109,6 +126,10 @@ powershell.exe -NoProfile -File tests/Test-NetworkRepairs.ps1
 pwsh.exe -NoProfile -File tests/Test-NetworkRepairs.ps1
 powershell.exe -NoProfile -File tests/Test-NetworkMenus.ps1
 pwsh.exe -NoProfile -File tests/Test-NetworkMenus.ps1
+powershell.exe -NoProfile -File tests/Test-PowerToolkit.ps1
+pwsh.exe -NoProfile -File tests/Test-PowerToolkit.ps1
+powershell.exe -NoProfile -File tests/Test-DiskUsage.ps1
+pwsh.exe -NoProfile -File tests/Test-DiskUsage.ps1
 ```
 
 Tests cover parsing, source/endpoint parity, invalid input, compatibility gates, open/closed loopback TCP ports, adapter enumeration, localhost DNS, and IEX startup/exit. They require no tenant, elevation, package installation or public network probe. Historical Windows installations still need real-device validation.
@@ -118,3 +139,5 @@ AD regression tests use simulated CIM/domain responses and native commands. They
 Repair tests mock every modifying command: no real cache flush, renewal, resync or trust repair is executed during testing. They verify privilege/role gates, cancellation, WhatIf, exact command arguments, static-adapter rejection, DHCP result handling, credential flow, skipping healthy trust and post-repair verification. Real repair outcomes still require validation in a suitable test environment.
 
 Menu tests verify that every action remains reachable, every category returns to the main menu, DNS repair cancellation preserves the yes/no prompt, and unavailable AD repairs are blocked before collecting inputs. Add or reorganize topics through `Get-NetworkCategories`; diagnostics and repairs continue to use their existing dispatchers and checks.
+
+Power tests simulate laptop/desktop firmware, localized plan output, missing plans, confirmation/cancellation, and driver support. All changes are mocked. Read-only power/health provider calls were checked on a Windows desktop; real laptop and NIC modification outcomes still need device validation. Disk tests use isolated temporary files, including a junction loop. Windows PowerShell 5.0 remains targeted but not runtime-tested.

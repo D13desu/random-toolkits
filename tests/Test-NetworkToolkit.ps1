@@ -10,6 +10,7 @@ $parseErrors = $null
 $null = [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source), [ref]$tokens, [ref]$parseErrors)
 Assert-True ($parseErrors.Count -eq 0) 'Source parses on this PowerShell version'
 Assert-True ((Get-FileHash $source).Hash -eq (Get-FileHash $endpoint).Hash) 'Pages endpoint matches source byte-for-byte'
+Assert-True ((Get-FileHash $source).Hash -eq (Get-FileHash (Join-Path $PSScriptRoot '../win/index.html')).Hash) 'Unified Windows endpoint matches source byte-for-byte'
 . $source -NoMenu
 foreach ($targetValue in @('localhost','example.com','127.0.0.1','::1')) { Test-NetworkTarget $targetValue }
 foreach ($targetValue in @('https://example.com','-bad','host;whoami','', 'two hosts')) {

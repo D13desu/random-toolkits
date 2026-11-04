@@ -6,18 +6,22 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Network Toolkit v0.4.0 | [win/net](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.5.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [win/m365](win/m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
-## Run Windows network diagnostics
+## Run all Windows tools
 
 ```powershell
-irm https://tools.d0xd.com/win/net/ | iex
+irm https://tools.d0xd.com/win | iex
 ```
 
-Choose a troubleshooting area: **1 Overview**, **2 Connectivity**, **3 DNS**, **4 Active Directory and time**, **5 Routing and proxy**, or **6 Firewall**. The menu labels incompatible or missing tools and prevents running them. See [compatibility, legacy TLS and local execution](win/net/README.md).
+One entry point: **1 Network**, **2 Power and device health**, **3 Storage**. Network contains overview, connectivity, DNS, AD/time, routing/proxy and firewall checks. Power includes laptop/battery detection, plans, NIC sleep settings, sleep blockers, disk headroom and restart indicators. Storage opens a read-only explorer of drives, folders and files sorted by size. M365 stays separate.
+
+The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
 
 Repairs appear beside their related checks: DHCP renewal under Connectivity, cache flush under DNS, and trust repair/time resync under Active Directory and time. Repairs require an administrator session and yes/no confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
+
+Power repairs can select an existing power plan or disable supported sleep settings on a selected physical NIC. Unsupported plans/features are not forced. NIC changes do not automatically restart the adapter.
 
 ## Run M365 Toolkit
 
