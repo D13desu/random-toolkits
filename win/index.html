@@ -369,11 +369,11 @@ function Get-PcQualityChecks {
 }
 
 function Start-PcDiskExplorer {
-    $revision='ae885ba90a055bf67e3670359476de1d18dd47cd'
-    $expected='89504933103D642F4C621D78878C2734EC633294CE4786153AAFE416DE97ED75'
+    $revision='b709513f21f5082067ae90b02d25d143bb9fed03'
+    $expected='D93ABEB2C3F792C5CACC0EA9CB441CBFADD44ED885B630C0CFD508E7F8889FB9'
     $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
     try {
-        Write-Host 'Downloading verified Disk Usage 0.4.0 from D13desu/random-toolkits...'
+        Write-Host 'Downloading verified Disk Usage 0.4.1 from D13desu/random-toolkits...'
         Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/D13desu/random-toolkits/$revision/win/disk/Disk-Usage.ps1" -OutFile $download -TimeoutSec 60 -ErrorAction Stop
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $expected) { throw 'Disk explorer checksum mismatch. Script not executed.' }
         & $download

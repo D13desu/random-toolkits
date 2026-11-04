@@ -1,4 +1,4 @@
-# Disk Usage 0.4.0
+# Disk Usage 0.4.1
 
 Read-only drive and folder explorer for PowerShell 5.0+; tested on Windows PowerShell 5.1 and PowerShell 7. Open it from the unified Windows launcher: **Storage > Open disk usage explorer**.
 
