@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Toolkit v0.6.3 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.6.4 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools
@@ -21,7 +21,7 @@ Printing includes inventory, queues, ports/drivers, spooler status and printing 
 
 The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
 
-Disk Usage 0.2.0 uses a compiled native Windows metadata scanner, cached navigation, live partial totals and Q-to-stop with partial results. It falls back to PowerShell if compilation is restricted. See its documentation for benchmark methodology and why this is still different from direct MFT scanning.
+Disk Usage 0.4.0 offers native directory scanning and an optional elevated NTFS MFT view with On disk allocation, logical sizes, cached navigation and explicit incomplete totals. See its documentation for allocation semantics and independent Windows API validation.
 
 Repairs appear beside their related checks: DHCP renewal under Connectivity, cache flush under DNS, and trust repair/time resync under Active Directory and time. Repairs require an administrator session and yes/no confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
 

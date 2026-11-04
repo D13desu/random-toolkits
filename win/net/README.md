@@ -1,4 +1,4 @@
-# Windows Toolkit 0.6.3
+# Windows Toolkit 0.6.4
 
 Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
@@ -43,9 +43,7 @@ Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check
 
 ## Storage
 
-Choose **Storage > Open disk usage explorer**. It lists drive total/used/free space and scans a chosen drive or folder. Drill into folders ordered by size, navigate up, page through results and rescan. It never deletes files. See [Disk Usage documentation](../disk/README.md) for keys and limitations: totals are logical file sizes, links/cloud placeholders are skipped, and inaccessible trees are marked partial.
-
-The pinned Disk Usage 0.2.0 engine compiles a native Windows metadata scanner once per PowerShell process. It avoids per-file PowerShell overhead and redundant metadata reads, shows live provisional totals and supports Q-to-stop into a partial view when console key polling is available. If compilation is restricted it uses the older PowerShell fallback. This is directory enumeration, not direct MFT parsing.
+Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.0 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
 
 ## Printing
 

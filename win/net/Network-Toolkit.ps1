@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.6.3
+# Random Toolkits | Windows Toolkit 0.6.4
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -369,11 +369,11 @@ function Get-PcQualityChecks {
 }
 
 function Start-PcDiskExplorer {
-    $revision='911777e949ac1bfbc4654104368292e416689e25'
-    $expected='68AEA207F0F96C381E7809635032AE65FA42F374C42DCD343EB4D06EB2F72DD9'
+    $revision='ae885ba90a055bf67e3670359476de1d18dd47cd'
+    $expected='89504933103D642F4C621D78878C2734EC633294CE4786153AAFE416DE97ED75'
     $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
     try {
-        Write-Host 'Downloading verified Disk Usage 0.3.4 from D13desu/random-toolkits...'
+        Write-Host 'Downloading verified Disk Usage 0.4.0 from D13desu/random-toolkits...'
         Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/D13desu/random-toolkits/$revision/win/disk/Disk-Usage.ps1" -OutFile $download -TimeoutSec 60 -ErrorAction Stop
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $expected) { throw 'Disk explorer checksum mismatch. Script not executed.' }
         & $download
@@ -905,7 +905,7 @@ function Start-NetworkMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.3' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.4' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
