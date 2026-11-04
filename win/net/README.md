@@ -1,4 +1,4 @@
-# Windows Toolkit 0.5.0
+# Windows Toolkit 0.6.0
 
 Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
@@ -17,7 +17,7 @@ irm https://tools.d0xd.com/win | iex
 
 ## Menu layout
 
-The root menu is **1 Network**, **2 Power and device health**, **3 Storage**. M365 remains separate at `/win/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**. M365 remains separate at `/win/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -44,6 +44,31 @@ Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check
 ## Storage
 
 Choose **Storage > Open disk usage explorer**. It lists drive total/used/free space and scans a chosen drive or folder. Drill into folders ordered by size, navigate up, page through results and rescan. It never deletes files. See [Disk Usage documentation](../disk/README.md) for keys and limitations: totals are logical file sizes, links/cloud placeholders are skipped, and inaccessible trees are marked partial.
+
+## Printing
+
+Lists installed printers (CIM fallback when Get-Printer is missing), per-printer queued jobs, ports/drivers and the local spooler status. Queue access errors are reported per printer so other results remain visible. Printing events default to `Microsoft-Windows-PrintService/Admin`; enter `Microsoft-Windows-PrintService/Operational` if that log is already enabled. No log is enabled automatically.
+
+The confirmed administrator repair starts a stopped spooler or restarts a running one, then waits up to 15 seconds for Running. It does not force-stop dependent services, delete spool files, remove printers or intentionally cancel jobs. Printing and remote clients of a print server can be interrupted. A running spooler does not prove a printer can print.
+
+## Group Policy
+
+Uses `gpresult /scope user /r` for the current account and `gpresult /scope computer /r` for computer results (administrator). An elevated session running as another user reports that user's policy. Membership/role and `Microsoft-Windows-GroupPolicy/Operational` event browsing are included. No RSOP data, missing domain connectivity or permissions are shown as errors rather than healthy policy results; local/workgroup PCs may still have local policy.
+
+Confirmed refresh runs `gpupdate /target:user /force /wait:0` or `/target:computer /force /wait:0`. It requests background processing; command success is **not proof of policy completion**. Inspect policy events/results afterward. No `/boot` or `/logoff` option is used. Policy itself can apply settings and configured scripts/extensions, and some changes need a later reboot/logoff.
+
+## Event Logs via CLI
+
+List logs using a name pattern, or browse one exact log name. Filters: lookback hours (1-8760), comma-separated IDs (0-65535), levels (0-5), provider name/wildcard, literal case-insensitive message text, and maximum recent candidates (1-1000, default 200). Log/time/ID/level/provider filtering runs in the event service via FilterHashtable. Text filtering runs **after** the candidate cap, so older text matches may be omitted. Results are newest-first, 20 per page; N/P navigates and an event number opens its full message and record ID.
+
+Security and protected logs may require elevation or Event Log Readers membership. Disabled/missing logs and access errors are not treated as empty matches. No logs are cleared or enabled and nothing is exported automatically. Messages may contain sensitive usernames/document names; inspect locally before sharing.
+
+Noninteractive checks: `printers`, `print-jobs`, `print-ports`, `spooler`, `gp-user`, `gp-computer`. Event choices (`print-events`, `gp-events`, `event-logs`, `event-browser`) are interactive. For scripted filtering:
+
+```powershell
+. ./win/net/Network-Toolkit.ps1 -NoMenu
+Get-PcEventRecords -LogName System -Hours 48 -Ids 7031,7034 -Levels 2,3 -Limit 100
+```
 
 ## Checks
 
@@ -130,6 +155,8 @@ powershell.exe -NoProfile -File tests/Test-PowerToolkit.ps1
 pwsh.exe -NoProfile -File tests/Test-PowerToolkit.ps1
 powershell.exe -NoProfile -File tests/Test-DiskUsage.ps1
 pwsh.exe -NoProfile -File tests/Test-DiskUsage.ps1
+powershell.exe -NoProfile -File tests/Test-AdminTools.ps1
+pwsh.exe -NoProfile -File tests/Test-AdminTools.ps1
 ```
 
 Tests cover parsing, source/endpoint parity, invalid input, compatibility gates, open/closed loopback TCP ports, adapter enumeration, localhost DNS, and IEX startup/exit. They require no tenant, elevation, package installation or public network probe. Historical Windows installations still need real-device validation.
@@ -141,3 +168,5 @@ Repair tests mock every modifying command: no real cache flush, renewal, resync 
 Menu tests verify that every action remains reachable, every category returns to the main menu, DNS repair cancellation preserves the yes/no prompt, and unavailable AD repairs are blocked before collecting inputs. Add or reorganize topics through `Get-NetworkCategories`; diagnostics and repairs continue to use their existing dispatchers and checks.
 
 Power tests simulate laptop/desktop firmware, localized plan output, missing plans, confirmation/cancellation, and driver support. All changes are mocked. Read-only power/health provider calls were checked on a Windows desktop; real laptop and NIC modification outcomes still need device validation. Disk tests use isolated temporary files, including a junction loop. Windows PowerShell 5.0 remains targeted but not runtime-tested.
+
+Printing/policy/event tests cover query filters (including level 0), literal message matching, empty vs access-denied results, invalid input, paging/detail navigation, per-printer errors, repair cancellation, spooler state handling and scoped gpupdate arguments. Mutations are mocked. Read-only printer inventory and System event retrieval were smoke-tested locally; real service restart and domain policy processing are not exercised by tests.

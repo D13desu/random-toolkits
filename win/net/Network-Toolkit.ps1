@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.5.0
+# Random Toolkits | Windows Toolkit 0.6.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -111,6 +111,106 @@ function Get-NetworkProxy {
 
 function Get-NetworkFirewall {
     Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction
+}
+
+function Get-PcPrinters {
+    if (Get-Command Get-Printer -ErrorAction SilentlyContinue) {
+        Get-Printer -ErrorAction Stop | Select-Object Name,Type,PrinterStatus,DriverName,PortName,Shared
+    } else {
+        Get-CimInstance Win32_Printer -ErrorAction Stop | Select-Object Name,Default,WorkOffline,PrinterStatus,DriverName,PortName,Shared
+    }
+}
+
+function Get-PcPrintJobs {
+    foreach ($printer in @(Get-Printer -ErrorAction Stop)) {
+        try {
+            $jobs=@(Get-PrintJob -PrinterName $printer.Name -ErrorAction Stop)
+            if ($jobs.Count -eq 0) { [pscustomobject]@{Printer=$printer.Name;Detail='Queue empty'} }
+            foreach ($job in $jobs) { [pscustomobject]@{Printer=$printer.Name;Id=$job.ID;Document=$job.DocumentName;User=$job.UserName;Status=$job.JobStatus;Submitted=$job.SubmittedTime;Size=$job.Size;TotalPages=$job.TotalPages} }
+        } catch { [pscustomobject]@{Printer=$printer.Name;Detail=$_.Exception.Message} }
+    }
+}
+
+function Get-PcEventRecords {
+    [CmdletBinding()]
+    param(
+        [string]$LogName='System',
+        [ValidateRange(1,8760)][int]$Hours=24,
+        [int[]]$Ids=@(),
+        [int[]]$Levels=@(),
+        [string]$Provider,
+        [string]$Text,
+        [ValidateRange(1,1000)][int]$Limit=200
+    )
+    if ([string]::IsNullOrWhiteSpace($LogName) -or $LogName -match '[*?]') { throw 'Enter one exact log name (no wildcards).' }
+    if (@($Ids | Where-Object { $_ -lt 0 -or $_ -gt 65535 }).Count) { throw 'Event IDs must be between 0 and 65535.' }
+    if (@($Levels | Where-Object { $_ -lt 0 -or $_ -gt 5 }).Count) { throw 'Levels must be between 0 and 5.' }
+    $filter=@{LogName=$LogName;StartTime=(Get-Date).AddHours(-$Hours)}
+    if ($Ids.Count) { $filter.Id=$Ids }
+    if ($Levels.Count) { $filter.Level=$Levels }
+    if ($Provider) { $filter.ProviderName=$Provider }
+    try { $records=@(Get-WinEvent -FilterHashtable $filter -MaxEvents $Limit -ErrorAction Stop) }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { return }
+        throw
+    }
+    foreach ($record in $records) {
+        try { $message=[string]$record.Message } catch { $message='[Message unavailable: '+$_.Exception.Message+']' }
+        if ($Text -and $message.IndexOf($Text,[StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        [pscustomobject]@{Time=$record.TimeCreated;Id=$record.Id;Level=$record.LevelDisplayName;Provider=$record.ProviderName;Log=$record.LogName;RecordId=$record.RecordId;Machine=$record.MachineName;Message=$message}
+    }
+}
+
+function ConvertTo-PcEventNumbers {
+    param([string]$Value,[int]$Maximum)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return }
+    foreach ($part in $Value.Split(',')) {
+        $number=0
+        if (-not [int]::TryParse($part.Trim(),[ref]$number) -or $number -lt 0 -or $number -gt $Maximum) { throw "Enter comma-separated integers between 0 and $Maximum." }
+        $number
+    }
+}
+
+function Start-PcEventBrowser {
+    param([string]$DefaultLog='System')
+    $log=Read-Host "Log name [$DefaultLog]"
+    if ([string]::IsNullOrWhiteSpace($log)) { $log=$DefaultLog } else { $log=$log.Trim() }
+    $hours=24; $answer=Read-Host 'Look back hours [24; max 8760]'
+    if ($answer -and (-not [int]::TryParse($answer,[ref]$hours) -or $hours -lt 1 -or $hours -gt 8760)) { throw 'Hours must be 1-8760.' }
+    $ids=@(ConvertTo-PcEventNumbers (Read-Host 'Event IDs, comma-separated [all]') 65535)
+    $levels=@(ConvertTo-PcEventNumbers (Read-Host 'Levels: 0=log always,1=critical,2=error,3=warning,4=information,5=verbose [all]') 5)
+    $provider=Read-Host 'Provider name or wildcard [all]'
+    $text=Read-Host 'Message contains text [any]'
+    $limit=200; $answer=Read-Host 'Maximum recent candidates [200; max 1000]'
+    if ($answer -and (-not [int]::TryParse($answer,[ref]$limit) -or $limit -lt 1 -or $limit -gt 1000)) { throw 'Limit must be 1-1000.' }
+    Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
+    $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
+    if ($events.Count -eq 0) { Write-Host 'No matching events in the queried window/candidate set.'; return }
+    $page=0
+    :events while ($true) {
+        $pages=[math]::Ceiling($events.Count/20.0)
+        Write-Host "`n EVENTS | $log | $($events.Count) results | page $($page+1)/$pages" -ForegroundColor Cyan
+        for ($i=$page*20; $i -lt [math]::Min($events.Count,($page+1)*20); $i++) {
+            $event=$events[$i]
+            Write-Host (' [{0}] {1} | {2} | ID {3} | {4}' -f ($i+1),$event.Time,$event.Level,$event.Id,$event.Provider)
+        }
+        $answer=Read-Host 'Number: full message | N/P: pages | 0: back'
+        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        switch ($answer.Trim().ToUpperInvariant()) {
+            'N' { $page=[math]::Min($pages-1,$page+1); continue events }
+            'P' { $page=[math]::Max(0,$page-1); continue events }
+        }
+        $number=0
+        if ([int]::TryParse($answer,[ref]$number) -and $number -gt 0 -and $number -le $events.Count) { $events[$number-1] | Format-List | Out-Host }
+        else { Write-Warning 'Choose an event number, N, P or 0.' }
+    }
+}
+
+function Get-PcEventLogs {
+    $pattern=Read-Host 'Log name pattern [*]'
+    if ([string]::IsNullOrWhiteSpace($pattern)) { $pattern='*' }
+    # Preserve warnings for inaccessible logs; disabled logs are shown but never enabled automatically.
+    Get-WinEvent -ListLog $pattern -ErrorAction Continue | Sort-Object LogName | Select-Object LogName,IsEnabled,RecordCount,LogMode,MaximumSizeInBytes
 }
 
 function Get-PcPowerPlans {
@@ -328,6 +428,9 @@ function Start-AdMenu { Start-NetworkCategory -Id 'ad' }
 
 function Get-NetworkRepairs {
     @(
+        [pscustomobject]@{Key='7';Id='restart-spooler';Name='Restart / start local Print Spooler';MinPS='5.0';Commands=@('Get-Service','Restart-Service','Start-Service');Admin=$true;Roles=@();Impact='Restarts the local spooler (or starts it if stopped). Interrupts printing and may affect connected clients on a print server. Does not delete spool files or intentionally cancel jobs.'}
+        [pscustomobject]@{Key='8';Id='gp-refresh-user';Name='Refresh current-user Group Policy';MinPS='5.0';Commands=@('gpupdate.exe');Admin=$false;Roles=@();Impact='Requests reapplication of current-user policy. Policy can change settings and run configured extensions/scripts. Uses the current Windows account, which may differ in an elevated session. No automatic reboot/logoff requested.'}
+        [pscustomobject]@{Key='9';Id='gp-refresh-computer';Name='Refresh computer Group Policy';MinPS='5.0';Commands=@('gpupdate.exe');Admin=$true;Roles=@();Impact='Requests reapplication of computer policy. Policy can change machine settings and run configured extensions/scripts. No automatic reboot/logoff requested.'}
         [pscustomobject]@{Key='5'; Id='set-power-plan'; Name='Select an available power plan'; MinPS='5.0'; Commands=@('powercfg.exe'); Admin=$true; Roles=@(); Impact='Changes the active plan for this PC, including its AC/battery sleep and performance settings. High performance may increase battery drain, heat and fan noise. Note the previous plan to switch back.'}
         [pscustomobject]@{Key='6'; Id='nic-awake'; Name='Disable supported NIC sleep settings'; MinPS='5.0'; Commands=@('Get-NetAdapter','Get-NetAdapterPowerManagement','Set-NetAdapterPowerManagement'); Admin=$true; Roles=@(); Impact='Disables supported sleep settings on ONE physical NIC. May increase power use. No automatic NIC restart; a later adapter restart or reboot may be needed. Wake-on-LAN settings are preserved.'}
         [pscustomobject]@{Key='1'; Id='flush-dns'; Name='Flush local DNS cache'; MinPS='5.0'; Commands=@('ipconfig.exe'); Admin=$true; Roles=@(); Impact='Clears cached DNS answers on this PC. Subsequent lookups query DNS again.'}
@@ -401,6 +504,19 @@ function Invoke-NetworkRepair {
     $availability = Get-AdAvailability $entry (Get-AdContext)
     if (-not $availability.Available) { throw $availability.Reason }
     switch ($Id) {
+        'restart-spooler' {
+            $service=Get-Service -Name Spooler -ErrorAction Stop
+            if ($service.Status -eq 'Stopped') { Start-Service -Name Spooler -ErrorAction Stop }
+            else { Restart-Service -Name Spooler -ErrorAction Stop }
+            $service=Get-Service -Name Spooler -ErrorAction Stop
+            $service.WaitForStatus('Running',[timespan]::FromSeconds(15))
+            [pscustomobject]@{Action=$Id;Status='PASS';Detail='Local Print Spooler is running. Recheck queues; this does not prove end-to-end printing works.'}
+        }
+        { $_ -in @('gp-refresh-user','gp-refresh-computer') } {
+            $scope='user'; if ($Id -eq 'gp-refresh-computer') { $scope='computer' }
+            Invoke-AdNative 'gpupdate.exe' @("/target:$scope",'/force','/wait:0')
+            Write-Host 'Policy refresh requested asynchronously. Completion is not verified; check gpresult and GroupPolicy events. Some settings require a later logoff/reboot.' -ForegroundColor Yellow
+        }
         'set-power-plan' {
             $result = Invoke-AdNative 'powercfg.exe' @('/setactive',$selected.Guid)
             $result
@@ -499,6 +615,16 @@ function Invoke-InteractiveRepair {
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
+        [pscustomobject]@{Key='printers';Id='printers';Name='Installed printers and status';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcPrinters}}
+        [pscustomobject]@{Key='print-jobs';Id='print-jobs';Name='Print queues and jobs';MinPS='5.0';Commands=@('Get-Printer','Get-PrintJob');Admin=$false;Action={param($t,$p) Get-PcPrintJobs}}
+        [pscustomobject]@{Key='print-ports';Id='print-ports';Name='Printer ports and drivers';MinPS='5.0';Commands=@('Get-PrinterPort','Get-PrinterDriver');Admin=$false;Action={param($t,$p) Get-PrinterPort -ErrorAction Stop | Select-Object Name,Description,PrinterHostAddress,PortNumber; Get-PrinterDriver -ErrorAction Stop | Select-Object Name,Manufacturer,PrinterEnvironment,MajorVersion}}
+        [pscustomobject]@{Key='spooler';Id='spooler';Name='Print Spooler service';MinPS='5.0';Commands=@('Get-Service');Admin=$false;Action={param($t,$p) Get-Service Spooler -ErrorAction Stop | Select-Object Name,Status,StartType}}
+        [pscustomobject]@{Key='print-events';Id='print-events';Name='Printing event browser';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;Action={param($t,$p) Start-PcEventBrowser 'Microsoft-Windows-PrintService/Admin'}}
+        [pscustomobject]@{Key='gp-user';Id='gp-user';Name='Applied user policy (current account)';MinPS='5.0';Commands=@('gpresult.exe');Admin=$false;Action={param($t,$p) Invoke-AdNative 'gpresult.exe' @('/scope','user','/r')}}
+        [pscustomobject]@{Key='gp-computer';Id='gp-computer';Name='Applied computer policy';MinPS='5.0';Commands=@('gpresult.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'gpresult.exe' @('/scope','computer','/r')}}
+        [pscustomobject]@{Key='gp-events';Id='gp-events';Name='Group Policy event browser';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;Action={param($t,$p) Start-PcEventBrowser 'Microsoft-Windows-GroupPolicy/Operational'}}
+        [pscustomobject]@{Key='event-logs';Id='event-logs';Name='List available logs (name filter)';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;Action={param($t,$p) Get-PcEventLogs}}
+        [pscustomobject]@{Key='event-browser';Id='event-browser';Name='Browse/filter events and full messages';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;Action={param($t,$p) Start-PcEventBrowser}}
         [pscustomobject]@{Key='power';Id='power';Name='Laptop / battery / active power plan';MinPS='5.0';Commands=@('Get-CimInstance','powercfg.exe');Admin=$false;Action={param($t,$p) Get-PcPowerOverview}}
         [pscustomobject]@{Key='nic-power';Id='nic-power';Name='NIC sleep and power-saving settings';MinPS='5.0';Commands=@('Get-NetAdapter','Get-NetAdapterPowerManagement');Admin=$false;Action={param($t,$p) Get-PcNicPower}}
         [pscustomobject]@{Key='sleep';Id='sleep';Name='Sleep states and AC/battery timeouts';MinPS='5.0';Commands=@('powercfg.exe');Admin=$false;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/a'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_SLEEP'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_VIDEO')}}
@@ -554,6 +680,9 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
         [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorer'; Checks=@('disk'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='9';Id='printing';Name='Printing';Checks=@('printers','print-jobs','print-ports','spooler','print-events');AdChecks=@();Repairs=@('restart-spooler')}
+        [pscustomobject]@{Key='10';Id='policy';Name='Group Policy';Checks=@('gp-user','gp-computer','gp-events');AdChecks=@('ad-context');Repairs=@('gp-refresh-user','gp-refresh-computer')}
+        [pscustomobject]@{Key='11';Id='events';Name='Event Logs';Checks=@('event-logs','event-browser');AdChecks=@();Repairs=@()}
     )
 }
 
@@ -660,14 +789,14 @@ function Start-NetworkMenu {
         Write-Host ' WINDOWS TOOLKIT > NETWORK' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
-        foreach ($category in @(Get-NetworkCategories | Where-Object { $_.Id -notin @('power','storage') })) { Write-Host " [$($category.Key)] $($category.Name)" }
+        foreach ($category in @(Get-NetworkCategories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { Write-Host " [$($category.Key)] $($category.Name)" }
         Write-Host "`n [0] Back"
         Write-Host 'Checks and repairs are grouped by topic. Repairs ask before making changes.' -ForegroundColor DarkGray
         $selection = Read-Host 'Select'
         if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
         # Retain the former AD shortcut for existing users.
         if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
-        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() -and $_.Id -notin @('power','storage') } | Select-Object -First 1
+        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() -and $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') } | Select-Object -First 1
         if (-not $category) { Write-Warning 'Unknown selection'; continue }
         Start-NetworkCategory $category.Id
     }
@@ -676,12 +805,15 @@ function Start-NetworkMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.5.0' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.0' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
         Write-Host ' [2] Power and device health - battery, plans, NIC sleep'
         Write-Host ' [3] Storage - drives and folder sizes'
+        Write-Host ' [4] Printing - printers, queues, spooler and events'
+        Write-Host ' [5] Group Policy - results, refresh and events'
+        Write-Host ' [6] Event Logs - filtered CLI viewer'
         Write-Host "`n [0] Exit"
         Write-Host 'Repair options ask before making changes. M365 remains a separate toolkit.' -ForegroundColor DarkGray
         $answer = Read-Host 'Select'
@@ -690,6 +822,9 @@ function Start-WindowsMenu {
             '1' { Start-NetworkMenu }
             '2' { Start-NetworkCategory 'power' }
             '3' { Start-NetworkCategory 'storage' }
+            '4' { Start-NetworkCategory 'printing' }
+            '5' { Start-NetworkCategory 'policy' }
+            '6' { Start-NetworkCategory 'events' }
             default { Write-Warning 'Choose a listed section.' }
         }
     }

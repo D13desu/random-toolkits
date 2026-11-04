@@ -14,13 +14,13 @@ function Write-Host { param($Object,$ForegroundColor) $script:Output.Add([string
 function Write-Warning { param($Message) $script:Output.Add([string]$Message) }
 $script:Answers = New-Object 'System.Collections.Generic.Queue[string]'
 function Read-Host { param($Prompt) if ($script:Answers.Count -eq 0) { throw "Unexpected prompt: $Prompt" }; $script:Output.Add($Prompt); $script:Answers.Dequeue() }
-foreach ($category in @($categories | Where-Object { $_.Id -notin @('power','storage') })) { $script:Answers.Enqueue($category.Key); $script:Answers.Enqueue('0') }
+foreach ($category in @($categories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { $script:Answers.Enqueue($category.Key); $script:Answers.Enqueue('0') }
 $script:Answers.Enqueue('0')
 Start-NetworkMenu
 Assert-True ($script:Answers.Count -eq 0) 'Every network category returns to the network menu'
-foreach ($answer in @('1','0','2','0','3','0','0')) { $script:Answers.Enqueue($answer) }
+foreach ($answer in @('1','0','2','0','3','0','4','0','5','0','6','0','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
-Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates Network, Power and Storage and returns'
+Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates all six sections and returns'
 $script:Output.Clear()
 foreach ($answer in @('3','2','n','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu
