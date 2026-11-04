@@ -338,7 +338,8 @@ function Invoke-NetworkRepair {
     Write-Host "Target: $targetLabel"
     Write-Host $entry.Impact -ForegroundColor Yellow
     if (-not $PSCmdlet.ShouldProcess($targetLabel, $entry.Name)) { return }
-    if ((Read-Host 'Type REPAIR to apply this change, or press Enter to cancel') -cne 'REPAIR') {
+    $confirmation = Read-Host 'Apply this change? [y/N]'
+    if ([string]::IsNullOrWhiteSpace($confirmation) -or $confirmation.Trim() -notmatch '^(y|yes)$') {
         [pscustomobject]@{Action=$Id; Status='CANCELLED'; Detail='No changes made.'}
         return
     }
@@ -403,7 +404,7 @@ function Start-NetworkRepairMenu {
             $availability = Get-AdAvailability $entry $context
             if (-not $availability.Available) { throw $availability.Reason }
             $repairParameters = @{Id=$entry.Id; Confirm=$false}
-            # Dispatcher always requests typed confirmation, even with -Confirm:$false.
+            # Dispatcher always requests yes/no confirmation, even with -Confirm:$false.
             if ($entry.Id -eq 'repair-trust') {
                 $repairParameters.Controller = (Read-Host 'DC hostname [automatic discovery]').Trim()
             }

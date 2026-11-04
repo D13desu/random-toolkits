@@ -7,7 +7,7 @@ function Assert-True($Condition, [string]$Message) {
 # Mock all system-changing operations. No real repair is performed by this suite.
 $script:Role = 'Domain member'
 $script:Elevated = $true
-$script:Answer = 'REPAIR'
+$script:Answer = 'yes'
 $script:Calls = New-Object 'System.Collections.Generic.List[string]'
 function Get-AdContext { [pscustomobject]@{Computer='TEST';Domain='example.test';Role=$script:Role} }
 function Get-NetworkAvailability {
@@ -66,7 +66,18 @@ foreach ($id in @('flush-dns','resync-time','renew-dhcp','repair-trust')) {
     $null = Invoke-NetworkRepair $id -Controller dc.example.test -InterfaceIndex 12 -WhatIf
     Assert-True ($script:Calls.Count -eq 0) "WhatIf leaves system untouched: $id"
 }
-$script:Answer = 'REPAIR'
+foreach ($answer in @('n','no','NO','REPAIR','maybe',' ')) {
+    $script:Answer = $answer
+    $result = Invoke-NetworkRepair flush-dns -Confirm:$false
+    Assert-True ($result.Status -eq 'CANCELLED' -and $script:Calls.Count -eq 0) "Non-yes response cancels: $answer"
+}
+foreach ($answer in @('y','Y','yes','YES',' yes ')) {
+    $script:Answer = $answer
+    $null = Invoke-NetworkRepair flush-dns -Confirm:$false
+    Assert-True ($script:Calls.Count -eq 1) "Yes response accepted: $answer"
+    $script:Calls.Clear()
+}
+$script:Answer = 'yes'
 $null = Invoke-NetworkRepair flush-dns -Confirm:$false
 $null = Invoke-NetworkRepair resync-time -Confirm:$false
 Assert-True (($script:Calls -join '|') -eq 'ipconfig.exe /flushdns|w32tm.exe /resync') 'DNS and time execute only intended commands'
@@ -93,7 +104,7 @@ $script:PostHealthy = $false
 $result = Invoke-NetworkRepair repair-trust -Controller dc.example.test -Confirm:$false
 Assert-True ($result.Status -eq 'WARN') 'Failed post-repair verification is not reported as success'
 $script:Calls.Clear()
-function Read-Host { param($Prompt) $script:Role = 'Domain controller'; 'REPAIR' }
+function Read-Host { param($Prompt) $script:Role = 'Domain controller'; 'yes' }
 $blocked = $false
 try { Invoke-NetworkRepair repair-trust -Controller dc.example.test -Confirm:$false } catch { $blocked = $true }
 Assert-True ($blocked -and $script:Calls.Count -eq 0) 'Role changes during confirmation block repair'

@@ -34,7 +34,7 @@ Each menu entry displays its minimum PowerShell version. Missing commands, incom
 
 ## Repair PC submenu [R]
 
-All repairs require administrator access and an exact `REPAIR` confirmation after displaying the target and effects. Pressing Enter cancels. The underlying `Invoke-NetworkRepair` function supports `-WhatIf`; `-Confirm:$false` does not bypass the typed confirmation. Diagnostics never automatically initiate repairs.
+All repairs require administrator access and an `Apply this change? [y/N]` confirmation after displaying the target and effects. Only `y` or `yes` proceeds (case-insensitive); pressing Enter or any other response cancels. The underlying `Invoke-NetworkRepair` function supports `-WhatIf`; `-Confirm:$false` does not bypass this confirmation. Diagnostics never automatically initiate repairs.
 
 | Repair | Changes and checks |
 | --- | --- |
