@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Toolkit v0.6.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.6.1 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [win/m365](win/m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools
@@ -20,6 +20,8 @@ One entry point: **1 Network**, **2 Power and device health**, **3 Storage**, **
 Printing includes inventory, queues, ports/drivers, spooler status and printing events. Group Policy shows applied user/computer results and policy events. Confirmed fixes can restart/start the local spooler or request a scoped policy refresh. Event Logs offers log discovery and a paginated CLI viewer filtered by time, IDs, severity, provider and message text.
 
 The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
+
+Disk Usage 0.2.0 uses a compiled native Windows metadata scanner, cached navigation, live partial totals and Q-to-stop with partial results. It falls back to PowerShell if compilation is restricted. See its documentation for benchmark methodology and why this is still different from direct MFT scanning.
 
 Repairs appear beside their related checks: DHCP renewal under Connectivity, cache flush under DNS, and trust repair/time resync under Active Directory and time. Repairs require an administrator session and yes/no confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
 
