@@ -1,4 +1,4 @@
-# Windows Toolkit 0.7.3
+# Windows Toolkit 0.7.4
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -67,7 +67,7 @@ Confirmed refresh runs `gpupdate /target:user /force /wait:0` or `/target:comput
 
 ## Event Logs via CLI
 
-List logs using a name pattern, or browse one exact log name. Filters: lookback hours (1-8760), comma-separated IDs (0-65535), levels (0-5), provider name/wildcard, literal case-insensitive message text, and maximum recent candidates (1-1000, default 200). Log/time/ID/level/provider filtering runs in the event service via FilterHashtable. Text filtering runs **after** the candidate cap, so older text matches may be omitted. Results are newest-first, 20 per page; N/P navigates and an event number opens its full message and record ID.
+List logs using a name pattern, or browse one exact log name. Filters: lookback hours (1-8760), comma-separated IDs (0-65535), levels (0-5), provider name/wildcard, literal case-insensitive message text, and maximum recent candidates (1-1000, default 200). Log/time/ID/level/provider filtering runs in the event service via FilterHashtable. Text filtering runs **after** the candidate cap, so older text matches may be omitted. Results are newest-first, up to five per page (fewer in short consoles), with a three-line message preview beneath each event. Arrow keys select events; Enter opens the full message and X shows the cached XML. Line-input hosts retain numbered navigation.
 
 Security and protected logs may require elevation or Event Log Readers membership. Disabled/missing logs and access errors are not treated as empty matches. No logs are cleared or enabled and nothing is exported automatically. Messages may contain sensitive usernames/document names; inspect locally before sharing.
 
@@ -229,3 +229,5 @@ Maintain `win/net/Toolkit-Cleanup.ps1`, then run `tests/Sync-ToolkitCleanup.ps1`
 Windows menu **6: Event Logs** now offers Application, System, Security, Setup, Forwarded Events, Windows PowerShell, PowerShell Operational, Defender, Windows Update, Group Policy and Printing. Selecting a preset immediately displays up to 200 recent events from the last 24 hours, including all levels (Security audit events are not filtered out). Disabled/missing/inaccessible logs report their status without enabling logs or changing permissions.
 
 Inside a log, R refreshes the current query, F opens a filtered child view for that log, an event number displays full details, and N/P pages. B returns to the previous view/menu. Empty results keep the browser available so filters can widen the time window. C in the picker opens a custom exact log name and advanced filters; L lists/searches available logs. Advanced filters retain time, event IDs, levels, provider and literal message search, with a candidate cap of 1000. Message filtering applies after the candidate cap. Security and some operational logs may require elevated access.
+
+Event browsing in 0.7.4 supports Up/Down in both the log picker and event list; selection crosses page boundaries. Enter/Right opens the highlighted item, Left/Esc returns, PageUp/PageDown changes event pages, and Home/End jumps to the first/last item. Event bodies appear inline as up to three wrapped lines, with an ellipsis for longer messages. Full original messages and XML remain unchanged in the detail view (M and X); Enter returns to the same event selection. The XML snapshot is captured with the original event, so opening details does not query a potentially changed log. Unsupported/redirected hosts use typed commands. Preview, selection, cross-page navigation and cached XML tests pass on PowerShell 5.1 and 7.
