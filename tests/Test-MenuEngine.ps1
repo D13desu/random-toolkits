@@ -3,7 +3,8 @@ $ErrorActionPreference='Stop'
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
 $script:Output=New-Object 'Collections.Generic.List[string]'
-function Write-Host {param($Object,$ForegroundColor) $script:Output.Add([string]$Object)}
+function Write-Host {param($Object,$ForegroundColor) $script:Output.Add([string]$Object);if(([string]$Object).StartsWith('    ')){$script:DetailColors.Add([string]$ForegroundColor)}}
+$script:DetailColors=New-Object 'Collections.Generic.List[string]'
 function Write-Warning {param($Message) $script:Output.Add([string]$Message)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 function Feed($Answers){foreach($answer in $Answers){$script:Answers.Enqueue($answer)}}
@@ -60,3 +61,7 @@ $source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -
 $embedded=($source -split '# BEGIN MENU ENGINE',2)[1] -split '# END MENU ENGINE',2
 $module=Get-Content (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded menu engine matches source'
+
+$script:DetailColors.Clear();Feed @('B')
+$null=Show-PcMenu -Title Colors -Items @([pscustomobject]@{Id='one';Label='Selected';Detail=@('path','source')}) -DetailLines 2 -Plain
+Assert (($script:DetailColors -join ',') -eq 'Cyan,Cyan') 'Both description lines share the selected highlight'

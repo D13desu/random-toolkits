@@ -1,4 +1,4 @@
-# Windows Toolkit 0.14.0
+# Windows Toolkit 0.14.1
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -326,3 +326,8 @@ No DNS lookups, outbound probes, process termination or firewall changes are per
 The Windows NetTCPIP cmdlets must be available; missing TCP support is marked unavailable in the menu. UDP collection failure preserves TCP results. PowerShell 5.1 and 7 fixtures cover IPv6 formatting, duplicate endpoint tuples, stale process IDs, unavailable metadata, partial collection and keyboard/filter/refresh navigation. Live loopback tests verified listening/established TCP and bound UDP with the correct owning PID on both shells.
 
 Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` to update the embedded launcher and Pages copies. Sources: [Microsoft Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection) and [Get-NetUDPEndpoint](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netudpendpoint).
+
+
+### Navigation adjustment (0.14.1)
+
+Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
