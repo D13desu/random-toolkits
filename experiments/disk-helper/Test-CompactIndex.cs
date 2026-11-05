@@ -10,6 +10,33 @@ internal static class CompactIndexTest {
   Assert(a.Name==b.Name && a.Path==b.Path && a.Kind==b.Kind && a.ReparseTag==b.ReparseTag && a.Bytes==b.Bytes &&
    a.Allocated==b.Allocated && a.Partial==b.Partial && a.AllocationUnknown==b.AllocationUnknown,"Page row differs from source cache.");
  }
+ static long Metric(Scan scan,string name){object snapshot=scan.Accounting.Snapshot(scan);return Convert.ToInt64(snapshot.GetType().GetProperty(name).GetValue(snapshot,null));}
+ static MftRecord AccountingRecord(ulong reference,string name,ulong parent,bool directory,long bytes,long allocated,bool known){
+  var record=new MftRecord {Reference=reference,Directory=directory,HasData=!directory,HasStandardInformation=true,Bytes=bytes,Allocated=allocated,AllocationKnown=known,AllocationIssue="fixture unknown"};
+  record.Names.Add(new MftName {Name=name,Parent=parent});return record;
+ }
+ static Scan AccountingBuild(params MftRecord[] records){try {ScanProfile.Current=new ScanProfile {UseDirectRows=true,UseCompactFolders=true,UseLazyPaths=true};return MftScanner.Build(@"Z:\",records,false);}finally{ScanProfile.Current=null;}}
+ static void Accounting(){
+  var root=AccountingRecord(5,".",5,true,0,0,true);
+  var file=AccountingRecord(100,"z.bin",5,false,100,4096,true);file.Names.Add(new MftName {Parent=5,Name="a.bin"});file.LinkCountMismatch=true;
+  var info=AccountingBuild(root,file);
+  Assert(!info.Nodes[info.Root].Partial && info.IssueCount==1 && Metric(info,"informationalDiagnostics")==1 && Metric(info,"problemDiagnostics")==0,"Included information incorrectly marks totals partial.");
+  Assert(Metric(info,"uniqueFiles")==1 && Metric(info,"fileEntries")==2 && Metric(info,"additionalLinks")==1 && Metric(info,"uniqueLogical")==100 && Metric(info,"logicalAcrossLinks")==200,"Hard-link accounting totals are wrong.");
+  var index=new CompactIndex(info,info.DirectRows);int rootId;index.Find(info.Root,out rootId);var order=index.Sort(rootId,"name");var rows=index.Page(rootId,order,0,order.Length);
+  Assert(!index.GetFolder(rootId).Partial && rows[1].Kind=="LINK" && rows[1].Bytes==0 && rows[1].Allocated==0,"Information/expanded logical total changed charged browsing rows.");
+  var duplicate=AccountingRecord(101,"a.bin",5,false,500,8192,true);var collision=AccountingBuild(root,file,duplicate);
+  Assert(collision.Nodes[collision.Root].Partial && Metric(collision,"fileEntries")==2 && Metric(collision,"logicalAcrossLinks")==200,"Rejected duplicate entered accounting or lost partial flag.");
+  var mft=AccountingRecord(0,"$MFT",5,false,8192,8192,true);var extend=AccountingRecord(11,"$Extend",5,true,0,128,false);
+  var metadataDir=AccountingRecord(40,"$RmMetadata",11,true,0,64,true);var log=AccountingRecord(41,"log",40,false,100,1024,true);var unknown=AccountingRecord(42,"unknown",40,false,100,256,false);
+  var badClusters=AccountingRecord(8,"$BadClus",5,false,999010856960L,999010856960L,true);
+  var metadata=AccountingBuild(root,mft,mft,extend,badClusters,metadataDir,log,unknown,file);
+  Assert(Metric(metadata,"coreMetadataRecords")==4 && Metric(metadata,"coreKnownDataAllocation")==8320 && Metric(metadata,"coreUnknownAllocations")==2,"Core metadata is duplicated, hides unknown allocation, or counts the bad-cluster span as used space.");
+  Assert(Metric(metadata,"excludedMetadataFiles")==2 && Metric(metadata,"excludedMetadataDirectories")==1 && Metric(metadata,"excludedKnownDataAllocation")==1344 && Metric(metadata,"excludedUnknownAllocations")==1,"Excluded metadata tree accounting is wrong.");
+  Assert(metadata.Nodes[metadata.Root].Bytes==100 && metadata.Nodes[metadata.Root].Allocated==4096 && metadata.Nodes[metadata.Root].Partial && Metric(metadata,"metadataExclusionDiagnostics")==3,"Metadata entered user totals or lost exclusion flags.");
+  var uncertain=AccountingBuild(root,AccountingRecord(200,"uncertain",5,false,50,256,false));
+  Assert(uncertain.Nodes[uncertain.Root].Partial && uncertain.Nodes[uncertain.Root].AllocationUnknown && Metric(uncertain,"problemDiagnostics")==1,"User allocation uncertainty was classified as information.");
+  Console.WriteLine("PASS: unique/path logical totals, zero-charge links, duplicate rejection, informational-only completeness, metadata deduplication/lower bounds and real uncertainty flags.");
+ }
  static void FolderBlocks(){
   const int count=4205;var records=new List<MftRecord>();
   records.Add(new MftRecord {Reference=5,Directory=true});
@@ -107,6 +134,6 @@ internal static class CompactIndexTest {
   }
   direct.Rows.ForcePartial=true;var partial=new CompactIndex(scan,direct);int partialId;partial.Find(scan.Root+"folder-39",out partialId);
   int[] partialOrder=partial.Sort(partialId,"name");foreach(var row in partial.Page(partialId,partialOrder,0,partialOrder.Length))Assert(row.Partial,"Late partial flag lost.");
-  Console.WriteLine("PASS: legacy and direct caches, "+total+" rows, 41 folders, three sort orders, block boundaries, duplicates, late partial flags and all pages/metadata/parents match.");FolderBlocks();PathCache();return 0;
+  Console.WriteLine("PASS: legacy and direct caches, "+total+" rows, 41 folders, three sort orders, block boundaries, duplicates, late partial flags and all pages/metadata/parents match.");FolderBlocks();PathCache();Accounting();return 0;
  }
 }

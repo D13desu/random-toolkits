@@ -75,7 +75,7 @@ namespace RandomToolkits.HelperExperiment {
    for(int id=Folders.Count-1;id>0;id--){var child=Folders.Get(id);if(child.Parent<0 || child.Parent>=id)throw new InvalidOperationException("Invalid compact parent order.");var parent=Folders.Get(child.Parent);
     parent.Logical=checked(parent.Logical+child.Logical);parent.Allocated=checked(parent.Allocated+child.Allocated);parent.Files=checked(parent.Files+child.Files);parent.Unknown|=child.Unknown;Folders.Set(child.Parent,parent);
    }
-   Folders.ForcePartial=scan.IssueCount>0;
+   Folders.ForcePartial=ScanAccounting.HasIncompleteTotals(scan);
    for(int id=1;id<Folders.Count;id++){var folder=Folders.Get(id);Add(folder.Parent,Lazy!=null?Lazy.Name(id):Path.GetFileName(Paths[id]),"DIR",folder.Logical,folder.Allocated,folder.Unknown,folder.Partial,folderTags[id]);}
    folderTags=null;
    var totals=Folders.Get(0);var root=scan.Nodes[scan.Root];root.Bytes=totals.Logical;root.Allocated=totals.Allocated;root.Files=totals.Files;root.AllocationUnknown=totals.Unknown;root.Partial=totals.Partial;

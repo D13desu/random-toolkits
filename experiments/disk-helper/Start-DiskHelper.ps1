@@ -8,6 +8,22 @@ function Format-HelperBytes($Bytes) {
     $value=[double]$Bytes
     foreach($unit in @('B','KiB','MiB','GiB','TiB','PiB')){if([math]::Abs($value) -lt 1024 -or $unit -eq 'PiB'){return ('{0:N1} {1}' -f $value,$unit)};$value/=1024}
 }
+function Show-HelperAccounting($Summary) {
+    $a=$Summary.accounting
+    if($null -eq $a){Write-Host 'Accounting comparison is available for MFT scans.';return}
+    Write-Host ("`nVOLUME ACCOUNTING | {0}" -f $Summary.root) -ForegroundColor Cyan
+    Write-Host ('Unique included files: {0:N0} | Additional hard-link paths: {1:N0} | Included file entries: {2:N0}' -f $a.uniqueFiles,$a.additionalLinks,$a.fileEntries)
+    Write-Host ('Unique logical bytes: {0:N0} ({1})' -f $a.uniqueLogical,(Format-HelperBytes $a.uniqueLogical))
+    Write-Host ('Logical bytes across all included file paths: {0:N0} ({1})' -f $a.logicalAcrossLinks,(Format-HelperBytes $a.logicalAcrossLinks))
+    Write-Host 'LINK rows remain zero charged bytes. The path total above repeats each linked file size; it is not physical disk usage.'
+    Write-Host ('Included-file information: {0:N0} | Metadata exclusion diagnostics: {1:N0} | Other problems/uncertainties: {2:N0}' -f $a.informationalDiagnostics,$a.metadataExclusionDiagnostics,$a.problemDiagnostics)
+    Write-Host ('Observed core NTFS records (<16): {0:N0} | Known DATA allocation: {1:N0} bytes ({2}) | Unknown/incomplete: {3:N0}' -f $a.coreMetadataRecords,$a.coreKnownDataAllocation,(Format-HelperBytes $a.coreKnownDataAllocation),$a.coreUnknownAllocations)
+    Write-Host ('Excluded metadata tree: {0:N0} files, {1:N0} directories | Known DATA allocation: {2:N0} bytes ({3}) | Unknown/incomplete: {4:N0}' -f $a.excludedMetadataFiles,$a.excludedMetadataDirectories,$a.excludedKnownDataAllocation,(Format-HelperBytes $a.excludedKnownDataAllocation),$a.excludedUnknownAllocations)
+    Write-Host 'Metadata figures are separate, non-additive observations: resident-file slots can overlap $MFT allocation. Non-DATA metadata is not fully measured; unknown values are lower bounds.' -ForegroundColor Yellow
+    Write-Host '$BadClus allocation is unmeasured until its cluster mappings are validated; its header size is not counted as used space.'
+    Write-Host 'The difference from volume-used bytes is not a measured NTFS-overhead total. Live scans and other tools may use different accounting rules.'
+    $a.metadataSamples | Select-Object group,record,sequence,name,directory,knownDataAllocation,allocationUnknown | Format-Table -AutoSize | Out-Host
+}
 $session=$null
 try {
     $session=Start-DiskHelper (Join-Path $HelperDirectory 'DiskHelper.exe') (Join-Path $HelperDirectory 'manifest.json')
@@ -51,7 +67,7 @@ try {
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
             Write-Host (' [{0,2}] {1,14} | {2,12} | {3,-4} {4}' -f ($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name)
         }
-        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | T: timings | 0: exit' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
+        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | A: accounting | T: timings | 0: exit' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
         $choice=Read-Host 'Select';$number=0
         switch($choice.ToUpperInvariant()){
             '0'{return}
@@ -61,11 +77,14 @@ try {
             'S'{$sort=switch($sort){'allocated'{'logical'}'logical'{'name'}default{if($Engine -eq 'mft'){'allocated'}else{'logical'}}};$offset=0}
             'E'{
                 $issues=Invoke-DiskHelper $session @{command='issues';limit=100}
-                Write-Host 'Diagnostics include warnings on counted files; not every diagnostic is an omission.'
-                $issues.causes.PSObject.Properties | ForEach-Object {[pscustomobject]@{Cause=$_.Name;Count=$_.Value}} | Format-Table | Out-Host
+                Write-Host 'Included-file information does not mark totals PARTIAL. Metadata exclusions and other incomplete results remain flagged. A shows volume accounting.'
+                if($summary.accounting -and $summary.accounting.problemDiagnostics -eq 0 -and $summary.accounting.metadataExclusionDiagnostics -gt 0){Write-Host 'The remaining PARTIAL flag is from intentional metadata exclusions.'}
+                if($summary.accounting){$summary.accounting.categories | Select-Object cause,count,kind | Format-Table -AutoSize | Out-Host}
+                else {$issues.causes.PSObject.Properties | ForEach-Object {[pscustomobject]@{Cause=$_.Name;Count=$_.Value}} | Format-Table | Out-Host}
                 $issues.rows | Format-List Path,Reason,Category | Out-Host
                 $null=Read-Host 'Enter to return'
             }
+            'A'{Show-HelperAccounting $summary;$null=Read-Host 'Enter to return'}
             'T'{
                 $profile=Invoke-DiskHelper $session @{command='profile'}
                 if($null -eq $profile.scan){Write-Host 'Phase profiling is available for MFT scans.'}

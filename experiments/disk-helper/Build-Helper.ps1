@@ -20,11 +20,11 @@ $output=[IO.Path]::GetFullPath($OutputDirectory);$null=[IO.Directory]::CreateDir
 $enginePath=Join-Path $output 'Engine.generated.cs'
 [IO.File]::WriteAllText($enginePath,$engine,[Text.UTF8Encoding]::new($false))
 $exe=Join-Path $output 'DiskHelper.exe'
-$sources=@($enginePath,(Join-Path $PSScriptRoot 'Program.cs'),(Join-Path $PSScriptRoot 'CompactIndex.cs'),(Join-Path $PSScriptRoot 'ScanProfile.cs'),(Join-Path $PSScriptRoot 'DirectRows.cs'),(Join-Path $PSScriptRoot 'DirectoryPaths.cs'))
+$sources=@($enginePath,(Join-Path $PSScriptRoot 'Program.cs'),(Join-Path $PSScriptRoot 'CompactIndex.cs'),(Join-Path $PSScriptRoot 'ScanProfile.cs'),(Join-Path $PSScriptRoot 'DirectRows.cs'),(Join-Path $PSScriptRoot 'DirectoryPaths.cs'),(Join-Path $PSScriptRoot 'ScanAccounting.cs'))
 if(-not $BaselineStorage){$sources+=Join-Path $PSScriptRoot 'MftNames.cs'}
 $defines=if($LegacyRows -or $BaselineStorage){'/define:LEGACY_ROWS'}elseif($LegacyFolders){'/define:DIRECT_ROWS'}elseif($LegacyPaths){'/define:DIRECT_ROWS,COMPACT_FOLDERS'}else{'/define:DIRECT_ROWS,COMPACT_FOLDERS,LAZY_PATHS'}
 & $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output $defines ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $sources
 if($LASTEXITCODE -ne 0){throw 'Helper compilation failed.'}
-$manifest=[ordered]@{Version='0.6.0-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}elseif($LegacyRows){'inline names, released records'}elseif($LegacyFolders){'direct compact rows, inline names, released records'}elseif($LegacyPaths){'compact folders, direct rows, retained paths'}else{'on-demand paths, compact folders, direct rows'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
+$manifest=[ordered]@{Version='0.7.0-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}elseif($LegacyRows){'inline names, released records'}elseif($LegacyFolders){'direct compact rows, inline names, released records'}elseif($LegacyPaths){'compact folders, direct rows, retained paths'}else{'on-demand paths, compact folders, direct rows'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'manifest.json') -Encoding UTF8
 [pscustomobject]@{Executable=$exe;Manifest=(Join-Path $output 'manifest.json');Bytes=(Get-Item $exe).Length}

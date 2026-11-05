@@ -9,7 +9,7 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.6.0-experiment";
+  const string Version="0.7.0-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -53,7 +53,7 @@ namespace RandomToolkits.HelperExperiment {
     partial=root.Partial,cancelled=scan.Cancelled,diagnostics=scan.IssueCount,causes=scan.IssueCounts,
     omittedFiles=scan.MftOmittedFiles,omittedDirectories=scan.MftOmittedDirectories,parseErrors=scan.MftRecordErrors,
     unknownAllocations=scan.MftUnknownAllocations,apiVerified=scan.MftApiVerified,records=scan.MftRecordsRead,
-    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds};
+    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds,accounting=allocated && scan.Accounting!=null?scan.Accounting.Snapshot(scan):null};
   }
   static object Status() {
    Finish();

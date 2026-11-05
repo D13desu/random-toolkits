@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.6.0
+# Standalone disk helper experiment 0.7.0
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -59,6 +59,18 @@ UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper e
 Requests are limited to 64 KiB. Only paths in the cached scan can be browsed. All MFT file rows stay in C# memory; native mode caches the current directory listing. No write/delete/repair command exists.
 
 ## Validation and measured limits
+
+### 0.7.0: explicit accounting and diagnostic categories
+
+Press **A** for volume-wide accounting: unique included files, additional hard-link paths, total included file entries, unique logical bytes and logical bytes summed across included paths. Duplicate/rejected paths and excluded files do not enter these counters. LINK rows still have zero charged bytes/allocation; the expanded logical figure is a comparison metric, not physical disk usage.
+
+The report separately measures known DATA allocation in observed core NTFS records (record indexes below 16) and in the excluded metadata tree. Records are deduplicated by their full sequence-bearing reference. Unknown/incomplete allocation counts and sampled records accompany both groups. Known portions are lower bounds when streams are incomplete. Non-DATA structures are not fully measured, and these figures must not simply be added to user allocation: resident-file slots can overlap the allocation of $MFT. Neither the metadata report nor the volume-used difference is a complete NTFS-overhead measurement.
+
+$BadClus is explicitly unmeasured and its header allocation is excluded from the known sum. The live test exposed a header value spanning nearly the entire volume; the bad-cluster map needs separate mapping validation before physical allocation can be reported. See Microsoft's [MFT developer notes](https://learn.microsoft.com/en-us/windows/win32/devnotes/master-file-table) and the [Linux NTFS3 implementation](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/69050f8d6d075dc01af7a5f2f550a8067510366f/fs/ntfs3/super.c) for the special stream and mapped-run accounting.
+
+**E** labels included-file information, metadata exclusions, allocation uncertainty and other problems separately. IncludedLinkCountMismatch remains visible and counted but does not set PARTIAL by itself. Exclusions, unknown allocations, cancellation and parse failures retain partial flags. Tests cover information-only completeness, immutable zero-charge LINK rows, duplicate rejection, expanded logical totals, metadata deduplication, lower bounds and genuine uncertainty.
+
+The final elevated C: comparison passed the immutable hard-link fixture against the production engine. It reported 2,949,999 unique files, 440,665 additional paths and 3,390,664 total file entries, with zero parse errors. Unique logical bytes were 988,496,494,254 versus 1,082,989,301,103 across included paths. Early and reconstruction-stage cancellation both passed. These live results validate the report on this PC; they do not establish equality with another tool or explain every allocation difference.
 
 ### 0.6.0: directory paths on demand
 

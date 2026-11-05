@@ -67,5 +67,12 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
     $Source=Replace-One $Source 'direct.Ids.ContainsKey(path)' 'direct.ContainsPath(path)'
     $Source=Replace-One $Source 'paths.Add(r.Reference,path); if(direct==null || !direct.CompactFolders)' 'if(direct==null || !direct.CompactFolders)'
     $Source=Replace-One $Source 'direct.SetMetadata(path,r.Allocated,!r.AllocationKnown,r.Reparse?Tag(r):null);}' 'direct.SetMetadata(path,r.Allocated,!r.AllocationKnown,r.Reparse?Tag(r):null);} paths.Add(r.Reference,path);'
+    $prefix=Replace-One $prefix 'internal RandomToolkits.HelperExperiment.DirectRows DirectRows;' 'internal RandomToolkits.HelperExperiment.ScanAccounting Accounting; internal RandomToolkits.HelperExperiment.DirectRows DirectRows;'
+    $Source=Replace-One $Source 'Scan s=new Scan {Root=root,Engine="Experimental NTFS MFT records",Cancelled=cancelled};' 'Scan s=new Scan {Root=root,Engine="Experimental NTFS MFT records",Cancelled=cancelled}; s.Accounting=new RandomToolkits.HelperExperiment.ScanAccounting(); foreach(MftRecord core in records)if(core!=null && (core.Reference&IndexMask)<16)s.Accounting.Metadata(core,true);'
+    $Source=Replace-One $Source 'scan.IssueCount++; scan.Nodes[scan.Root].Partial=true;' 'scan.IssueCount++; if(category!="IncludedLinkCountMismatch")scan.Nodes[scan.Root].Partial=true;'
+    $Source=Replace-One $Source 'if(s.IssueCount>0) foreach(Node n in s.Nodes.Values) n.Partial=true;' 'if(RandomToolkits.HelperExperiment.ScanAccounting.HasIncompleteTotals(s)) foreach(Node n in s.Nodes.Values) n.Partial=true;'
+    $Source=Replace-One $Source 'blocked[start.Reference]=failure;s.MftOmittedDirectories++;' 'blocked[start.Reference]=failure;s.MftOmittedDirectories++;if(failure.Category=="DirectorySystemMetadata")s.Accounting.Metadata(start,false);'
+    $Source=Replace-One $Source 'if(names.Count==0 && linkFailure!=null && metadataOnly) {s.MftOmittedFiles++;' 'if(names.Count==0 && linkFailure!=null && metadataOnly) {s.Accounting.Metadata(r,false);s.MftOmittedFiles++;'
+    $Source=Replace-One $Source 'charged=true;' 's.Accounting.IncludePath(r.Bytes,charged);charged=true;'
     return $prefix+$Source+$suffix
 }
