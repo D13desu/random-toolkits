@@ -50,3 +50,7 @@ Assert-True ($script:Answers.Count -eq 0) 'Both disk tools return directly to St
 foreach ($answer in @('8','B','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
 Assert-True ($script:Answers.Count -eq 0) 'Cleanup is reachable and returns to the Windows menu without deleting'
+function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@{CollectedAt=(Get-Date);Rows=@((New-PcHealthFinding INFO 'Fixture' 'Test dashboard' power))}}
+foreach ($answer in @('9','B','0')) { $script:Answers.Enqueue($answer) }
+Start-WindowsMenu
+Assert-True ($script:Answers.Count -eq 0) 'Health dashboard is reachable and returns to Windows menu'
