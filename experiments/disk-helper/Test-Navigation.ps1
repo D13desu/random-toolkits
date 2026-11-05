@@ -5,7 +5,7 @@ $null=[IO.Directory]::CreateDirectory((Join-Path $root 'child'))
 $global:HelperNavigationAnswers=New-Object 'System.Collections.Generic.Queue[string]'
 # First scan: enter child, back to root, inspect views, back to drives.
 # Second scan: select the same fixture, return to drives, then caller.
-foreach($answer in @('@DOWN','@UP','@ENTER','b','A','','E','','T','','b',$root,'0','b')){$global:HelperNavigationAnswers.Enqueue($answer)}
+foreach($answer in @('@DOWN','@UP','@ENTER','b','H','@DOWN','@UP','@ENTER','','H','2','','H','3','','H','B','b',$root,'0','b')){$global:HelperNavigationAnswers.Enqueue($answer)}
 $global:HelperNavigationDrivePrompts=0
 function Read-Host {
  param($Prompt)

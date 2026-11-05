@@ -23,7 +23,8 @@ function Show-HelperAccounting($Summary) {
     Write-Host ('Excluded metadata tree: {0:N0} files, {1:N0} directories | Known DATA allocation: {2:N0} bytes ({3}) | Unknown/incomplete: {4:N0}' -f $a.excludedMetadataFiles,$a.excludedMetadataDirectories,$a.excludedKnownDataAllocation,(Format-HelperBytes $a.excludedKnownDataAllocation),$a.excludedUnknownAllocations)
     Write-Host 'Metadata figures are separate, non-additive observations: resident-file slots can overlap $MFT allocation. Non-DATA metadata is not fully measured; unknown values are lower bounds.' -ForegroundColor Yellow
     Write-Host '$BadClus allocation is unmeasured until its cluster mappings are validated; its header size is not counted as used space.'
-    Write-Host 'The difference from volume-used bytes is not a measured NTFS-overhead total. Live scans and other tools may use different accounting rules.'
+    Write-Host ('Volume-wide unreconciled allocation: {0} ({1:N0} bytes)' -f (Format-HelperBytes ($Summary.volumeUsed-$Summary.allocated)),($Summary.volumeUsed-$Summary.allocated))
+    Write-Host 'This is volume-used minus included-file allocation, not a missing-file total or measured NTFS overhead. Metadata observations above are not additive; live scans and other tools may use different accounting rules.'
     $a.metadataSamples | Select-Object group,record,sequence,name,directory,knownDataAllocation,allocationUnknown | Format-Table -AutoSize | Out-Host
 }
 :drives while ($true) {
@@ -67,9 +68,9 @@ try {
         Write-Host ("`nDISK HELPER {0} | {1}" -f $session.Hello.version,$page.path) -ForegroundColor Cyan
         Write-Host ('On disk: {0} | Logical: {1} | Files: {2:N0} | Scan: {3:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$page.files,$summary.seconds)
         Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
-        if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; E shows diagnostics.' -ForegroundColor Yellow}
+        if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
         if($Engine -eq 'mft'){
-            Write-Host ('Volume used: {0} | Accounted DATA: {1} | Difference: {2}' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))
+            if($current -eq $summary.root){Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
             Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
         }
         $rows=@($page.rows)
@@ -80,9 +81,13 @@ try {
             $color=if($i -eq $selected){'Cyan'}else{'Gray'}
             Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-4} {5}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name) -ForegroundColor $color
         }
-        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | A: accounting | T: timings | B: back (parent/drives) | 0: drives' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
-        if($keyboard){Write-Host 'Up/Down: select | Enter/Right: enter folder | Left/Backspace: back | Ctrl+Enter / O: Explorer | digits + Enter: folder'}
+        Write-Host ('Page {0}/{1} | Sort: {2}' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
+        if($keyboard){
+            Write-Host 'Up/Down: select | Enter: open | Left/Esc: back | Ctrl+Enter: Explorer'
+            Write-Host 'PgUp/PgDn: pages | S: sort | F1: reports'
+        }else{Write-Host 'Number: folder | B: back | N/P: pages | S: sort | O: Explorer | H: reports | 0: drives'}
         $choice=Read-HelperChoice $keyboard;$number=0
+        if($choice -in @('@REPORTS','H')){$choice=Read-HelperReport $keyboard}
         switch(([string]$choice).Trim().ToUpperInvariant()){
             '@UP'{if($selected -gt 0){$selected--}elseif($offset -gt 0){$offset=[math]::Max(0,$offset-20)}}
             '@DOWN'{if($selected+1 -lt $rows.Count){$selected++}elseif($offset+20 -lt $page.total){$offset+=20}}

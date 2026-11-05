@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.8.0
+# Standalone disk helper experiment 0.8.1
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -169,5 +169,7 @@ These are sequential live-volume samples, not a controlled speed benchmark or pe
 
 Tests: Test-Helper.ps1 (non-admin protocol), Test-Engine.ps1 (non-admin shared MFT regressions against the built helper), Test-CompactIndex.ps1 (non-admin cache equivalence), Test-MftCancel.ps1 (admin, cancellation after real MFT progress), Compare-Helper.ps1 (admin, helper then embedded full-volume comparison), Measure-Memory.ps1 (admin, full MFT scan, phase samples and memory collection with unchanged root-page assertion). Validation writes only build output, isolated TEMP fixtures and requested report files. Reports can contain local paths and should stay local.
 
-### Keyboard browsing (0.8.0)
+### Keyboard browsing (0.8.1)
 In an interactive console, Up/Down selects a row; Enter or Right enters a directory. Left, Backspace or Escape goes back. PageUp/PageDown changes pages. Ctrl+Enter (or O) opens the selected directory in Explorer; with a file selected it opens the current directory. Missing/inaccessible paths report an error. Existing commands remain available, including numbers followed by Enter. Redirected or unsupported hosts retain line input. The scanner remains read-only; Explorer is a separate Windows application.
+
+Version 0.8.1 groups accounting, diagnostics and timing under F1: Reports (H with line input), with arrow/Enter selection. The browser shows compact navigation hints; legacy commands remain accepted. The root-only Unreconciled figure is volume-used minus included-file allocation, not missing files or a measured overhead total. Reports retain the exact difference and non-additive metadata caveats.

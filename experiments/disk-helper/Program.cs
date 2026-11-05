@@ -9,7 +9,7 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.8.0-experiment";
+  const string Version="0.8.1-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
