@@ -1,4 +1,4 @@
-# Windows Toolkit 0.6.4
+# Windows Toolkit 0.6.5
 
 Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
@@ -29,6 +29,12 @@ The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **
 | 6 Firewall | Firewall profiles | None |
 
 `0` returns from a submenu or exits the main menu. Unavailable actions remain visible with the reason underneath. Repair entries are yellow and marked `CHANGES SYSTEM`; minimum PowerShell and administrator requirements remain visible. The old `A` shortcut still opens Active Directory. Noninteractive check IDs are unchanged.
+
+## Storage
+
+**1** opens production Disk Usage 0.4.4. **2** opens experimental C# Disk Helper 0.6.0 in MFT mode. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
+
+The helper downloads from a pinned GitHub release, with the ZIP's SHA-256 checked before extraction. Its client verifies the executable hash and version handshake. It runs from an isolated temporary directory that is removed on exit. No separate `irm` command or permanent installation is required. The noninteractive action ID is `disk-helper`.
 
 ## Power and device health
 

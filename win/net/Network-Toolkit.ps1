@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.6.4
+# Random Toolkits | Windows Toolkit 0.6.5
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -380,6 +380,48 @@ function Start-PcDiskExplorer {
     } finally { if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force } }
 }
 
+function Get-PcDiskHelperRuntimeReason {
+    $framework=Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue
+    if (-not $framework -or [int]$framework.Release -lt 378675) { return 'Requires .NET Framework 4.5.1+ (full Windows runtime)' }
+}
+
+function Get-PcDiskHelperPackage {
+    [pscustomobject]@{
+        Version='0.6.0-experiment'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.6.0/DiskHelper-0.6.0-experiment.zip'
+        Sha256='E09D7D139E59CB7F2B50E58AA621C28E64E81435B00FB7F04F0119943B7390B5'
+    }
+}
+
+function Start-PcDiskHelper {
+    $entry=Get-NetworkChecks | Where-Object Id -eq 'disk-helper' | Select-Object -First 1
+    $availability=Get-NetworkAvailability $entry
+    if (-not $availability.Available) { throw $availability.Reason }
+    $package=Get-PcDiskHelperPackage
+    $temp=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    $work=[IO.Path]::GetFullPath((Join-Path $temp ('toolkit-helper-'+[guid]::NewGuid().ToString('N'))))
+    $null=[IO.Directory]::CreateDirectory($work)
+    try {
+        $archive=Join-Path $work 'helper.zip'
+        Write-Host "Downloading verified experimental Disk Helper $($package.Version)..."
+        Invoke-WebRequest -UseBasicParsing -Uri $package.Uri -OutFile $archive -TimeoutSec 60 -ErrorAction Stop
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $package.Sha256) { throw 'Disk helper package checksum mismatch. Nothing extracted or executed.' }
+        $unpacked=Join-Path $work 'package'
+        Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -ErrorAction Stop
+        $runner=Join-Path $unpacked 'Start-DiskHelper.ps1'
+        $manifest=Get-Content -LiteralPath (Join-Path $unpacked 'out/manifest.json') -Raw | ConvertFrom-Json
+        if ($manifest.Version -ne $package.Version -or -not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'Unexpected disk helper package layout or version.' }
+        # The packaged client also verifies the executable hash and version handshake.
+        & $runner -HelperDirectory (Join-Path $unpacked 'out') -Engine mft
+    } finally {
+        # Delete only this invocation's GUID directory beneath the resolved TEMP root.
+        $resolved=[IO.Path]::GetFullPath($work)
+        if ($resolved.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^toolkit-helper-[0-9a-f]{32}$') {
+            if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
 function Get-AdContext {
     try {
         $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
@@ -731,6 +773,7 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
         [pscustomobject]@{Key='disk';Id='disk';Name='Open disk usage explorer (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.6.0 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -750,6 +793,7 @@ function Get-NetworkAvailability {
     param($Entry, [version]$Version = $PSVersionTable.PSVersion)
     $reasons = @()
     if ($Version -lt [version]$Entry.MinPS) { $reasons += "Requires PowerShell $($Entry.MinPS)+" }
+    if ($Entry.Id -eq 'disk-helper') { $runtimeReason=Get-PcDiskHelperRuntimeReason; if ($runtimeReason) { $reasons += $runtimeReason } }
     foreach ($command in $Entry.Commands) {
         if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { $reasons += "Missing $command" }
     }
@@ -779,7 +823,7 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
-        [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorer'; Checks=@('disk'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorers'; Checks=@('disk','disk-helper'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='9';Id='printing';Name='Printing';Checks=@('printers','print-jobs','print-ports','spooler','print-events');AdChecks=@();Repairs=@('restart-spooler')}
         [pscustomobject]@{Key='10';Id='policy';Name='Group Policy';Checks=@('gp-user','gp-computer','gp-events');AdChecks=@('ad-context');Repairs=@('gp-refresh-user','gp-refresh-computer')}
         [pscustomobject]@{Key='11';Id='events';Name='Event Logs';Checks=@('event-logs','event-browser');AdChecks=@();Repairs=@()}
@@ -905,7 +949,7 @@ function Start-NetworkMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.4' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.5' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
