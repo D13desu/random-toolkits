@@ -2053,7 +2053,7 @@ function Start-WindowsMenu {
     $state=@{}
     while ($true) {
         $menu=@(
-            New-PcMenuItem '9' 'Health dashboard' 'Menu' 'Start here'
+            New-PcMenuItem '9' 'Health dashboard' 'Menu'
             New-PcMenuItem '1' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
             New-PcMenuItem '2' 'Power and device health'
             New-PcMenuItem '3' 'Storage'
@@ -2066,7 +2066,7 @@ function Start-WindowsMenu {
             New-PcMenuItem '11' 'Services'
             New-PcMenuItem '12' 'Windows repair centre'
         )
-        $answer=Read-PcCategoryMenu 'Windows' $menu $state 'M365 remains separate. Back exits the toolkit.'
+        $answer=Read-PcCategoryMenu 'Windows' $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-NetworkMenu }
