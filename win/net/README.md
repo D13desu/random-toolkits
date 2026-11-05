@@ -1,4 +1,4 @@
-# Windows Toolkit 0.14.2
+# Windows Toolkit 0.14.3
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -336,3 +336,8 @@ Root, section and action menus now use compact numbered selection (number/shortc
 ### Compact hybrid menus (0.14.2)
 
 Navigation and action menus accept both arrow selection plus Enter and existing number/letter shortcuts. All options are shown without paging, using one clipped line per option. Selection is retained on return; Esc/Backspace/B/0 goes back. Unsupported/redirected consoles retain line input. Change labels and unavailable-action checks remain in place. This replaces the number-only input introduced in 0.14.1; scrollable result lists remain unchanged.
+
+
+### Visible numeric input (0.14.3)
+
+Interactive shared menus display `Selection: _` beneath their controls. Typed digits appear immediately, Backspace edits them, and Enter submits the number. Enter with no digits activates the highlighted row. Esc cancels and returns. Each new prompt starts with an empty numeric buffer. This retains unambiguous selection of 1 versus 10/11/12; unsupported consoles continue to use visible Read-Host input.
