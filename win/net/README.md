@@ -1,4 +1,4 @@
-# Windows Toolkit 0.8.0
+# Windows Toolkit 0.9.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -241,3 +241,15 @@ Up/Down selects a finding; Enter shows evidence and offers its related checks/re
 **C** adds live gateway ICMP (up to three gateways), system DNS resolution (AD domain, otherwise example.com), and a read-only secure-channel test on domain-member computers only. Subsequent refreshes include those checks. Workgroups and domain controllers do not run the member trust test. DNS waits two seconds; an underlying OS resolver operation may complete later. Secure-channel timing is controlled by the Windows cmdlet. No full disk surface scan, update installation, internet speed test or service restart is performed.
 
 The local smoke test on this PC returned 18 findings in 3.3 seconds (4 INFO, 6 PASS, 6 REVIEW and 2 unavailable NIC-driver settings). This is one live sample, not a speed guarantee or a health certification. Synthetic tests on PowerShell 5.1 and 7 cover thresholds, review vs fault classification, provider errors, AD-role gates and navigation. Maintain `Health-Dashboard.ps1` and use `tests/Sync-HealthDashboard.ps1` to synchronize the embedded launcher and both Pages endpoints.
+
+## Startup apps and scheduled tasks
+
+Windows menu **10** provides read-only startup inventory, scheduled-task inspection, the Task Scheduler event log, and explicit shortcuts to Windows Startup Apps settings and Task Scheduler. Inventory does not execute commands, run tasks, disable entries or change configuration.
+
+The startup view uses Win32_StartupCommand and shows command, user, registry/folder location and a conservative executable-path assessment. It does not claim to include every packaged startup app or determine StartupApproved/disabled state. Quoted local commands can be checked for file existence; ambiguous unquoted paths, relative executables, user-dependent variables, UNC paths and COM actions are UNVERIFIED. Network paths are not probed. Arguments, script files and dependencies are not validated merely because their launcher exists.
+
+The scheduled-task view shows state, last/next run, missed runs, unsigned hexadecimal result, run-as user, actions, working directories and selected trigger fields. Running, ready, queued, disabled and never-run scheduler statuses are informational. Other nonzero codes are REVIEW items because application exit-code semantics can vary. See [Microsoft's scheduler result constants](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-error-and-success-constants). Per-task metadata failures preserve other rows; permissions may limit the task inventory.
+
+Up/Down and Enter navigate; N/P pages; F filters literal name/location text; C toggles all versus review/unavailable entries; R refreshes; B/Esc returns. Selecting an item displays its full metadata. There are no run/disable/delete actions in this browser. The management shortcuts open the standard Windows interfaces only when chosen.
+
+Tests on PowerShell 5.1 and 7 cover path ambiguity, missing files, network/user-context paths, scheduler informational codes, unsigned/signed results, per-task permission failures, filtering and navigation. A live read-only sample inspected 19 startup entries and 212 visible tasks in 2.45 seconds; counts and speed vary by PC. Maintain Startup-Tasks.ps1 and run tests/Sync-StartupTasks.ps1 to update the embedded launcher and Pages endpoints.

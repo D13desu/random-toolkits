@@ -54,3 +54,6 @@ function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@
 foreach ($answer in @('9','B','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
 Assert-True ($script:Answers.Count -eq 0) 'Health dashboard is reachable and returns to Windows menu'
+foreach ($answer in @('10','B','0')) { $script:Answers.Enqueue($answer) }
+Start-WindowsMenu
+Assert-True ($script:Answers.Count -eq 0) 'Startup and scheduled-task menu returns to Windows menu'
