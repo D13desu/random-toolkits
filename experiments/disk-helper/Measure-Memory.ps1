@@ -16,6 +16,13 @@ try {
         Start-Sleep -Milliseconds 200
     }while($true)
     $report.Summary=$state.summary
+    $report.Profile=Invoke-DiskHelper $session @{command='profile'}
+    if($report.Profile.scan.phase -ne 'ready'){throw 'Profile did not reach ready.'}
+    $previous=-1
+    foreach($sample in $report.Profile.scan.samples){
+        if($sample.seconds -lt $previous -or $sample.managedBytes -lt 0 -or $sample.workingSet -lt 0){throw 'Invalid phase measurements.'}
+        $previous=$sample.seconds
+    }
     $report.ReadySeconds=$state.readySeconds
     $report.CleanupMilliseconds=$state.cleanupMilliseconds
     $report.CompactMilliseconds=$state.compactMilliseconds

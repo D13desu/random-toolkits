@@ -15,10 +15,13 @@ try {
     $session=Start-DiskHelper (Join-Path $PSScriptRoot 'out/DiskHelper.exe') (Join-Path $PSScriptRoot 'out/manifest.json')
     $report.StartupMilliseconds=$timer.Elapsed.TotalMilliseconds
     Assert ($session.Hello.protocol -eq 1 -and $session.Hello.architecture -eq 'x64') 'Versioned helper starts as a separate x64 process'
+    $profile=Invoke-DiskHelper $session @{command='profile'}
+    Assert ($profile.type -eq 'profile' -and $null -eq $profile.scan) 'Idle session has no stale MFT profile'
     $null=Invoke-DiskHelper $session @{command='scan';path=$fixture;engine='native'}
     do{$status=Invoke-DiskHelper $session @{command='status'};if($status.state -ne 'ready'){Start-Sleep -Milliseconds 20}}while($status.state -ne 'ready')
     $report.Summary=$status.summary
     Assert ($status.summary.files -eq 47 -and $status.summary.logical -eq 21158) 'Native helper counts the fixture exactly'
+    Assert ($null -eq (Invoke-DiskHelper $session @{command='profile'}).scan) 'Native scans do not fabricate MFT phase measurements'
     $first=Invoke-DiskHelper $session @{command='list';limit=20}
     Assert ($first.total -eq 47 -and @($first.rows).Count -eq 20 -and $first.rows[0].Name -eq 'nested') 'Paged listing sorts largest entries first'
     $report.PageResponseBytes=$session.LastResponseBytes

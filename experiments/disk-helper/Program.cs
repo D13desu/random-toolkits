@@ -9,12 +9,13 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.2.0-experiment";
+  const string Version="0.3.0-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
   static List<Issue> issues;static Dictionary<string,int> causes;static int issueCount;
   static double cleanupMilliseconds,compactMilliseconds;
+  static ScanProfile profile;
   static Stopwatch elapsed; static string mode, cachedPath, cachedSort; static Row[] cachedRows;
   static bool Running {get {return (native!=null && !native.Done) || (mft!=null && !mft.Done);}}
   static string Text(Dictionary<string,object> request,string key,string fallback) {
@@ -33,10 +34,12 @@ namespace RandomToolkits.HelperExperiment {
    scan=mft!=null?mft.Result:native.Result;
    object summary=Summary();issues=scan.Issues;causes=scan.IssueCounts;issueCount=scan.IssueCount;
    if(mode=="mft") {
+    profile.Mark("cache cleanup");
     var timer=Stopwatch.StartNew();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
-    timer.Restart();compact=new CompactIndex(scan);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
+    profile.Mark("cache compaction");timer.Restart();compact=new CompactIndex(scan);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
     scan=null;mft=null;
     timer.Restart();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
+    profile.Mark("ready");
    }
    completedSummary=summary;
   }
@@ -55,7 +58,7 @@ namespace RandomToolkits.HelperExperiment {
     managedBytes=GC.GetTotalMemory(false),cleanupMilliseconds=cleanupMilliseconds,compactMilliseconds=compactMilliseconds,
     readySeconds=elapsed.Elapsed.TotalSeconds+(cleanupMilliseconds+compactMilliseconds)/1000};
    if(native==null && mft==null) return new {type="status",state="idle"};
-   return new {type="status",state="scanning",files=mft!=null?mft.FilesSeen:native.FilesSeen,
+   return new {type="status",state="scanning",phase=profile!=null?profile.Phase:"native scan",files=mft!=null?mft.FilesSeen:native.FilesSeen,
     folders=mft!=null?mft.DirectoriesSeen:native.DirectoriesSeen,records=mft!=null?mft.RecordsSeen:0,
     seconds=elapsed.Elapsed.TotalSeconds,cancelling=mft!=null?mft.CancelRequested:native.CancelRequested,
     workingSet=Process.GetCurrentProcess().WorkingSet64};
@@ -74,7 +77,7 @@ namespace RandomToolkits.HelperExperiment {
    }
    mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;
    cleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
-   if(engine=="mft") mft=MftScanner.Start(path);else native=Scanner.Start(path);
+   profile=null;if(engine=="mft") {mft=MftScanner.Start(path);profile=mft.Profile;}else native=Scanner.Start(path);
    return new {type="accepted",engine=engine,path=path};
   }
   static void RequireReady() {Finish();if(completedSummary==null) throw new InvalidOperationException("Wait for scan completion before browsing.");}
@@ -124,6 +127,7 @@ namespace RandomToolkits.HelperExperiment {
     case "cancel":Cancel();return new {type="cancelled",message="Cancellation requested; poll status for partial results."};
     case "list":return List(request);
     case "memory":return Memory(request);
+    case "profile":return new {type="profile",scan=profile==null?null:profile.Snapshot()};
     case "issues":
      RequireReady();int offset=Number(request,"offset",0,0,Int32.MaxValue),limit=Number(request,"limit",20,1,100);
      offset=Math.Min(offset,issues.Count);return new {type="issues",total=issueCount,sampled=issues.Count,

@@ -29,7 +29,7 @@ try {
     do {
         $status=Invoke-DiskHelper $session @{command='status'}
         if($status.state -eq 'ready'){break}
-        Write-Progress -Activity 'C# helper scanning' -Status ('{0:N0} records | {1:N0} files | {2:N1}s' -f $status.records,$status.files,$status.seconds)
+        Write-Progress -Activity 'C# helper scanning' -Status ('{0} | {1:N0} records | {2:N0} files | {3:N1}s' -f $status.phase,$status.records,$status.files,$status.seconds)
         try {if(-not [Console]::IsInputRedirected -and [Console]::KeyAvailable -and [Console]::ReadKey($true).Key -eq 'Q'){$null=Invoke-DiskHelper $session @{command='cancel'}}} catch {}
         Start-Sleep -Milliseconds 200
     } while($true)
@@ -51,7 +51,7 @@ try {
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
             Write-Host (' [{0,2}] {1,14} | {2,12} | {3,-4} {4}' -f ($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name)
         }
-        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | 0: exit' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
+        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | T: timings | 0: exit' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
         $choice=Read-Host 'Select';$number=0
         switch($choice.ToUpperInvariant()){
             '0'{return}
@@ -64,6 +64,15 @@ try {
                 Write-Host 'Diagnostics include warnings on counted files; not every diagnostic is an omission.'
                 $issues.causes.PSObject.Properties | ForEach-Object {[pscustomobject]@{Cause=$_.Name;Count=$_.Value}} | Format-Table | Out-Host
                 $issues.rows | Format-List Path,Reason,Category | Out-Host
+                $null=Read-Host 'Enter to return'
+            }
+            'T'{
+                $profile=Invoke-DiskHelper $session @{command='profile'}
+                if($null -eq $profile.scan){Write-Host 'Phase profiling is available for MFT scans.'}
+                else {
+                    Write-Host 'Samples mark phase boundaries. Managed memory includes objects awaiting collection.'
+                    $profile.scan.samples | Select-Object @{n='Phase starting';e={$_.phase}},@{n='Elapsed s';e={[math]::Round($_.seconds,2)}},@{n='Managed GiB';e={[math]::Round($_.managedBytes/1GB,2)}},@{n='Working GiB';e={[math]::Round($_.workingSet/1GB,2)}} | Format-Table -AutoSize | Out-Host
+                }
                 $null=Read-Host 'Enter to return'
             }
             default{if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $rows.Count -and $rows[$number-1].Kind -eq 'DIR'){$current=$rows[$number-1].Path;$offset=0}}

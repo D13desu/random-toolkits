@@ -30,6 +30,7 @@ try {
         Start-Sleep -Milliseconds 200
     } while($true)
     $report.Helper=$status.summary;$report.HelperWorkingSet=$status.workingSet
+    $report.Profile=Invoke-DiskHelper $session @{command='profile'}
     $report.ReadySeconds=$status.readySeconds
     $report.CleanupMilliseconds=$status.cleanupMilliseconds
     $report.CompactMilliseconds=$status.compactMilliseconds
