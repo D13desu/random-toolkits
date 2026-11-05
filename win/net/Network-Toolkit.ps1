@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.9.0
+# Random Toolkits | Windows Toolkit 0.9.1
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -281,16 +281,16 @@ function ConvertTo-PcEventNumbers {
 }
 
 function Format-PcEventPreview {
-    param([string]$Message,[ValidateRange(20,200)][int]$Width=100)
+    param([string]$Message,[ValidateRange(20,200)][int]$Width=100,[ValidateRange(1,3)][int]$Lines=3)
     $text=($Message -replace '[\x00-\x1F\x7F]',' ' -replace '\s+',' ').Trim()
     if(-not $text){return '[No rendered message; open event for XML.]'}
-    for($line=0;$line -lt 3 -and $text.Length;$line++){
+    for($line=0;$line -lt $Lines -and $text.Length;$line++){
         if($text.Length -le $Width){$text;break}
         $take=$Width
         if([char]::IsHighSurrogate($text[$take-1])){$take--}
         $space=$text.LastIndexOf(' ',$take-1,$take)
         if($space -gt 0){$take=$space}
-        if($line -eq 2){$text.Substring(0,$take).TrimEnd()+' ...';break}
+        if($line -eq ($Lines-1)){$text.Substring(0,$take).TrimEnd()+' ...';break}
         $text.Substring(0,$take).TrimEnd();$text=$text.Substring($take).TrimStart()
     }
 }
@@ -352,11 +352,11 @@ function Start-PcEventBrowser {
     Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
     $keyboard=Test-PcEventKeyboard;$selected=0
-    $page=0;$pageSize=5;$previewWidth=100
+    $page=0;$pageSize=10;$previewWidth=100
     try{$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
     :events while ($true) {
         if($keyboard){
-            try{$pageSize=[math]::Max(1,[math]::Min(5,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-10)/5)));$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
+            try{$pageSize=[math]::Max(1,[math]::Min(20,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-12)/2)));$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
             $page=[int][math]::Floor($selected/[double]$pageSize);Clear-Host
         }
         $pages=[math]::Max(1,[math]::Ceiling($events.Count/[double]$pageSize))
@@ -367,8 +367,8 @@ function Start-PcEventBrowser {
             $event=$events[$i]
             $marker=if($i -eq $selected){'>'}else{' '};$color=if($i -eq $selected){'Cyan'}else{'Gray'}
             Write-Host ('{0}[{1}] {2} | {3} | ID {4} | {5}' -f $marker,($i+1),$event.Time,$event.Level,$event.Id,$event.Provider) -ForegroundColor $color
-            foreach($line in @(Format-PcEventPreview -Message $event.Message -Width $previewWidth)){Write-Host ('     '+$line)}
-            Write-Host ''
+            $previewLines=if($i -eq $selected){3}else{1}
+            foreach($line in @(Format-PcEventPreview -Message $event.Message -Width $previewWidth -Lines $previewLines)){Write-Host ('     '+$line)}
         }
         if($keyboard){Write-Host 'Up/Down: select | Enter: full message/XML | PgUp/PgDn: pages | R: refresh | F: filter | Left/Esc: back'}
         $answer=Read-PcEventChoice $keyboard 'Number: full message / XML | N/P: pages | R: refresh | F: filtered view | B / 0: back'
@@ -1648,7 +1648,7 @@ function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind
     $all=@();$selected=0;$filter='';$reviewOnly=$false;$reload=$true;$keyboard=Test-PcEventKeyboard;$size=10
     while($true){
         if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false;$selected=0}
-        $rows=@($all | Where-Object {(-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')) -and (-not $filter -or ($_.Name+' '+$_.Location).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
+        $rows=@($all | Where-Object {(-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')) -and (-not $filter -or ($_.Name+' '+$_.Location+' '+$_.Command+' '+$_.Executable).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
         $selected=[math]::Max(0,[math]::Min($selected,$rows.Count-1));$page=[int][math]::Floor($selected/[double]$size)
         if($keyboard){Clear-Host}
         Write-Host ("`n{0} INSPECTION | {1}/{2} entries | READ ONLY" -f $Kind,$rows.Count,$all.Count) -ForegroundColor Cyan
@@ -1658,6 +1658,10 @@ function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
             $marker=if($i -eq $selected){'>'}else{' '}
             Write-Host ('{0}[{1}] {2,-11} {3} | {4}' -f $marker,($i+1),$rows[$i].Status,$rows[$i].Name,$rows[$i].State)
+            if($Kind -eq 'Startup'){
+                Write-Host ('     Command: '+([string]$rows[$i].Command -replace '[\x00-\x1F\x7F]',' '))
+                Write-Host ('     Source: '+$rows[$i].Location+' | Path: '+$rows[$i].PathStatus)
+            }
         }
         Write-Host 'Up/Down: select | Enter: details | N/P: pages | F: name/path filter | C: review/all | R: refresh | B/Esc: back'
         $answer=Read-PcEventChoice $keyboard 'Number: details | N/P | F: filter | C: review/all | R: refresh | B / 0: back'
@@ -1668,7 +1672,7 @@ function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind
             '@HOME'{$selected=0} '@END'{$selected=[math]::Max(0,$rows.Count-1)}
             'N'{if(($page+1)*$size -lt $rows.Count){$selected=($page+1)*$size}} 'P'{$selected=[math]::Max(0,($page-1)*$size)}
             'R'{$reload=$true} 'C'{$reviewOnly=-not $reviewOnly;$selected=0}
-            'F'{try{$filter=Read-PcInput 'Name or location contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
+            'F'{try{$filter=Read-PcInput 'Name, location or startup command contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
             '@ENTER'{if($rows.Count){$open=$selected}}
             default{$n=0;if([int]::TryParse($answer,[ref]$n) -and $n -ge 1 -and $n -le $rows.Count){$open=$n-1}}
         }
@@ -1700,7 +1704,7 @@ function Start-PcStartupTaskMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.9.0' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.9.1' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [9] Health dashboard - start here'
