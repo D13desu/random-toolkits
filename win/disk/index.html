@@ -1,8 +1,8 @@
-# Random Toolkits | Disk Usage 0.4.4 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.4.5 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
 
-$script:DiskUsageVersion = '0.4.4'
+$script:DiskUsageVersion = '0.4.5'
 
 function Format-DiskSize {
     param([double]$Bytes)
@@ -39,7 +39,8 @@ function Read-DiskDriveRoot {
     param([string]$DefaultDrive)
     $prompt='NTFS drive root (for example C:\)'
     if ($DefaultDrive) { $prompt="NTFS drive root [Enter = $DefaultDrive]" }
-    $answer=Read-Host $prompt
+    $answer=Read-Host ($prompt+' [B: back]')
+    if ($answer -and $answer.Trim() -eq 'B') { return $null }
     if ([string]::IsNullOrWhiteSpace($answer)) { return $DefaultDrive }
     return $answer.Trim()
 }
@@ -938,6 +939,7 @@ function Measure-DiskTree {
         Write-Host 'EXPERIMENTAL: reading MFT records. Whole volume; metadata may include protected filenames. No filesystem snapshot.' -ForegroundColor Yellow
         $worker=[RandomToolkits.DiskV10.MftScanner]::Start($root.FullName)
     } else { $worker=[RandomToolkits.DiskV10.Scanner]::Start($root.FullName) }
+    $backRequested=$false
     $timer=[Diagnostics.Stopwatch]::StartNew()
     $lastPreview=0L
     try {
@@ -950,11 +952,14 @@ function Measure-DiskTree {
             }
             try {
                 if (-not [Console]::IsInputRedirected -and [Console]::KeyAvailable) {
-                    if ([Console]::ReadKey($true).Key -eq 'Q') { $worker.CancelRequested=$true }
+                    $key=[Console]::ReadKey($true).Key
+                    if ($key -eq 'Q') { $worker.CancelRequested=$true }
+                    if ($key -eq 'B') { $backRequested=$true; $worker.CancelRequested=$true }
                 }
             } catch { } # Console key polling is unavailable in some remote hosts.
             Start-Sleep -Milliseconds 100
         }
+        if ($backRequested) { throw [OperationCanceledException]::new('Back to drives.') }
         if ($worker.Error) {
             if ($Engine -eq 'Mft') { Write-Warning ('MFT scan failed; using the standard scanner: '+$worker.Error); return Measure-DiskTree $LiteralPath -Engine Auto }
             throw $worker.Error
@@ -1040,10 +1045,11 @@ function Show-DiskScan {
                 Write-Host (' [{0}] {1,16}  {2,12}  {3,-4}  {4}{5}' -f ($i+1),(Format-DiskAllocation $row.Allocated ($row.AllocationUnknown -or $row.Partial)),(Format-DiskSize $row.Bytes),$row.Kind,$row.Name,$flag)
             } else { Write-Host (' [{0}] {1,12}  {2,-4}  {3}{4}' -f ($i+1),(Format-DiskSize $row.Bytes),$row.Kind,$row.Name,$flag) }
         }
-        Write-Host ("Page {0}/{1} | Number: open folder | U: up | N/P: pages | R: rescan root | E: exclusions | 0: drives" -f ($page+1),$pages)
+        Write-Host ("Page {0}/{1} | Number: open folder | U: up | N/P: pages | R: rescan root | E: exclusions | B: back (parent/drives) | 0: drives" -f ($page+1),$pages)
         $answer = Read-Host 'Select'
         if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
         switch ($answer.Trim().ToUpperInvariant()) {
+            'B' { if ($node.Parent) { $current=$node.Parent; $page=0; continue browse }; return }
             'U' { if ($node.Parent) { $current=$node.Parent; $page=0 }; continue browse }
             'N' { $page=[math]::Min($pages-1,$page+1); continue browse }
             'P' { $page=[math]::Max(0,$page-1); continue browse }
@@ -1075,23 +1081,24 @@ function Start-DiskUsage {
             $drive=$drives[$i]
             Write-Host (' [{0}] {1} {2} | Total {3} | Used {4} | Free {5} | {6}' -f ($i+1),$drive.Drive,$drive.Type,(Format-DiskSize $drive.Total),(Format-DiskSize $drive.Used),(Format-DiskSize $drive.Free),$drive.Detail)
         }
-        Write-Host ' [F] Scan a folder path   [0] Exit'
+        Write-Host ' [F] Scan a folder path   [B / 0] Back to launcher (exit standalone)'
         $mftLabel=' [M] Experimental MFT scan (local NTFS drive root)'
         if (-not ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { $mftLabel+=' [UNAVAILABLE: Requires administrator]' }
         Write-Host $mftLabel
         Write-Host ' [D] Diagnose an MFT record and its parents (local NTFS, admin; no full scan)'
-        Write-Host 'Native metadata scan with live partial totals. Q: stop and browse partial results; Ctrl+C: exit. Links are skipped.' -ForegroundColor DarkGray
+        Write-Host 'Native metadata scan with live partial totals. Q: stop and browse partial results; B: cancel and return to drives. Links are skipped.' -ForegroundColor DarkGray
         $defaultDrive=$null
         if ($drives.Count -gt 0) { $defaultDrive=$drives[0].Drive }
         $answer=Read-Host 'Select drive or F/M/D'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         try {
             if ($answer.Trim() -eq 'D') {
                 $diagnosticRoot=Read-DiskDriveRoot $defaultDrive
                 if ([string]::IsNullOrWhiteSpace($diagnosticRoot)) { continue }
                 $reason=Get-DiskMftUnavailableReason $diagnosticRoot
                 if ($reason) { Write-Warning $reason; continue }
-                $recordText=Read-Host 'MFT record number from E (digits only)'
+                $recordText=Read-Host 'MFT record number from E (digits only; B: back)'
+                if ($recordText -and $recordText.Trim() -eq 'B') { continue }
                 $recordNumber=[uint64]0
                 if (-not [uint64]::TryParse($recordText,[ref]$recordNumber) -or $recordNumber -gt 281474976710655) { throw 'Enter a valid MFT record number.' }
                 Initialize-DiskScanner
@@ -1100,7 +1107,7 @@ function Start-DiskUsage {
             }
             $scanPath=$null; $engine='Auto'
             if ($answer.Trim() -eq 'M') { $scanPath=Read-DiskDriveRoot $defaultDrive; $engine='Mft'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
-            elseif ($answer.Trim() -eq 'F') { $scanPath=Read-Host 'Folder path'; if ([string]::IsNullOrWhiteSpace($scanPath)) { continue } }
+            elseif ($answer.Trim() -eq 'F') { $scanPath=Read-Host 'Folder path [B: back]'; if ($scanPath -eq 'B' -or [string]::IsNullOrWhiteSpace($scanPath)) { continue } }
             else {
                 $number=0
                 if (-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $drives.Count) { throw 'Choose a listed drive.' }
@@ -1108,7 +1115,7 @@ function Start-DiskUsage {
                 $scanPath=$drives[$number-1].Drive
             }
             Show-DiskScan (Measure-DiskTree $scanPath -Engine $engine)
-        } catch { Write-Warning $_.Exception.Message }
+        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
     }
 }
 
