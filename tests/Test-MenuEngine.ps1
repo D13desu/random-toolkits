@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
@@ -38,6 +38,13 @@ foreach($pair in @(@('UpArrow','Up'),@('DownArrow','Down'),@('Enter','Select'),@
  $key=[ConsoleKeyInfo]::new([char]0,[ConsoleKey]$pair[0],$false,$false,$false)
  Assert ((ConvertFrom-PcMenuKey $key) -eq $pair[1]) "Key maps: $($pair[0])"
 }
+$shortcuts=@(New-PcMenuItem '9' 'Health';New-PcMenuItem '1' 'Network';New-PcMenuItem 'C' 'Custom')
+Feed @('1');$result=Show-PcMenu -Title Test -Items $shortcuts -Plain
+Assert ($result.Item.Id -eq '1') 'Stable numeric shortcut is independent of row position'
+Feed @('c');$result=Show-PcMenu -Title Test -Items $shortcuts -Plain
+Assert ($result.Item.Id -eq 'C') 'Letter shortcut is case insensitive'
+$blocked=$false;try{Show-PcMenu -Title Test -Items @((New-PcMenuItem '0' 'Reserved')) -Plain}catch{$blocked=$true}
+Assert $blocked 'Reserved back key cannot be assigned to an action'
 Assert ($script:Answers.Count -eq 0) 'All expected prompts consumed'
 $source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN MENU ENGINE',2)[1] -split '# END MENU ENGINE',2

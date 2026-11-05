@@ -1,4 +1,4 @@
-# Windows Toolkit 0.10.1
+# Windows Toolkit 0.11.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -255,7 +255,7 @@ Up/Down and Enter navigate; N/P pages; F filters literal name/location text; C t
 Tests on PowerShell 5.1 and 7 cover path ambiguity, missing files, network/user-context paths, scheduler informational codes, unsigned/signed results, per-task permission failures, filtering and navigation. A live read-only sample inspected 19 startup entries and 212 visible tasks in 2.45 seconds; counts and speed vary by PC. Maintain Startup-Tasks.ps1 and run tests/Sync-StartupTasks.ps1 to update the embedded launcher and Pages endpoints.
 
 
-## Services and Windows repair centre (0.10.1)
+## Services and Windows repair centre (0.11.0)
 
 Root **11 Services** lists local Win32 services with state, startup mode and executable command. Arrow keys select; Enter opens service account, description, dependencies and actions. F filters name/display name/path, R refreshes, N/P page, B/Esc returns. Start/stop/restart require administrator rights and yes/no confirmation. Stop/restart refuse active dependents and never use Force. The toolkit does not alter startup types. Starting a service can start its prerequisites; stopping services may interrupt applications or connectivity. Windows enforces service permissions and protected-service restrictions.
 
@@ -267,9 +267,9 @@ Native output stays visible until Enter returns to the menu. Exit code, elapsed 
 
 Maintain `System-Maintenance.ps1`, then run `tests/Sync-SystemMaintenance.ps1` to update the embedded launcher and Pages copies. `tests/Test-SystemMaintenance.ps1` mocks all service mutations and native repairs, checking confirmations, elevation, dependent-service protection, fixed arguments and navigation. No live repair or service mutation is performed by the tests.
 
-## Shared menu engine (pass 1)
+## Shared menu engine (passes 1 and 2)
 
-`Menu-Engine.ps1` supplies `Show-PcMenu`, keyboard mapping/input, bounded row formatting and `Confirm-PcMenuChange` (yes/no, default No). It is embedded in the launcher; existing menus are not migrated yet.
+`Menu-Engine.ps1` supplies `Show-PcMenu`, keyboard mapping/input, bounded row formatting and `Confirm-PcMenuChange` (yes/no, default No). It is embedded in the launcher. Root and category menus now use it; list browsers keep their existing renderers until pass 3.
 
 Items require unique nonempty `Id` and `Label`; optional fields are `Kind` (Check, Change, Menu), `Detail`, and `DisabledReason`. Unavailable entries cannot be selected, including by number. The engine returns `Action` (Select, Refresh, Back), `Item`, and `State`, and never executes actions. Callers own execution, availability checks and confirmation. Reuse a hashtable through `-State` to preserve `SelectedId` and `Filter` across calls; missing selections fall back to the first matching row.
 
@@ -285,4 +285,13 @@ $choice = Show-PcMenu -Title 'Windows > Example' -State $state -Filterable -Refr
 )
 ```
 
-Run `tests/Sync-MenuEngine.ps1` after editing the module. Tests cover navigation, disabled items, empty views, state preservation, filtering/cancellation, fallback input, confirmations and source synchronization on PowerShell 5.1 and 7. Pass 2 migrates root/category menus; pass 3 aligns list browsers.
+Run `tests/Sync-MenuEngine.ps1` after editing the module. Tests cover navigation, disabled items, empty views, state preservation, filtering/cancellation, fallback input, confirmations and source synchronization on PowerShell 5.1 and 7. Pass 2 has migrated root/category menus; pass 3 will align list browsers.
+
+
+### Menu migration (0.11.0)
+
+The shared renderer now drives Windows root, Network and its categories (including Power, Storage, Printing and Group Policy), Registry and both tweak submenus, the Event Log picker, Startup/tasks, Cleanup, service actions, and Windows repair centre. Arrows/Enter select, Escape/Backspace return one level, and Home/End/PageUp/PageDown navigate. Existing numbered shortcuts remain stable even when a menu is reordered or paged (Health remains 9). The legacy Network A shortcut, event picker C/L, and service D/E shortcuts are also supported. Backspace edits a partially typed number before acting as Back.
+
+Selection is retained on return from a submenu or action. Check/Change/Browse/Menu labels distinguish intent, and unavailable operations show a reason and cannot be selected. Action-time permission and availability checks remain in place. Interactive output is paused before redraw; text-input prompts retain B-to-cancel. Service actions now have a D details choice for the full account/path/dependency view. Repair-centre checks also display administrator, binary and OS requirements.
+
+Optional item `Key` preserves shortcuts independently of row order; duplicate/reserved keys are rejected. `Description` adds context under the breadcrumb. `New-PcMenuItem` and `Read-PcCategoryMenu` adapt existing dispatch loops without executing actions inside the engine. `tests/Test-MenuMigration.ps1` exercises nested keyboard dispatch with mocked actions, plus the existing regression suites on PowerShell 5.1 and 7. Event, service, startup/task, discovery and health list browsers are intentionally unchanged for pass 3; Disk Helper retains its C# renderer.

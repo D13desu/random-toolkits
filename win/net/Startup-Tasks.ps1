@@ -93,12 +93,16 @@ function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind
     }
 }
 function Start-PcStartupTaskMenu {
+    $state=@{}
     while($true){
-        Write-Host "`nSTARTUP & SCHEDULED TASKS | READ ONLY" -ForegroundColor Cyan
-        Write-Host ' [1] Startup entries   [2] Scheduled tasks   [3] Task Scheduler event log'
-        Write-Host ' [4] Open Windows Startup Apps settings   [5] Open Task Scheduler'
-        Write-Host ' [B / 0] Back'
-        $answer=Read-Host 'Select'
+        $menu=@(
+            New-PcMenuItem '1' 'Startup entries' 'Browse'
+            New-PcMenuItem '2' 'Scheduled tasks' 'Browse'
+            New-PcMenuItem '3' 'Task Scheduler event log' 'Browse'
+            New-PcMenuItem '4' 'Open Windows Startup Apps settings' 'Open'
+            New-PcMenuItem '5' 'Open Task Scheduler' 'Open'
+        )
+        $answer=Read-PcCategoryMenu 'Windows > Startup and scheduled tasks' $menu $state 'Inventory is read-only; Windows management shortcuts open separately.'
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         try{
             switch($answer.Trim()){
@@ -109,6 +113,6 @@ function Start-PcStartupTaskMenu {
                 '5'{Start-Process -FilePath (Join-Path $env:WINDIR 'System32\mmc.exe') -ArgumentList ('"'+(Join-Path $env:WINDIR 'System32\taskschd.msc')+'"') -ErrorAction Stop}
                 default{Write-Warning 'Choose a listed option.'}
             }
-        }catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message}
+        }catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
     }
 }
