@@ -195,26 +195,34 @@ function Start-NetworkDiscovery {
     try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable; MAC addresses will be omitted.'}
     $database=Get-DiscoveryOuiDatabase
     Add-DiscoveryMacInfo $result.Rows $database $neighbors
-    $page=0;$showAll=$false;$probeView=$false
+    $state=@{};$showAll=$false;$probeView=$false
     while($true){
         $rows=@($result.Rows | Where-Object {$showAll -or $_.Responded})
-        Write-Host ("`nDISCOVERY | {0}/{1} addresses checked | Cancelled: {2} | Displayed: {3}" -f $result.Completed,$result.Requested,$result.Cancelled,$rows.Count) -ForegroundColor Cyan
-        Write-Host 'No response does not mean offline. Open ports do not identify services or device type. Closed = connection refused; Error = another connection error.'
-        Write-Host ('IEEE data: {0} | Retrieved UTC: {1}. Vendor is the registered assignee, not a verified device identity.' -f $database.Status,$database.RetrievedUtc)
-        Write-Host 'MACs are exact-IP neighbor-cache observations (possibly stale/proxied); routed targets usually have no MAC. Local/randomized MACs have no vendor attribution.'
-        if($probeView){$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,Ping,LatencyMs,OpenTCP,ClosedTCP,NoResponseTCP,ErrorTCP -AutoSize | Out-Host}
-        else{$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,MAC,Vendor,MacStatus,OpenTCP -Wrap | Out-Host}
-        $answer=Read-Host 'N/P: pages | A: all/responding | D: MAC/probe view | M: lookup MAC | E: export CSV | B / 0: back'
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            'N'{if(($page+1)*20 -lt $rows.Count){$page++}} 'P'{$page=[math]::Max(0,$page-1)}
-            'A'{$showAll=-not $showAll;$page=0}
-            'D'{$probeView=-not $probeView}
-            'M'{try{Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database | Format-List | Out-Host}catch [OperationCanceledException] {}}
-            'E'{
-                try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path"}
-                catch [OperationCanceledException] {} catch{Write-Warning $_.Exception.Message}
+        $menu=@(foreach($row in $rows){
+            $detail=if($probeView){"Ping: $($row.Ping) | $($row.LatencyMs) ms | Open: $($row.OpenTCP) | Closed: $($row.ClosedTCP) | No response: $($row.NoResponseTCP) | Errors: $($row.ErrorTCP)"}else{"MAC: $($row.MAC) | $($row.Vendor) | $($row.MacStatus)"}
+            [pscustomobject]@{Id=$row.Address;Label=($row.Address+' | TCP open: '+$row.OpenTCP);Detail=$detail;SearchText=($row.MAC+' '+$row.Vendor+' '+$row.Ping);Data=$row}
+        })
+        $description="$($result.Completed)/$($result.Requested) checked | Partial/cancelled: $($result.Cancelled). No response does not mean offline; MAC/vendor are unverified cache observations."
+        $choice=Show-PcMenu -Title 'Windows > Network > Discovery' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{A=('All/responding (all: '+$showAll+')');D='MAC/probe view';M='Lookup MAC';E='Export all scan rows to CSV';L='Scan and vendor-data notes'}
+        switch($choice.Action){
+            'Back'{return}
+            'Select'{Show-PcListDetails $choice.Item.Data 'Device observations'}
+            'Refresh'{
+                Write-Host "Rescan the same scope: $scope; ports: $($ports -join ', ')"
+                $result=Invoke-NetworkDiscovery -Scope $scope -Ports $ports -TimeoutMs $timeout
+                $neighbors=@();try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable.'}
+                Add-DiscoveryMacInfo $result.Rows $database $neighbors
             }
+            'Command'{switch($choice.Command){
+                'A'{$showAll=-not $showAll}
+                'D'{$probeView=-not $probeView}
+                'L'{Show-PcListDetails ([pscustomobject]@{Scope=$scope;Completed=$result.Completed;Requested=$result.Requested;Cancelled=$result.Cancelled;IEEEStatus=$database.Status;RetrievedUTC=$database.RetrievedUtc;Notes='No response does not mean offline. Open ports do not identify services/device type. Closed means refused. MACs are exact-IP neighbor-cache observations, possibly stale/proxied. Routed targets usually have no MAC. Local/randomized MACs have no vendor attribution; vendor is the registered assignee, not verified identity.'}) 'Scan notes'}
+                'M'{try{Show-PcListDetails (Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database) 'MAC lookup'}catch [OperationCanceledException]{}}
+                'E'{
+                    try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path";Wait-PcMenuReturn}
+                    catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
+                }
+            }}
         }
     }
 }

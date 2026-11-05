@@ -27,9 +27,9 @@ $rows=@(Get-PcScheduledTaskEntries)
 Assert ($rows.Count -eq 3 -and ($rows | Where-Object Name -eq Denied).Status -eq 'UNAVAILABLE') 'Per-task access failure preserves other tasks'
 Assert (($rows | Where-Object Name -eq COM).Paths -match 'UNVERIFIED') 'COM actions are not labelled missing executables'
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('@DOWN','@ENTER','','F','Fixture','C','R','B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('Down','Select','','F','Fixture','C','R','B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt $Prompt"};$script:Answers.Dequeue()}
-function Test-PcEventKeyboard {$false}
+function Test-PcMenuKeyboard {$false}
 Start-PcStartupTaskBrowser Task
 Assert ($script:Answers.Count -eq 0) 'Task navigation, details, name filter, review filter and refresh work'
 $source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw

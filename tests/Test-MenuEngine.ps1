@@ -45,6 +45,16 @@ Feed @('c');$result=Show-PcMenu -Title Test -Items $shortcuts -Plain
 Assert ($result.Item.Id -eq 'C') 'Letter shortcut is case insensitive'
 $blocked=$false;try{Show-PcMenu -Title Test -Items @((New-PcMenuItem '0' 'Reserved')) -Plain}catch{$blocked=$true}
 Assert $blocked 'Reserved back key cannot be assigned to an action'
+Feed @('C');$state=@{SelectedId='item3';Filter=''};$result=Show-PcMenu -Title Test -Items $items -State $state -Commands @{C='Review toggle'} -Plain
+Assert ($result.Action -eq 'Command' -and $result.Command -eq 'C' -and $state.SelectedId -eq 'item3') 'List command returns without losing selection'
+$script:Output.Clear();Feed @('B')
+$null=Show-PcMenu -Title Test -Items @([pscustomobject]@{Id='event';Label='Event';Detail='short';SelectedDetail=@('first','second','third')}) -ExpandedPreview -Plain
+Assert ($script:Output -contains '    third') 'Selected event renders three preview lines'
+$script:Output.Clear();Feed @('B')
+$null=Show-PcMenu -Title Test -Items @([pscustomobject]@{Id='startup';Label='Startup';Detail=@('command','source')}) -DetailLines 2 -Plain
+Assert ($script:Output -contains '    source') 'Startup source stays visible beside command'
+$blocked=$false;try{Show-PcMenu -Title Test -Items $items -Filterable -Commands @{F='conflict'} -Plain}catch{$blocked=$true}
+Assert $blocked 'Custom command cannot override filter control'
 Assert ($script:Answers.Count -eq 0) 'All expected prompts consumed'
 $source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN MENU ENGINE',2)[1] -split '# END MENU ENGINE',2

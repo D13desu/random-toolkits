@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.11.0
+# Random Toolkits | Windows Toolkit 0.12.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -348,15 +348,15 @@ function Read-PcEventChoice([bool]$Keyboard,[string]$Prompt='Select') {
     }
 }
 function Show-PcEventDetails($EventRecord) {
-    $keyboard=Test-PcEventKeyboard
+    $keyboard=Test-PcMenuKeyboard
     if($keyboard){Clear-Host}
     $EventRecord | Select-Object Time,Id,Level,Provider,Log,RecordId,Machine | Format-List | Out-Host
     Write-Host $EventRecord.Message
     while($true){
-        Write-Host 'X: raw XML | M: full message | Enter / Left / Esc: back'
-        $answer=Read-PcEventChoice $keyboard 'X: raw XML | M: full message | Enter / B / 0: back'
+        Write-Host 'X: raw XML | M: full message | Enter / Esc / Backspace: back'
+        $answer=Read-PcMenuInput $keyboard
         switch(([string]$answer).Trim().ToUpperInvariant()){
-            ''{return} 'B'{return} '0'{return} '@ENTER'{return}
+            ''{return} 'B'{return} '0'{return} 'SELECT'{return} 'BACK'{return}
             'M'{Write-Host $EventRecord.Message}
             'X'{if($EventRecord.Xml){Write-Host $EventRecord.Xml}else{Write-Warning ('XML unavailable: '+$EventRecord.XmlError)}}
         }
@@ -379,42 +379,19 @@ function Start-PcEventBrowser {
     }
     Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
-    $keyboard=Test-PcEventKeyboard;$selected=0
-    $page=0;$pageSize=10;$previewWidth=100
-    try{$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
-    :events while ($true) {
-        if($keyboard){
-            try{$pageSize=[math]::Max(1,[math]::Min(20,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-12)/2)));$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
-            $page=[int][math]::Floor($selected/[double]$pageSize);Clear-Host
+    $state=@{}
+    while($true){
+        $menu=@(foreach($event in $events){
+            $preview=@(Format-PcEventPreview -Message $event.Message -Width 100)
+            [pscustomobject]@{Id=($event.Log+'|'+$event.RecordId);Label=("{0} | {1} | ID {2} | {3}" -f $event.Time,$event.Level,$event.Id,$event.Provider);Detail=($preview -join ' ');SelectedDetail=$preview;SearchText=$event.Message;Data=$event}
+        })
+        $choice=Show-PcMenu -Title ('Windows > Events > '+$log) -Items $menu -State $state -Filterable -Refreshable -ExpandedPreview -PageSize 20 -Description ("Last {0}h | Candidate cap: {1}. Text filter searches cached candidates; older matches may be omitted." -f $hours,$limit) -Commands @{C='Advanced query (time, IDs, levels, provider)'}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)}
+            'Command'{try{Start-PcEventBrowser -DefaultLog $log -FixedLog}catch [OperationCanceledException]{}}
+            'Select'{Show-PcEventDetails $choice.Item.Data}
         }
-        $pages=[math]::Max(1,[math]::Ceiling($events.Count/[double]$pageSize))
-        Write-Host "`n EVENTS | $log | $($events.Count) results | page $($page+1)/$pages" -ForegroundColor Cyan
-        Write-Host ("Last {0} hours | Candidate cap: {1} | IDs: {2} | Levels: {3}" -f $hours,$limit,($ids -join ','),($levels -join ','))
-        if(-not $events.Count){Write-Host 'No matching events in this window. F opens filters to widen the search.'}
-        for ($i=$page*$pageSize; $i -lt [math]::Min($events.Count,($page+1)*$pageSize); $i++) {
-            $event=$events[$i]
-            $marker=if($i -eq $selected){'>'}else{' '};$color=if($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host ('{0}[{1}] {2} | {3} | ID {4} | {5}' -f $marker,($i+1),$event.Time,$event.Level,$event.Id,$event.Provider) -ForegroundColor $color
-            $previewLines=if($i -eq $selected){3}else{1}
-            foreach($line in @(Format-PcEventPreview -Message $event.Message -Width $previewWidth -Lines $previewLines)){Write-Host ('     '+$line)}
-        }
-        if($keyboard){Write-Host 'Up/Down: select | Enter: full message/XML | PgUp/PgDn: pages | R: refresh | F: filter | Left/Esc: back'}
-        $answer=Read-PcEventChoice $keyboard 'Number: full message / XML | N/P: pages | R: refresh | F: filtered view | B / 0: back'
-        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
-        switch ($answer.Trim().ToUpperInvariant()) {
-            '@UP'{$selected=[math]::Max(0,$selected-1);$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
-            '@DOWN'{$selected=[math]::Max(0,[math]::Min($events.Count-1,$selected+1));$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
-            '@HOME'{$selected=0;$page=0;continue events}
-            '@END'{$selected=[math]::Max(0,$events.Count-1);$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
-            '@ENTER'{if($events.Count){Show-PcEventDetails $events[$selected]};continue events}
-            'N' { $page=[math]::Min($pages-1,$page+1);$selected=$page*$pageSize; continue events }
-            'P' { $page=[math]::Max(0,$page-1);$selected=$page*$pageSize; continue events }
-            'R' { $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit);$page=0;$selected=0;continue events }
-            'F' { try{Start-PcEventBrowser -DefaultLog $log -FixedLog}catch [OperationCanceledException]{};continue events }
-        }
-        $number=0
-        if ([int]::TryParse($answer,[ref]$number) -and $number -gt 0 -and $number -le $events.Count) { $selected=$number-1;$page=[int][math]::Floor($selected/[double]$pageSize);Show-PcEventDetails $events[$selected] }
-        else { Write-Warning 'Choose an event number, N, P or 0.' }
     }
 }
 
@@ -1100,26 +1077,34 @@ function Start-NetworkDiscovery {
     try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable; MAC addresses will be omitted.'}
     $database=Get-DiscoveryOuiDatabase
     Add-DiscoveryMacInfo $result.Rows $database $neighbors
-    $page=0;$showAll=$false;$probeView=$false
+    $state=@{};$showAll=$false;$probeView=$false
     while($true){
         $rows=@($result.Rows | Where-Object {$showAll -or $_.Responded})
-        Write-Host ("`nDISCOVERY | {0}/{1} addresses checked | Cancelled: {2} | Displayed: {3}" -f $result.Completed,$result.Requested,$result.Cancelled,$rows.Count) -ForegroundColor Cyan
-        Write-Host 'No response does not mean offline. Open ports do not identify services or device type. Closed = connection refused; Error = another connection error.'
-        Write-Host ('IEEE data: {0} | Retrieved UTC: {1}. Vendor is the registered assignee, not a verified device identity.' -f $database.Status,$database.RetrievedUtc)
-        Write-Host 'MACs are exact-IP neighbor-cache observations (possibly stale/proxied); routed targets usually have no MAC. Local/randomized MACs have no vendor attribution.'
-        if($probeView){$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,Ping,LatencyMs,OpenTCP,ClosedTCP,NoResponseTCP,ErrorTCP -AutoSize | Out-Host}
-        else{$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,MAC,Vendor,MacStatus,OpenTCP -Wrap | Out-Host}
-        $answer=Read-Host 'N/P: pages | A: all/responding | D: MAC/probe view | M: lookup MAC | E: export CSV | B / 0: back'
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            'N'{if(($page+1)*20 -lt $rows.Count){$page++}} 'P'{$page=[math]::Max(0,$page-1)}
-            'A'{$showAll=-not $showAll;$page=0}
-            'D'{$probeView=-not $probeView}
-            'M'{try{Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database | Format-List | Out-Host}catch [OperationCanceledException] {}}
-            'E'{
-                try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path"}
-                catch [OperationCanceledException] {} catch{Write-Warning $_.Exception.Message}
+        $menu=@(foreach($row in $rows){
+            $detail=if($probeView){"Ping: $($row.Ping) | $($row.LatencyMs) ms | Open: $($row.OpenTCP) | Closed: $($row.ClosedTCP) | No response: $($row.NoResponseTCP) | Errors: $($row.ErrorTCP)"}else{"MAC: $($row.MAC) | $($row.Vendor) | $($row.MacStatus)"}
+            [pscustomobject]@{Id=$row.Address;Label=($row.Address+' | TCP open: '+$row.OpenTCP);Detail=$detail;SearchText=($row.MAC+' '+$row.Vendor+' '+$row.Ping);Data=$row}
+        })
+        $description="$($result.Completed)/$($result.Requested) checked | Partial/cancelled: $($result.Cancelled). No response does not mean offline; MAC/vendor are unverified cache observations."
+        $choice=Show-PcMenu -Title 'Windows > Network > Discovery' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{A=('All/responding (all: '+$showAll+')');D='MAC/probe view';M='Lookup MAC';E='Export all scan rows to CSV';L='Scan and vendor-data notes'}
+        switch($choice.Action){
+            'Back'{return}
+            'Select'{Show-PcListDetails $choice.Item.Data 'Device observations'}
+            'Refresh'{
+                Write-Host "Rescan the same scope: $scope; ports: $($ports -join ', ')"
+                $result=Invoke-NetworkDiscovery -Scope $scope -Ports $ports -TimeoutMs $timeout
+                $neighbors=@();try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable.'}
+                Add-DiscoveryMacInfo $result.Rows $database $neighbors
             }
+            'Command'{switch($choice.Command){
+                'A'{$showAll=-not $showAll}
+                'D'{$probeView=-not $probeView}
+                'L'{Show-PcListDetails ([pscustomobject]@{Scope=$scope;Completed=$result.Completed;Requested=$result.Requested;Cancelled=$result.Cancelled;IEEEStatus=$database.Status;RetrievedUTC=$database.RetrievedUtc;Notes='No response does not mean offline. Open ports do not identify services/device type. Closed means refused. MACs are exact-IP neighbor-cache observations, possibly stale/proxied. Routed targets usually have no MAC. Local/randomized MACs have no vendor attribution; vendor is the registered assignee, not verified identity.'}) 'Scan notes'}
+                'M'{try{Show-PcListDetails (Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database) 'MAC lookup'}catch [OperationCanceledException]{}}
+                'E'{
+                    try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path";Wait-PcMenuReturn}
+                    catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
+                }
+            }}
         }
     }
 }
@@ -1545,39 +1530,31 @@ function Open-PcHealthTarget([string]$Target) {
 function Show-PcHealthFinding($Finding) {
     Write-Host ("`n[{0}] {1}" -f $Finding.Status,$Finding.Title) -ForegroundColor Cyan
     Write-Host $Finding.Detail
-    Write-Host 'Related checks/repair menus retain their requirements and yes/no confirmation. No repair is run by opening this finding.'
     while($true){
-        $answer=Read-Host '1: open related tools | B / 0 / Enter: back'
-        if([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim() -in @('B','0')){return}
-        if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message};return}
+        Write-Host '1: related tools | Enter / Esc / Backspace / B: back (opening tools does not run a repair)'
+        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
+        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+        if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn};return}
     }
 }
 function Start-PcHealthDashboard {
-    $network=$false;$snapshot=Get-PcHealthDashboard;$selected=0;$keyboard=Test-PcEventKeyboard;$pageSize=8
+    $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
-        if($keyboard){Clear-Host}
-        $rows=@($snapshot.Rows);$page=[int][math]::Floor($selected/[double]$pageSize)
-        Write-Host ("`nWINDOWS HEALTH | {0} | READ ONLY" -f $snapshot.CollectedAt) -ForegroundColor Cyan
-        Write-Host 'Snapshot, not a full health certificate. C runs live gateway, DNS and domain-member trust checks (no repair).'
-        Write-Host ('Live network checks included: '+$network)
-        $counts=($rows | Group-Object Status | ForEach-Object {"$($_.Name): $($_.Count)"}) -join ' | ';Write-Host $counts
-        for($i=$page*$pageSize;$i -lt [math]::Min($rows.Count,($page+1)*$pageSize);$i++){
-            $marker=if($i -eq $selected){'>'}else{' '};$color=if($rows[$i].Status -eq 'WARN'){'Yellow'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host ('{0}[{1}] {2,-11} {3}' -f $marker,($i+1),$rows[$i].Status,$rows[$i].Title) -ForegroundColor $color
-        }
-        Write-Host ('Page {0}/{1} | Up/Down: select | Enter: findings/tools | N/P: pages | R: refresh | C: live network checks | B/Esc: back' -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$pageSize)))
-        $answer=Read-PcEventChoice $keyboard 'Number: finding/tools | N/P: pages | R: refresh | C: live checks | B / 0: back'
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)}
-            '@DOWN'{$selected=[math]::Max(0,[math]::Min($rows.Count-1,$selected+1))}
-            '@HOME'{$selected=0} '@END'{$selected=[math]::Max(0,$rows.Count-1)}
-            'N'{if(($page+1)*$pageSize -lt $rows.Count){$selected=($page+1)*$pageSize}}
-            'P'{$selected=[math]::Max(0,($page-1)*$pageSize)}
-            'R'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network;$selected=0}
-            'C'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork;$selected=0}
-            '@ENTER'{if($rows.Count){Show-PcHealthFinding $rows[$selected]}}
-            default{$number=0;if([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $rows.Count){$selected=$number-1;Show-PcHealthFinding $rows[$selected]}}
+        $identities=@{}
+        $menu=@(foreach($row in $snapshot.Rows){
+            $identity=$row.Target+'|'+$row.Title
+            if(@($snapshot.Rows | Where-Object {($_.Target+'|'+$_.Title) -eq $identity}).Count -gt 1){$identity+='|'+$row.Detail}
+            $base=$identity;$suffix=1
+            while($identities.ContainsKey($identity)){$suffix++;$identity=$base+'|'+$suffix}
+            $identities[$identity]=$true
+            [pscustomobject]@{Id=$identity;Label=($row.Status+' | '+$row.Title);Detail=$row.Detail;Data=$row}
+        })
+        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network}
+            'Command'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}
+            'Select'{Show-PcHealthFinding $choice.Item.Data}
         }
     }
 }
@@ -1644,38 +1621,22 @@ function Get-PcScheduledTaskEntries {
     }finally{Write-Progress -Activity 'Inspecting scheduled tasks (read-only)' -Completed}
 }
 function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind) {
-    $all=@();$selected=0;$filter='';$reviewOnly=$false;$reload=$true;$keyboard=Test-PcEventKeyboard;$size=10
+    $state=@{};$reviewOnly=$false;$reload=$true;$all=@()
     while($true){
-        if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false;$selected=0}
-        $rows=@($all | Where-Object {(-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')) -and (-not $filter -or ($_.Name+' '+$_.Location+' '+$_.Command+' '+$_.Executable).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
-        $selected=[math]::Max(0,[math]::Min($selected,$rows.Count-1));$page=[int][math]::Floor($selected/[double]$size)
-        if($keyboard){Clear-Host}
-        Write-Host ("`n{0} INSPECTION | {1}/{2} entries | READ ONLY" -f $Kind,$rows.Count,$all.Count) -ForegroundColor Cyan
-        if($Kind -eq 'Startup'){Write-Host 'Win32 startup inventory is not exhaustive; packaged startup apps and disabled/approved state may be absent. No entry is executed.'}
-        else{Write-Host 'Visible tasks only; permissions may limit inventory. Nonzero results are review items, not proof of current failure. No task is run or changed.'}
-        Write-Host ("Filter: {0} | Review/unavailable only: {1}" -f $filter,$reviewOnly)
-        for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $marker=if($i -eq $selected){'>'}else{' '}
-            Write-Host ('{0}[{1}] {2,-11} {3} | {4}' -f $marker,($i+1),$rows[$i].Status,$rows[$i].Name,$rows[$i].State)
-            if($Kind -eq 'Startup'){
-                Write-Host ('     Command: '+([string]$rows[$i].Command -replace '[\x00-\x1F\x7F]',' '))
-                Write-Host ('     Source: '+$rows[$i].Location+' | Path: '+$rows[$i].PathStatus)
-            }
+        if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false}
+        $rows=@($all | Where-Object {-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
+        $menu=@(foreach($row in $rows){
+            $detail=if($Kind -eq 'Startup'){@('Command: '+$row.Command; 'Source: '+$row.Location+' | Path: '+$row.PathStatus)}else{@($row.Location+' | '+$row.State;'Result: '+$row.Result+' | '+$row.ResultMeaning)}
+            [pscustomobject]@{Id=($row.Location+'|'+$row.Name+'|'+$row.User+'|'+$row.Command);Label=($row.Status+' | '+$row.Name);Detail=$detail;SearchText=($row.Command+' '+$row.Executable);Data=$row}
+        })
+        $description=if($Kind -eq 'Startup'){'Read-only; inventory may omit packaged apps and enabled/approved state.'}else{'Read-only; visible tasks only. Nonzero results need review, not proof of failure.'}
+        $choice=Show-PcMenu -Title ('Windows > Startup/tasks > '+$Kind) -Items $menu -State $state -Filterable -Refreshable -DetailLines 2 -Description $description -Commands @{C=('Review only: '+$reviewOnly+' / toggle')}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$reload=$true}
+            'Command'{$reviewOnly=-not $reviewOnly}
+            'Select'{Show-PcListDetails $choice.Item.Data ($Kind+' details')}
         }
-        Write-Host 'Up/Down: select | Enter: details | N/P: pages | F: name/path filter | C: review/all | R: refresh | B/Esc: back'
-        $answer=Read-PcEventChoice $keyboard 'Number: details | N/P | F: filter | C: review/all | R: refresh | B / 0: back'
-        $open=-1
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)} '@DOWN'{$selected=[math]::Max(0,[math]::Min($rows.Count-1,$selected+1))}
-            '@HOME'{$selected=0} '@END'{$selected=[math]::Max(0,$rows.Count-1)}
-            'N'{if(($page+1)*$size -lt $rows.Count){$selected=($page+1)*$size}} 'P'{$selected=[math]::Max(0,($page-1)*$size)}
-            'R'{$reload=$true} 'C'{$reviewOnly=-not $reviewOnly;$selected=0}
-            'F'{try{$filter=Read-PcInput 'Name, location or startup command contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
-            '@ENTER'{if($rows.Count){$open=$selected}}
-            default{$n=0;if([int]::TryParse($answer,[ref]$n) -and $n -ge 1 -and $n -le $rows.Count){$open=$n-1}}
-        }
-        if($open -ge 0){$rows[$open] | Format-List * | Out-Host;$null=Read-Host 'Enter to return'}
     }
 }
 function Start-PcStartupTaskMenu {
@@ -1763,32 +1724,15 @@ function Show-PcServiceDetails($Row) {
     }
 }
 function Start-PcServices {
-    $selected=0;$filter='';$reload=$true;$keyboard=Test-PcEventKeyboard;$size=10
+    $state=@{};$reload=$true;$rows=@()
     while($true){
-        try{if($reload){$all=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;return}
-        $rows=@($all | Where-Object {(-not $filter) -or (($_.Name+' '+$_.DisplayName+' '+$_.PathName).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
-        $selected=[math]::Max(0,[math]::Min($selected,$rows.Count-1));$page=[int][math]::Floor($selected/[double]$size)
-        if($keyboard){Clear-Host}
-        Write-Host ("`nSERVICES | {0} matches | Filter: {1}" -f $rows.Count,$filter) -ForegroundColor Cyan
-        for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $row=$rows[$i];$marker=if($i -eq $selected){'>'}else{' '}
-            Write-Host ('{0}[{1}] {2} | {3} | {4} ({5})' -f $marker,($i+1),$row.State,$row.StartMode,$row.DisplayName,$row.Name)
-            Write-Host ('    '+($row.PathName -replace '[\x00-\x1F\x7F]',' '))
+        try{if($reload){$rows=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;return}
+        $menu=@(foreach($row in $rows){[pscustomobject]@{Id=$row.Name;Label=($row.State+' | '+$row.StartMode+' | '+$row.DisplayName+' ('+$row.Name+')');Detail=$row.PathName;SearchText=$row.StartName;Data=$row}})
+        $choice=Show-PcMenu -Title 'Windows > Services' -Items $menu -State $state -Filterable -Refreshable -Description 'Enter opens details and confirmed actions. Filtering also searches executable paths and accounts.'
+        switch($choice.Action){
+            'Back'{return} 'Refresh'{$reload=$true}
+            'Select'{Show-PcServiceDetails $choice.Item.Data;$reload=$true}
         }
-        Write-Host 'Arrows: select | Enter: details/actions | N/P: pages | F: filter | R: refresh | B/Esc: back'
-        $answer=Read-PcEventChoice $keyboard 'Select';$open=-1
-        if($null -eq $answer){return}
-        switch($answer.Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)} '@DOWN'{$selected=[math]::Min($rows.Count-1,$selected+1)}
-            '@HOME'{$selected=0} '@END'{$selected=$rows.Count-1}
-            'N'{if(($page+1)*$size -lt $rows.Count){$selected=($page+1)*$size}} 'P'{$selected=[math]::Max(0,($page-1)*$size)}
-            'F'{try{$filter=Read-PcInput 'Name or executable path contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
-            'R'{$reload=$true}
-            '@ENTER'{if($rows.Count){$open=$selected}}
-            default{$n=0;if([int]::TryParse($answer,[ref]$n) -and $n -ge 1 -and $n -le $rows.Count){$open=$n-1}}
-        }
-        if($open -ge 0){Show-PcServiceDetails $rows[$open];$reload=$true}
     }
 }
 function Get-PcRepairCommand {
@@ -1873,7 +1817,7 @@ function Read-PcMenuInput([bool]$Keyboard) {
         $value=ConvertFrom-PcMenuKey $key
         if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};continue}
         if($value -eq 'Select' -and $digits.Length){return $digits}
-        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d')){return $value}
+        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d','m','x','s','t')){return $value}
     }
 }
 function Format-PcMenuText {
@@ -1890,36 +1834,40 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.11.0',
+        [string]$Version='0.12.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=12,
-        [switch]$Plain
+        [switch]$Plain,
+        [hashtable]$Commands=@{},
+        [ValidateRange(1,3)][int]$DetailLines=1,
+        [switch]$ExpandedPreview
     )
     # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason.
     # Caller retains State and handles Select/Refresh/Back; no scriptblock is executed here.
-    $ids=@{};$keys=@{};$ordinal=0
+    $ids=@{};$keys=@{};$displayKeys=@{};$ordinal=0
     foreach($item in $Items){
         if([string]::IsNullOrWhiteSpace([string]$item.Id) -or [string]::IsNullOrWhiteSpace([string]$item.Label)){throw 'Menu items require Id and Label.'}
         if($ids.ContainsKey([string]$item.Id)){throw "Duplicate menu item Id: $($item.Id)"}
         $ids[[string]$item.Id]=$true
         $ordinal++;$key=if($item.Key){[string]$item.Key}else{[string]$ordinal}
         if($key -notmatch '^(?:[1-9][0-9]*|[ACLED])$' -or $keys.ContainsKey($key)){throw "Invalid or duplicate menu key: $key"}
-        $keys[$key]=[string]$item.Id
+        $keys[$key]=[string]$item.Id;$displayKeys[[string]$item.Id]=$key
     }
+    foreach($key in $Commands.Keys){if($key -notmatch '^[ACDEFLMSTX]$' -or $keys.ContainsKey($key) -or ($key -eq 'F' -and $Filterable)){throw "Invalid or conflicting menu command: $key"}}
     if(-not $State.ContainsKey('Filter')){$State.Filter=''}
     if(-not $State.ContainsKey('SelectedId')){$State.SelectedId=''}
     $keyboard=(-not $Plain -and (Test-PcMenuKeyboard));$notice=''
     while($true){
-        $rows=@($Items | Where-Object {(-not $Filterable) -or (-not $State.Filter) -or (($_.Label+' '+$_.Detail).IndexOf([string]$State.Filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
+        $rows=@($Items | Where-Object {(-not $Filterable) -or (-not $State.Filter) -or (($_.Label+' '+($_.Detail -join ' ')+' '+$_.SearchText).IndexOf([string]$State.Filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
         $selected=0
         for($i=0;$i -lt $rows.Count;$i++){if([string]$rows[$i].Id -eq $State.SelectedId){$selected=$i;break}}
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
         $size=$PageSize;$width=100
         if($keyboard){
-            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-11)/2)));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-13)/($DetailLines+1))));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             Clear-Host
         }
         $page=[int][math]::Floor($selected/[double]$size)
@@ -1928,12 +1876,15 @@ function Show-PcMenu {
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
         if(-not $rows.Count){Write-Host 'No matching items.'}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $row=$rows[$i];$displayKey=($keys.Keys | Where-Object {$keys[$_] -eq [string]$row.Id} | Select-Object -First 1);$marker=if($i -eq $selected){'>'}else{' '}
+            $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
             $color=if($row.DisabledReason){'DarkGray'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
             Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color
-            $detail=if($row.DisabledReason){'UNAVAILABLE: '+$row.DisabledReason}else{[string]$row.Detail}
-            Write-Host (Format-PcMenuText ('    '+$detail) $width)
+            $detail=@($row.Detail | Select-Object -First $DetailLines)
+            if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
+            if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
+            if(-not $detail.Count){$detail=@('')}
+            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width)}
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
@@ -1941,10 +1892,12 @@ function Show-PcMenu {
         if($Filterable){$footer+=' | F: filter'}
         if($Refreshable){$footer+=' | R: refresh'}
         Write-Host $footer
+        if($Commands.Count){Write-Host (($Commands.Keys | Sort-Object | ForEach-Object {$_+': '+$Commands[$_]}) -join ' | ')}
         if($notice){Write-Warning $notice;$notice=''}
         $answer=Read-PcMenuInput $keyboard
         if($null -eq $answer){return [pscustomobject]@{Action='Back';Item=$null;State=$State}}
         $choice=$answer.Trim();$open=$false
+        if($Commands.ContainsKey($choice)){return [pscustomobject]@{Action='Command';Command=$choice.ToUpperInvariant();Item=$null;State=$State}}
         switch($choice.ToUpperInvariant()){
             {$_ -in @('BACK','B','0')}{return [pscustomobject]@{Action='Back';Item=$null;State=$State}}
             'UP'{$selected=[math]::Max(0,$selected-1)}
@@ -1991,6 +1944,17 @@ function Read-PcCategoryMenu {
 }
 function Wait-PcMenuReturn {
     if(Test-PcMenuKeyboard){$null=Read-Host 'Enter to return'}
+}
+
+function Show-PcListDetails {
+    param($Row,[string]$Title='Details')
+    Write-Host ("`n"+$Title) -ForegroundColor Cyan
+    $Row | Format-List * | Out-Host
+    while($true){
+        Write-Host 'Enter / Esc / Backspace / B: back'
+        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
+        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+    }
 }
 # END MENU ENGINE
 
