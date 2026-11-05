@@ -43,7 +43,7 @@ Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check
 
 ## Storage
 
-Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.3 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
+Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.4 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
 
 ## Printing
 
