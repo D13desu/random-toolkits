@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.6.8
+# Random Toolkits | Windows Toolkit 0.6.9
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -394,9 +394,9 @@ function Get-PcDiskHelperRuntimeReason {
 
 function Get-PcDiskHelperPackage {
     [pscustomobject]@{
-        Version='0.8.0-experiment'
-        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.8.0/DiskHelper-0.8.0-experiment.zip'
-        Sha256='A0319284C58139BA3A5500E24EC0AF648E27D4A9EB80948D0727F1CA1D391442'
+        Version='0.8.1-experiment'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.8.1/DiskHelper-0.8.1-experiment.zip'
+        Sha256='A3C1090C6B0FA6DE1D4A743421B2E362BBB866883EE2EEC2FEB0D5233CDAFD61'
     }
 }
 
@@ -780,7 +780,7 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
         [pscustomobject]@{Key='disk';Id='disk';Name='Open disk usage explorer (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
-        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.8.0 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.8.1 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -957,7 +957,7 @@ function Start-NetworkMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.8' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.9' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
