@@ -1,4 +1,98 @@
 # Embedded into Network-Toolkit.ps1 for the single-download launcher.
+function ConvertTo-DiscoveryMac([string]$Mac) {
+    $value=$Mac.Trim()
+    if($value -notmatch '^(?:[0-9A-Fa-f]{12}|(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2})$'){return ''}
+    return ($value -replace '[:.\-]','').ToUpperInvariant()
+}
+function Get-DiscoveryOuiDatabase {
+    param([string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'Random-Toolkits\oui'))
+    $map=@{};$date='';$status='Unavailable';$cache=Join-Path $CacheDirectory 'assignments.csv'
+    try{
+        if(Test-Path -LiteralPath $cache){
+            foreach($row in (Import-Csv -LiteralPath $cache -Encoding UTF8 -ErrorAction Stop)){
+                if($row.Assignment -notmatch '^(?:[A-F0-9]{6}|[A-F0-9]{7}|[A-F0-9]{9})$' -or [string]::IsNullOrWhiteSpace($row.Organization)){throw 'Invalid cached assignment data.'}
+                $map[$row.Assignment]=$row.Organization
+            }
+            if(-not $map.Count){throw 'Empty cached assignment data.'}
+            $date=(Get-Item -LiteralPath $cache).LastWriteTimeUtc.ToString('o');$status='Cached'
+        }
+    }catch{$map=@{};$date=''}
+    $temporary=New-Object 'Collections.Generic.List[string]'
+    try{
+        $attempt=Join-Path $CacheDirectory 'last-attempt.txt'
+        $fresh=$date -and ([datetime]::UtcNow-[datetime]::Parse($date).ToUniversalTime()).TotalDays -lt 30
+        $recent=(Test-Path -LiteralPath $attempt) -and ([datetime]::UtcNow-(Get-Item -LiteralPath $attempt).LastWriteTimeUtc).TotalHours -lt 24
+        if(-not $fresh -and -not $recent){
+            $null=[IO.Directory]::CreateDirectory($CacheDirectory)
+            [IO.File]::WriteAllText($attempt,[datetime]::UtcNow.ToString('o'))
+            Write-Host 'Downloading IEEE MAC assignment lists for local lookup (cached for 30 days)...'
+            $records=New-Object 'Collections.Generic.List[object]';$newMap=@{}
+            foreach($source in @(@('oui/oui.csv',6,'MA-L'),@('oui28/mam.csv',7,'MA-M'),@('oui36/oui36.csv',9,'MA-S'))){
+                $file=Join-Path $CacheDirectory ([guid]::NewGuid().ToString('N')+'.tmp');$temporary.Add($file)
+                Invoke-WebRequest -UseBasicParsing -Uri ('https://standards-oui.ieee.org/'+$source[0]) -OutFile $file -TimeoutSec 15 -ErrorAction Stop
+                $count=0
+                foreach($row in (Import-Csv -LiteralPath $file -Encoding UTF8 -ErrorAction Stop)){
+                    if($row.Registry -ne $source[2] -or $row.Assignment -notmatch ('^[A-Fa-f0-9]{'+$source[1]+'}$') -or [string]::IsNullOrWhiteSpace($row.'Organization Name')){throw 'Invalid IEEE assignment list.'}
+                    $key=$row.Assignment.ToUpperInvariant();$name=$row.'Organization Name' -replace '[\x00-\x1F\x7F]',' '
+                    $records.Add([pscustomobject]@{Assignment=$key;Organization=$name});$newMap[$key]=$name;$count++
+                }
+                if(-not $count){throw 'Empty IEEE assignment list.'}
+            }
+            $staged=Join-Path $CacheDirectory ([guid]::NewGuid().ToString('N')+'.tmp');$temporary.Add($staged)
+            $records.ToArray() | Export-Csv -LiteralPath $staged -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+            Move-Item -LiteralPath $staged -Destination $cache -Force -ErrorAction Stop
+            $map=$newMap;$date=(Get-Item -LiteralPath $cache).LastWriteTimeUtc.ToString('o');$status='Downloaded'
+        }elseif($map.Count -and -not $fresh){$status='Stale cache'}
+    }catch{
+        $status=if($map.Count){'Stale cache (refresh unavailable)'}else{'Unavailable (download/cache error)'}
+        Write-Verbose $_.Exception.Message
+        Write-Warning 'IEEE lookup data could not be refreshed. Discovery still works; cached assignments will be used when available.'
+    }finally{foreach($file in $temporary){if(Test-Path -LiteralPath $file){Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue}}}
+    [pscustomobject]@{Entries=$map;RetrievedUtc=$date;Status=$status}
+}
+function Resolve-DiscoveryOui([string]$Mac,$Database) {
+    $value=ConvertTo-DiscoveryMac $Mac;$prefix='';$vendor='';$kind='Invalid MAC'
+    if($value){
+        $first=[Convert]::ToInt32($value.Substring(0,2),16)
+        if($value -eq '000000000000'){$kind='Unspecified'}
+        elseif($value -eq 'FFFFFFFFFFFF'){$kind='Broadcast'}
+        elseif($first -band 1){$kind='Multicast'}
+        elseif($first -band 2){$kind='Locally administered (may be randomized)'}
+        elseif(-not $Database -or -not $Database.Entries.Count){$kind='Database unavailable'}
+        else{
+            $kind='No IEEE match'
+            foreach($length in @(9,7,6)){
+                $candidate=$value.Substring(0,$length)
+                if($Database.Entries.ContainsKey($candidate)){$prefix=$candidate+'/'+($length*4);$vendor=$Database.Entries[$candidate];$kind='IEEE assignment';break}
+            }
+        }
+    }
+    $formatted=if($value){([regex]::Matches($value,'..') | ForEach-Object {$_.Value}) -join ':'}else{''}
+    [pscustomobject]@{MAC=$formatted;OuiPrefix=$prefix;Vendor=$vendor;MacStatus=$kind}
+}
+function Add-DiscoveryMacInfo($Rows,$Database,[object[]]$Neighbors) {
+    $index=@{}
+    foreach($neighbor in $Neighbors){
+        if([string]$neighbor.State -notin @('Reachable','Stale','Delay','Probe','Permanent')){continue}
+        $mac=ConvertTo-DiscoveryMac ([string]$neighbor.LinkLayerAddress)
+        if(-not $mac -or $mac -in @('000000000000','FFFFFFFFFFFF')){continue}
+        if(-not $index.ContainsKey([string]$neighbor.IPAddress)){$index[[string]$neighbor.IPAddress]=@()}
+        $index[[string]$neighbor.IPAddress]+=$neighbor
+    }
+    foreach($row in $Rows){
+        $matches=@($index[[string]$row.Address] | Where-Object {$null -ne $_})
+        $macs=@($matches | ForEach-Object {ConvertTo-DiscoveryMac $_.LinkLayerAddress} | Select-Object -Unique)
+        $info=Resolve-DiscoveryOui '' $Database
+        if($macs.Count -eq 1){$info=Resolve-DiscoveryOui $macs[0] $Database}
+        elseif($macs.Count -gt 1){$info.MacStatus='Ambiguous neighbor entries'}
+        else{$info.MacStatus='No neighbor MAC available'}
+        foreach($property in $info.PSObject.Properties){$row | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force}
+        $row | Add-Member -NotePropertyName MacInterfaces -NotePropertyValue (($matches | Select-Object -ExpandProperty InterfaceIndex -Unique) -join ',') -Force
+        $row | Add-Member -NotePropertyName MacNeighborState -NotePropertyValue (($matches | ForEach-Object {[string]$_.State} | Select-Object -Unique) -join ',') -Force
+        $row | Add-Member -NotePropertyName OuiRetrievedUtc -NotePropertyValue $Database.RetrievedUtc -Force
+        $row | Add-Member -NotePropertyName OuiDatabaseStatus -NotePropertyValue $Database.Status -Force
+    }
+}
 function ConvertTo-DiscoveryNumber([string]$Address) {
     if($Address -notmatch '^\d{1,3}(\.\d{1,3}){3}$'){throw 'Use dotted-decimal IPv4 addresses.'}
     [uint64]$value=0
@@ -97,17 +191,26 @@ function Start-NetworkDiscovery {
     }
     Write-Host ("Scanning {0} through {1}: {2} addresses; TCP ports {3}. B stops the scan." -f $targets[0],$targets[-1],$targets.Count,($ports -join ','))
     $result=Invoke-NetworkDiscovery -Scope $scope -Ports $ports -TimeoutMs $timeout
-    $page=0;$showAll=$false
+    $neighbors=@()
+    try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable; MAC addresses will be omitted.'}
+    $database=Get-DiscoveryOuiDatabase
+    Add-DiscoveryMacInfo $result.Rows $database $neighbors
+    $page=0;$showAll=$false;$probeView=$false
     while($true){
         $rows=@($result.Rows | Where-Object {$showAll -or $_.Responded})
         Write-Host ("`nDISCOVERY | {0}/{1} addresses checked | Cancelled: {2} | Displayed: {3}" -f $result.Completed,$result.Requested,$result.Cancelled,$rows.Count) -ForegroundColor Cyan
         Write-Host 'No response does not mean offline. Open ports do not identify services or device type. Closed = connection refused; Error = another connection error.'
-        $rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,Ping,LatencyMs,OpenTCP,ClosedTCP,NoResponseTCP,ErrorTCP -AutoSize | Out-Host
-        $answer=Read-Host 'N/P: pages | A: toggle all/responding | E: export completed results CSV | B / 0: back'
+        Write-Host ('IEEE data: {0} | Retrieved UTC: {1}. Vendor is the registered assignee, not a verified device identity.' -f $database.Status,$database.RetrievedUtc)
+        Write-Host 'MACs are exact-IP neighbor-cache observations (possibly stale/proxied); routed targets usually have no MAC. Local/randomized MACs have no vendor attribution.'
+        if($probeView){$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,Ping,LatencyMs,OpenTCP,ClosedTCP,NoResponseTCP,ErrorTCP -AutoSize | Out-Host}
+        else{$rows | Select-Object -Skip ($page*20) -First 20 | Format-Table Address,MAC,Vendor,MacStatus,OpenTCP -Wrap | Out-Host}
+        $answer=Read-Host 'N/P: pages | A: all/responding | D: MAC/probe view | M: lookup MAC | E: export CSV | B / 0: back'
         switch(([string]$answer).Trim().ToUpperInvariant()){
             'B'{return} '0'{return}
             'N'{if(($page+1)*20 -lt $rows.Count){$page++}} 'P'{$page=[math]::Max(0,$page-1)}
             'A'{$showAll=-not $showAll;$page=0}
+            'D'{$probeView=-not $probeView}
+            'M'{try{Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database | Format-List | Out-Host}catch [OperationCanceledException] {}}
             'E'{
                 try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path"}
                 catch [OperationCanceledException] {} catch{Write-Warning $_.Exception.Message}
