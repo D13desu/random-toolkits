@@ -1,4 +1,4 @@
-# Windows Toolkit 0.6.7
+# Windows Toolkit 0.6.8
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -34,7 +34,7 @@ The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **
 
 ## Storage
 
-**1** opens production Disk Usage 0.4.5. **2** opens experimental C# Disk Helper 0.7.1 in MFT mode. After scanning, **A** shows unique-file versus hard-link accounting and separate metadata observations; **E** separates informational diagnostics from exclusions and uncertainty. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
+**1** opens production Disk Usage 0.4.5. **2** opens experimental C# Disk Helper 0.8.0 in MFT mode. After scanning, **A** shows unique-file versus hard-link accounting and separate metadata observations; **E** separates informational diagnostics from exclusions and uncertainty. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
 
 The helper downloads from a pinned GitHub release, with the ZIP's SHA-256 checked before extraction. Its client verifies the executable hash and version handshake. It runs from an isolated temporary directory that is removed on exit. No separate `irm` command or permanent installation is required. The noninteractive action ID is `disk-helper`.
 
@@ -189,3 +189,5 @@ Menu tests verify that every action remains reachable, every category returns to
 Power tests simulate laptop/desktop firmware, localized plan output, missing plans, confirmation/cancellation, and driver support. All changes are mocked. Read-only power/health provider calls were checked on a Windows desktop; real laptop and NIC modification outcomes still need device validation. Disk tests use isolated temporary files, including a junction loop. Windows PowerShell 5.0 remains targeted but not runtime-tested.
 
 Printing/policy/event tests cover query filters (including level 0), literal message matching, empty vs access-denied results, invalid input, paging/detail navigation, per-printer errors, repair cancellation, spooler state handling and scoped gpupdate arguments. Mutations are mocked. Read-only printer inventory and System event retrieval were smoke-tested locally; real service restart and domain policy processing are not exercised by tests.
+
+Experimental disk browsing supports Up/Down selection, Enter/Right to enter a folder, Left/Backspace/Escape to return, and Ctrl+Enter (or O) to open the selected directory in Explorer. With a file selected, Explorer opens the current directory. Line-input navigation remains available in redirected hosts.
