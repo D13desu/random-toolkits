@@ -56,32 +56,15 @@ function Show-PcServiceDetails($Row) {
     }
 }
 function Start-PcServices {
-    $selected=0;$filter='';$reload=$true;$keyboard=Test-PcEventKeyboard;$size=10
+    $state=@{};$reload=$true;$rows=@()
     while($true){
-        try{if($reload){$all=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;return}
-        $rows=@($all | Where-Object {(-not $filter) -or (($_.Name+' '+$_.DisplayName+' '+$_.PathName).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
-        $selected=[math]::Max(0,[math]::Min($selected,$rows.Count-1));$page=[int][math]::Floor($selected/[double]$size)
-        if($keyboard){Clear-Host}
-        Write-Host ("`nSERVICES | {0} matches | Filter: {1}" -f $rows.Count,$filter) -ForegroundColor Cyan
-        for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $row=$rows[$i];$marker=if($i -eq $selected){'>'}else{' '}
-            Write-Host ('{0}[{1}] {2} | {3} | {4} ({5})' -f $marker,($i+1),$row.State,$row.StartMode,$row.DisplayName,$row.Name)
-            Write-Host ('    '+($row.PathName -replace '[\x00-\x1F\x7F]',' '))
+        try{if($reload){$rows=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;return}
+        $menu=@(foreach($row in $rows){[pscustomobject]@{Id=$row.Name;Label=($row.State+' | '+$row.StartMode+' | '+$row.DisplayName+' ('+$row.Name+')');Detail=$row.PathName;SearchText=$row.StartName;Data=$row}})
+        $choice=Show-PcMenu -Title 'Windows > Services' -Items $menu -State $state -Filterable -Refreshable -Description 'Enter opens details and confirmed actions. Filtering also searches executable paths and accounts.'
+        switch($choice.Action){
+            'Back'{return} 'Refresh'{$reload=$true}
+            'Select'{Show-PcServiceDetails $choice.Item.Data;$reload=$true}
         }
-        Write-Host 'Arrows: select | Enter: details/actions | N/P: pages | F: filter | R: refresh | B/Esc: back'
-        $answer=Read-PcEventChoice $keyboard 'Select';$open=-1
-        if($null -eq $answer){return}
-        switch($answer.Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)} '@DOWN'{$selected=[math]::Min($rows.Count-1,$selected+1)}
-            '@HOME'{$selected=0} '@END'{$selected=$rows.Count-1}
-            'N'{if(($page+1)*$size -lt $rows.Count){$selected=($page+1)*$size}} 'P'{$selected=[math]::Max(0,($page-1)*$size)}
-            'F'{try{$filter=Read-PcInput 'Name or executable path contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
-            'R'{$reload=$true}
-            '@ENTER'{if($rows.Count){$open=$selected}}
-            default{$n=0;if([int]::TryParse($answer,[ref]$n) -and $n -ge 1 -and $n -le $rows.Count){$open=$n-1}}
-        }
-        if($open -ge 0){Show-PcServiceDetails $rows[$open];$reload=$true}
     }
 }
 function Get-PcRepairCommand {

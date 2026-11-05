@@ -20,7 +20,7 @@ function Read-PcMenuInput([bool]$Keyboard) {
         $value=ConvertFrom-PcMenuKey $key
         if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};continue}
         if($value -eq 'Select' -and $digits.Length){return $digits}
-        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d')){return $value}
+        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d','m','x','s','t')){return $value}
     }
 }
 function Format-PcMenuText {
@@ -37,36 +37,40 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.11.0',
+        [string]$Version='0.12.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=12,
-        [switch]$Plain
+        [switch]$Plain,
+        [hashtable]$Commands=@{},
+        [ValidateRange(1,3)][int]$DetailLines=1,
+        [switch]$ExpandedPreview
     )
     # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason.
     # Caller retains State and handles Select/Refresh/Back; no scriptblock is executed here.
-    $ids=@{};$keys=@{};$ordinal=0
+    $ids=@{};$keys=@{};$displayKeys=@{};$ordinal=0
     foreach($item in $Items){
         if([string]::IsNullOrWhiteSpace([string]$item.Id) -or [string]::IsNullOrWhiteSpace([string]$item.Label)){throw 'Menu items require Id and Label.'}
         if($ids.ContainsKey([string]$item.Id)){throw "Duplicate menu item Id: $($item.Id)"}
         $ids[[string]$item.Id]=$true
         $ordinal++;$key=if($item.Key){[string]$item.Key}else{[string]$ordinal}
         if($key -notmatch '^(?:[1-9][0-9]*|[ACLED])$' -or $keys.ContainsKey($key)){throw "Invalid or duplicate menu key: $key"}
-        $keys[$key]=[string]$item.Id
+        $keys[$key]=[string]$item.Id;$displayKeys[[string]$item.Id]=$key
     }
+    foreach($key in $Commands.Keys){if($key -notmatch '^[ACDEFLMSTX]$' -or $keys.ContainsKey($key) -or ($key -eq 'F' -and $Filterable)){throw "Invalid or conflicting menu command: $key"}}
     if(-not $State.ContainsKey('Filter')){$State.Filter=''}
     if(-not $State.ContainsKey('SelectedId')){$State.SelectedId=''}
     $keyboard=(-not $Plain -and (Test-PcMenuKeyboard));$notice=''
     while($true){
-        $rows=@($Items | Where-Object {(-not $Filterable) -or (-not $State.Filter) -or (($_.Label+' '+$_.Detail).IndexOf([string]$State.Filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
+        $rows=@($Items | Where-Object {(-not $Filterable) -or (-not $State.Filter) -or (($_.Label+' '+($_.Detail -join ' ')+' '+$_.SearchText).IndexOf([string]$State.Filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)})
         $selected=0
         for($i=0;$i -lt $rows.Count;$i++){if([string]$rows[$i].Id -eq $State.SelectedId){$selected=$i;break}}
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
         $size=$PageSize;$width=100
         if($keyboard){
-            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-11)/2)));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-13)/($DetailLines+1))));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             Clear-Host
         }
         $page=[int][math]::Floor($selected/[double]$size)
@@ -75,12 +79,15 @@ function Show-PcMenu {
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
         if(-not $rows.Count){Write-Host 'No matching items.'}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $row=$rows[$i];$displayKey=($keys.Keys | Where-Object {$keys[$_] -eq [string]$row.Id} | Select-Object -First 1);$marker=if($i -eq $selected){'>'}else{' '}
+            $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
             $color=if($row.DisabledReason){'DarkGray'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
             Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color
-            $detail=if($row.DisabledReason){'UNAVAILABLE: '+$row.DisabledReason}else{[string]$row.Detail}
-            Write-Host (Format-PcMenuText ('    '+$detail) $width)
+            $detail=@($row.Detail | Select-Object -First $DetailLines)
+            if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
+            if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
+            if(-not $detail.Count){$detail=@('')}
+            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width)}
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
@@ -88,10 +95,12 @@ function Show-PcMenu {
         if($Filterable){$footer+=' | F: filter'}
         if($Refreshable){$footer+=' | R: refresh'}
         Write-Host $footer
+        if($Commands.Count){Write-Host (($Commands.Keys | Sort-Object | ForEach-Object {$_+': '+$Commands[$_]}) -join ' | ')}
         if($notice){Write-Warning $notice;$notice=''}
         $answer=Read-PcMenuInput $keyboard
         if($null -eq $answer){return [pscustomobject]@{Action='Back';Item=$null;State=$State}}
         $choice=$answer.Trim();$open=$false
+        if($Commands.ContainsKey($choice)){return [pscustomobject]@{Action='Command';Command=$choice.ToUpperInvariant();Item=$null;State=$State}}
         switch($choice.ToUpperInvariant()){
             {$_ -in @('BACK','B','0')}{return [pscustomobject]@{Action='Back';Item=$null;State=$State}}
             'UP'{$selected=[math]::Max(0,$selected-1)}
@@ -138,4 +147,15 @@ function Read-PcCategoryMenu {
 }
 function Wait-PcMenuReturn {
     if(Test-PcMenuKeyboard){$null=Read-Host 'Enter to return'}
+}
+
+function Show-PcListDetails {
+    param($Row,[string]$Title='Details')
+    Write-Host ("`n"+$Title) -ForegroundColor Cyan
+    $Row | Format-List * | Out-Host
+    while($true){
+        Write-Host 'Enter / Esc / Backspace / B: back'
+        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
+        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+    }
 }

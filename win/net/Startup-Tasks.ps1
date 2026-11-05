@@ -58,38 +58,22 @@ function Get-PcScheduledTaskEntries {
     }finally{Write-Progress -Activity 'Inspecting scheduled tasks (read-only)' -Completed}
 }
 function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind) {
-    $all=@();$selected=0;$filter='';$reviewOnly=$false;$reload=$true;$keyboard=Test-PcEventKeyboard;$size=10
+    $state=@{};$reviewOnly=$false;$reload=$true;$all=@()
     while($true){
-        if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false;$selected=0}
-        $rows=@($all | Where-Object {(-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')) -and (-not $filter -or ($_.Name+' '+$_.Location+' '+$_.Command+' '+$_.Executable).IndexOf($filter,[StringComparison]::OrdinalIgnoreCase) -ge 0)} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
-        $selected=[math]::Max(0,[math]::Min($selected,$rows.Count-1));$page=[int][math]::Floor($selected/[double]$size)
-        if($keyboard){Clear-Host}
-        Write-Host ("`n{0} INSPECTION | {1}/{2} entries | READ ONLY" -f $Kind,$rows.Count,$all.Count) -ForegroundColor Cyan
-        if($Kind -eq 'Startup'){Write-Host 'Win32 startup inventory is not exhaustive; packaged startup apps and disabled/approved state may be absent. No entry is executed.'}
-        else{Write-Host 'Visible tasks only; permissions may limit inventory. Nonzero results are review items, not proof of current failure. No task is run or changed.'}
-        Write-Host ("Filter: {0} | Review/unavailable only: {1}" -f $filter,$reviewOnly)
-        for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $marker=if($i -eq $selected){'>'}else{' '}
-            Write-Host ('{0}[{1}] {2,-11} {3} | {4}' -f $marker,($i+1),$rows[$i].Status,$rows[$i].Name,$rows[$i].State)
-            if($Kind -eq 'Startup'){
-                Write-Host ('     Command: '+([string]$rows[$i].Command -replace '[\x00-\x1F\x7F]',' '))
-                Write-Host ('     Source: '+$rows[$i].Location+' | Path: '+$rows[$i].PathStatus)
-            }
+        if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false}
+        $rows=@($all | Where-Object {-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
+        $menu=@(foreach($row in $rows){
+            $detail=if($Kind -eq 'Startup'){@('Command: '+$row.Command; 'Source: '+$row.Location+' | Path: '+$row.PathStatus)}else{@($row.Location+' | '+$row.State;'Result: '+$row.Result+' | '+$row.ResultMeaning)}
+            [pscustomobject]@{Id=($row.Location+'|'+$row.Name+'|'+$row.User+'|'+$row.Command);Label=($row.Status+' | '+$row.Name);Detail=$detail;SearchText=($row.Command+' '+$row.Executable);Data=$row}
+        })
+        $description=if($Kind -eq 'Startup'){'Read-only; inventory may omit packaged apps and enabled/approved state.'}else{'Read-only; visible tasks only. Nonzero results need review, not proof of failure.'}
+        $choice=Show-PcMenu -Title ('Windows > Startup/tasks > '+$Kind) -Items $menu -State $state -Filterable -Refreshable -DetailLines 2 -Description $description -Commands @{C=('Review only: '+$reviewOnly+' / toggle')}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$reload=$true}
+            'Command'{$reviewOnly=-not $reviewOnly}
+            'Select'{Show-PcListDetails $choice.Item.Data ($Kind+' details')}
         }
-        Write-Host 'Up/Down: select | Enter: details | N/P: pages | F: name/path filter | C: review/all | R: refresh | B/Esc: back'
-        $answer=Read-PcEventChoice $keyboard 'Number: details | N/P | F: filter | C: review/all | R: refresh | B / 0: back'
-        $open=-1
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)} '@DOWN'{$selected=[math]::Max(0,[math]::Min($rows.Count-1,$selected+1))}
-            '@HOME'{$selected=0} '@END'{$selected=[math]::Max(0,$rows.Count-1)}
-            'N'{if(($page+1)*$size -lt $rows.Count){$selected=($page+1)*$size}} 'P'{$selected=[math]::Max(0,($page-1)*$size)}
-            'R'{$reload=$true} 'C'{$reviewOnly=-not $reviewOnly;$selected=0}
-            'F'{try{$filter=Read-PcInput 'Name, location or startup command contains [blank: all]';$selected=0}catch [OperationCanceledException]{}}
-            '@ENTER'{if($rows.Count){$open=$selected}}
-            default{$n=0;if([int]::TryParse($answer,[ref]$n) -and $n -ge 1 -and $n -le $rows.Count){$open=$n-1}}
-        }
-        if($open -ge 0){$rows[$open] | Format-List * | Out-Host;$null=Read-Host 'Enter to return'}
     }
 }
 function Start-PcStartupTaskMenu {

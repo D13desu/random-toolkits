@@ -33,9 +33,9 @@ Assert ($script:Calls[-1] -eq 'VerifyFiles') 'Verification launches without repa
 Assert (((Get-PcRepairCommand VerifyFiles).Arguments -join ' ') -eq '/verifyonly') 'Verification cannot repair files'
 Assert (((Get-PcRepairCommand RestoreHealth).Arguments -join ' ') -eq '/Online /Cleanup-Image /RestoreHealth /NoRestart') 'DISM repair uses fixed arguments and suppresses restart'
 function Get-PcServiceInventory {[pscustomobject]@{Name='Fixture';DisplayName='Fixture';PathName='C:\fixture.exe';State='Running';StartMode='Auto'}}
-function Test-PcEventKeyboard {$false}
+function Test-PcMenuKeyboard {$false}
 function Show-PcServiceDetails {param($Row) Assert ($Row.Name -eq 'Fixture') 'Selection opens correct service'}
-foreach($answer in @('F','fixture','@DOWN','@ENTER','R','B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('F','fixture','Down','Select','R','B')){$script:Answers.Enqueue($answer)}
 Start-PcServices
 $script:Answers.Enqueue('B');Start-PcWindowsRepair
 Assert ($script:Answers.Count -eq 0) 'Services navigation/filter/refresh and repair Back return cleanly'

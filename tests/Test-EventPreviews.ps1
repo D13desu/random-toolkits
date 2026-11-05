@@ -19,12 +19,12 @@ function Get-WinEvent {
 $script:Output=New-Object 'Collections.Generic.List[string]'
 function Write-Host {param($Object,$ForegroundColor) $script:Output.Add([string]$Object)}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('@END','@HOME','@DOWN','@DOWN','@DOWN','@DOWN','@DOWN','@UP','@DOWN','@ENTER','X','M','B','P','B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('Last','First','Down','Down','Down','Down','Down','Up','Down','Select','X','M','B','P','B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 if($KeyboardMode){
- function Test-PcEventKeyboard {$true}
+ function Test-PcMenuKeyboard {$true}
  function Clear-Host {}
- function Read-PcEventChoice {param($Keyboard,$Prompt) Read-Host $Prompt}
+ function Read-PcMenuInput {param($Keyboard,$Prompt) Read-Host $Prompt}
 }
 Start-PcEventBrowser -DefaultLog Application -Quick
 Assert ($script:Answers.Count -eq 0) 'Preview paging and detail return preserve browser navigation'

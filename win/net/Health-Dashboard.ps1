@@ -132,39 +132,31 @@ function Open-PcHealthTarget([string]$Target) {
 function Show-PcHealthFinding($Finding) {
     Write-Host ("`n[{0}] {1}" -f $Finding.Status,$Finding.Title) -ForegroundColor Cyan
     Write-Host $Finding.Detail
-    Write-Host 'Related checks/repair menus retain their requirements and yes/no confirmation. No repair is run by opening this finding.'
     while($true){
-        $answer=Read-Host '1: open related tools | B / 0 / Enter: back'
-        if([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim() -in @('B','0')){return}
-        if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message};return}
+        Write-Host '1: related tools | Enter / Esc / Backspace / B: back (opening tools does not run a repair)'
+        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
+        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+        if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn};return}
     }
 }
 function Start-PcHealthDashboard {
-    $network=$false;$snapshot=Get-PcHealthDashboard;$selected=0;$keyboard=Test-PcEventKeyboard;$pageSize=8
+    $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
-        if($keyboard){Clear-Host}
-        $rows=@($snapshot.Rows);$page=[int][math]::Floor($selected/[double]$pageSize)
-        Write-Host ("`nWINDOWS HEALTH | {0} | READ ONLY" -f $snapshot.CollectedAt) -ForegroundColor Cyan
-        Write-Host 'Snapshot, not a full health certificate. C runs live gateway, DNS and domain-member trust checks (no repair).'
-        Write-Host ('Live network checks included: '+$network)
-        $counts=($rows | Group-Object Status | ForEach-Object {"$($_.Name): $($_.Count)"}) -join ' | ';Write-Host $counts
-        for($i=$page*$pageSize;$i -lt [math]::Min($rows.Count,($page+1)*$pageSize);$i++){
-            $marker=if($i -eq $selected){'>'}else{' '};$color=if($rows[$i].Status -eq 'WARN'){'Yellow'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host ('{0}[{1}] {2,-11} {3}' -f $marker,($i+1),$rows[$i].Status,$rows[$i].Title) -ForegroundColor $color
-        }
-        Write-Host ('Page {0}/{1} | Up/Down: select | Enter: findings/tools | N/P: pages | R: refresh | C: live network checks | B/Esc: back' -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$pageSize)))
-        $answer=Read-PcEventChoice $keyboard 'Number: finding/tools | N/P: pages | R: refresh | C: live checks | B / 0: back'
-        switch(([string]$answer).Trim().ToUpperInvariant()){
-            'B'{return} '0'{return}
-            '@UP'{$selected=[math]::Max(0,$selected-1)}
-            '@DOWN'{$selected=[math]::Max(0,[math]::Min($rows.Count-1,$selected+1))}
-            '@HOME'{$selected=0} '@END'{$selected=[math]::Max(0,$rows.Count-1)}
-            'N'{if(($page+1)*$pageSize -lt $rows.Count){$selected=($page+1)*$pageSize}}
-            'P'{$selected=[math]::Max(0,($page-1)*$pageSize)}
-            'R'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network;$selected=0}
-            'C'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork;$selected=0}
-            '@ENTER'{if($rows.Count){Show-PcHealthFinding $rows[$selected]}}
-            default{$number=0;if([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $rows.Count){$selected=$number-1;Show-PcHealthFinding $rows[$selected]}}
+        $identities=@{}
+        $menu=@(foreach($row in $snapshot.Rows){
+            $identity=$row.Target+'|'+$row.Title
+            if(@($snapshot.Rows | Where-Object {($_.Target+'|'+$_.Title) -eq $identity}).Count -gt 1){$identity+='|'+$row.Detail}
+            $base=$identity;$suffix=1
+            while($identities.ContainsKey($identity)){$suffix++;$identity=$base+'|'+$suffix}
+            $identities[$identity]=$true
+            [pscustomobject]@{Id=$identity;Label=($row.Status+' | '+$row.Title);Detail=$row.Detail;Data=$row}
+        })
+        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network}
+            'Command'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}
+            'Select'{Show-PcHealthFinding $choice.Item.Data}
         }
     }
 }

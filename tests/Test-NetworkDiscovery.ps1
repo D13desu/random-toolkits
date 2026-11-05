@@ -32,9 +32,9 @@ function Invoke-NetworkDiscovery {
  [pscustomobject]@{Scope=$Scope;Requested=2;Completed=1;Cancelled=$true;Rows=@([pscustomobject]@{Address='127.0.0.1';Responded=$true;Ping='Success';LatencyMs=0;OpenTCP='';ClosedTCP='';NoResponseTCP='1';ErrorTCP=''})}
 }
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('127.0.0.1','1','100','A','N','P','E',$script:ExportPath,'B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('127.0.0.1','1','100','F','127.0.0.1','Select','Back','R','A','N','P','E',$script:ExportPath,'B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 Start-NetworkDiscovery
 $csv=@(Import-Csv -LiteralPath $script:ExportPath)
-Assert ($script:Answers.Count -eq 0 -and $csv.Count -eq 1 -and $csv[0].ScanCancelled -eq 'True' -and $csv[0].AddressesRequested -eq '2') 'Result navigation and CSV retain partial-scan context'
+Assert ($script:Answers.Count -eq 0 -and $csv.Count -eq 1 -and $csv[0].ScanCancelled -eq 'True' -and $csv[0].AddressesRequested -eq '2') 'Filtered navigation, details, rescan and CSV retain partial-scan context'
 Remove-Item -LiteralPath $script:ExportPath
