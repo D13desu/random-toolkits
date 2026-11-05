@@ -1,4 +1,4 @@
-# Windows Toolkit 0.13.0
+# Windows Toolkit 0.14.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -315,3 +315,14 @@ The default disk tool is now the C# helper; its source remains under `experiment
 Validated environments are x64 Windows with .NET Framework 4.8 and PowerShell 5.1/7. Older Windows/.NET and 32-bit hosts are not validated. Cancellation is cooperative; reconstruction can take time to finish. Intentional metadata exclusions and unknown allocations remain visible, and unreconciled allocation is not a missing-file total or measured NTFS overhead.
 
 Graduation validation on the maintainer's PC: packaged-launcher/hash checks, native protocol/navigation, MFT regression and compact-cache suites passed on PowerShell 5.1 and 7. The elevated C: comparison reported 2,949,533 files, zero parse errors, 40.3 seconds to browsing, and exact hard-link fixture equality with the compatibility engine. An early cancellation check returned partial results in 172 ms. These are live-volume observations, not performance guarantees; reports remain local.
+
+
+## Network connections (0.14.0)
+
+Open **Network > Connectivity and adapters > Network connections** (item 5). This is a read-only, numeric endpoint snapshot similar to `ss -antp`: protocol, TCP state, local/remote IPv4 or bracketed IPv6 endpoint, PID, process name and executable path. Default view is all TCP states. L selects TCP listeners; E selects established TCP; A shows all states in the current protocol; T cycles TCP, UDP and both. F searches visible endpoint/process/path text literally, R recollects, Enter opens cached full details, and Esc/Backspace/B returns. C shows collection errors and limitations. Existing DHCP renewal follows the new check at item 6.
+
+No DNS lookups, outbound probes, process termination or firewall changes are performed. UDP records are bound local sockets; their remote peer is shown as `*`, not invented connection state. A listener is not proof of reachability through the firewall. Process metadata is gathered once per snapshot; paths can be unavailable without elevation or for protected/exited processes. PID 0 is unattributed. If the current process started after the socket, attribution is withheld as possible PID reuse. Collection is not atomic, so all remaining PID mappings are best effort. Partial TCP/UDP/process collection failures remain visible under C rather than being presented as a complete empty list.
+
+The Windows NetTCPIP cmdlets must be available; missing TCP support is marked unavailable in the menu. UDP collection failure preserves TCP results. PowerShell 5.1 and 7 fixtures cover IPv6 formatting, duplicate endpoint tuples, stale process IDs, unavailable metadata, partial collection and keyboard/filter/refresh navigation. Live loopback tests verified listening/established TCP and bound UDP with the correct owning PID on both shells.
+
+Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` to update the embedded launcher and Pages copies. Sources: [Microsoft Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection) and [Get-NetUDPEndpoint](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netudpendpoint).
