@@ -25,6 +25,12 @@ foreach ($answer in @('1','U','N','P','R','0')) { $script:Answers.Enqueue($answe
 function Read-Host { param($Prompt) if ($script:Answers.Count -eq 0) { throw 'Unexpected prompt' }; $script:Answers.Dequeue() }
 Show-DiskScan $scan
 Assert-True ($script:Answers.Count -eq 0) 'Drill-down, parent, paging, rescan and exit navigation'
+foreach ($answer in @('1','b','b')) { $script:Answers.Enqueue($answer) }
+Show-DiskScan $scan
+Assert-True ($script:Answers.Count -eq 0) 'B returns from a folder to its parent, then to drives'
+foreach ($answer in @('F','B','M','B','B')) { $script:Answers.Enqueue($answer) }
+Start-DiskUsage
+Assert-True ($script:Answers.Count -eq 0) 'B cancels folder and MFT root input and returns to launcher'
 Assert-True ([IO.File]::ReadAllBytes((Join-Path $root 'small.bin')).Length -eq 17) 'Explorer does not modify files'
 $script:Answers.Enqueue('0')
 Get-Content -Raw (Join-Path $PSScriptRoot '../win/disk/index.html') | Invoke-Expression
