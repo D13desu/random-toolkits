@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.7.3
+# Random Toolkits | Windows Toolkit 0.7.4
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -264,7 +264,9 @@ function Get-PcEventRecords {
     foreach ($record in $records) {
         try { $message=[string]$record.Message } catch { $message='[Message unavailable: '+$_.Exception.Message+']' }
         if ($Text -and $message.IndexOf($Text,[StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-        [pscustomobject]@{Time=$record.TimeCreated;Id=$record.Id;Level=$record.LevelDisplayName;Provider=$record.ProviderName;Log=$record.LogName;RecordId=$record.RecordId;Machine=$record.MachineName;Message=$message}
+        $xml='';$xmlError=''
+        try{$xml=$record.ToXml()}catch{$xmlError=$_.Exception.Message}
+        [pscustomobject]@{Time=$record.TimeCreated;Id=$record.Id;Level=$record.LevelDisplayName;Provider=$record.ProviderName;Log=$record.LogName;RecordId=$record.RecordId;Machine=$record.MachineName;Message=$message;Xml=$xml;XmlError=$xmlError}
     }
 }
 
@@ -278,6 +280,60 @@ function ConvertTo-PcEventNumbers {
     }
 }
 
+function Format-PcEventPreview {
+    param([string]$Message,[ValidateRange(20,200)][int]$Width=100)
+    $text=($Message -replace '[\x00-\x1F\x7F]',' ' -replace '\s+',' ').Trim()
+    if(-not $text){return '[No rendered message; open event for XML.]'}
+    for($line=0;$line -lt 3 -and $text.Length;$line++){
+        if($text.Length -le $Width){$text;break}
+        $take=$Width
+        if([char]::IsHighSurrogate($text[$take-1])){$take--}
+        $space=$text.LastIndexOf(' ',$take-1,$take)
+        if($space -gt 0){$take=$space}
+        if($line -eq 2){$text.Substring(0,$take).TrimEnd()+' ...';break}
+        $text.Substring(0,$take).TrimEnd();$text=$text.Substring($take).TrimStart()
+    }
+}
+function Test-PcEventKeyboard {
+    try{return $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected}catch{return $false}
+}
+function ConvertFrom-PcEventKey($Key) {
+    switch([string]$Key.Key){
+        'UpArrow'{return '@UP'} 'DownArrow'{return '@DOWN'}
+        'Enter'{return '@ENTER'} 'RightArrow'{return '@ENTER'}
+        'LeftArrow'{return 'B'} 'Backspace'{return 'B'} 'Escape'{return 'B'}
+        'PageUp'{return 'P'} 'PageDown'{return 'N'}
+        'Home'{return '@HOME'} 'End'{return '@END'}
+    }
+    return ([string]$Key.KeyChar).ToUpperInvariant()
+}
+function Read-PcEventChoice([bool]$Keyboard,[string]$Prompt='Select') {
+    if(-not $Keyboard){return Read-Host $Prompt}
+    $digits=''
+    while($true){
+        $key=[Console]::ReadKey($true)
+        if($key.Key -eq 'Backspace' -and $digits.Length){$digits=$digits.Substring(0,$digits.Length-1);continue}
+        $command=ConvertFrom-PcEventKey $key
+        if($command -match '^\d$'){$digits+=$command;continue}
+        if($command -eq '@ENTER' -and $digits.Length){return $digits}
+        if($command -in @('@UP','@DOWN','@ENTER','@HOME','@END','B','N','P','R','F','X','M','C','L')){return $command}
+    }
+}
+function Show-PcEventDetails($EventRecord) {
+    $keyboard=Test-PcEventKeyboard
+    if($keyboard){Clear-Host}
+    $EventRecord | Select-Object Time,Id,Level,Provider,Log,RecordId,Machine | Format-List | Out-Host
+    Write-Host $EventRecord.Message
+    while($true){
+        Write-Host 'X: raw XML | M: full message | Enter / Left / Esc: back'
+        $answer=Read-PcEventChoice $keyboard 'X: raw XML | M: full message | Enter / B / 0: back'
+        switch(([string]$answer).Trim().ToUpperInvariant()){
+            ''{return} 'B'{return} '0'{return} '@ENTER'{return}
+            'M'{Write-Host $EventRecord.Message}
+            'X'{if($EventRecord.Xml){Write-Host $EventRecord.Xml}else{Write-Warning ('XML unavailable: '+$EventRecord.XmlError)}}
+        }
+    }
+}
 function Start-PcEventBrowser {
     param([string]$DefaultLog='System',[switch]$Quick,[switch]$FixedLog)
     $log=$DefaultLog;$hours=24;$ids=@();$levels=@();$provider='';$text='';$limit=200
@@ -295,26 +351,41 @@ function Start-PcEventBrowser {
     }
     Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
-    $page=0
+    $keyboard=Test-PcEventKeyboard;$selected=0
+    $page=0;$pageSize=5;$previewWidth=100
+    try{$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
     :events while ($true) {
-        $pages=[math]::Max(1,[math]::Ceiling($events.Count/20.0))
+        if($keyboard){
+            try{$pageSize=[math]::Max(1,[math]::Min(5,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-10)/5)));$previewWidth=[math]::Max(20,[math]::Min(120,$Host.UI.RawUI.WindowSize.Width-6))}catch{}
+            $page=[int][math]::Floor($selected/[double]$pageSize);Clear-Host
+        }
+        $pages=[math]::Max(1,[math]::Ceiling($events.Count/[double]$pageSize))
         Write-Host "`n EVENTS | $log | $($events.Count) results | page $($page+1)/$pages" -ForegroundColor Cyan
         Write-Host ("Last {0} hours | Candidate cap: {1} | IDs: {2} | Levels: {3}" -f $hours,$limit,($ids -join ','),($levels -join ','))
         if(-not $events.Count){Write-Host 'No matching events in this window. F opens filters to widen the search.'}
-        for ($i=$page*20; $i -lt [math]::Min($events.Count,($page+1)*20); $i++) {
+        for ($i=$page*$pageSize; $i -lt [math]::Min($events.Count,($page+1)*$pageSize); $i++) {
             $event=$events[$i]
-            Write-Host (' [{0}] {1} | {2} | ID {3} | {4}' -f ($i+1),$event.Time,$event.Level,$event.Id,$event.Provider)
+            $marker=if($i -eq $selected){'>'}else{' '};$color=if($i -eq $selected){'Cyan'}else{'Gray'}
+            Write-Host ('{0}[{1}] {2} | {3} | ID {4} | {5}' -f $marker,($i+1),$event.Time,$event.Level,$event.Id,$event.Provider) -ForegroundColor $color
+            foreach($line in @(Format-PcEventPreview -Message $event.Message -Width $previewWidth)){Write-Host ('     '+$line)}
+            Write-Host ''
         }
-        $answer=Read-Host 'Number: full message | N/P: pages | R: refresh | F: filtered view | B / 0: back'
+        if($keyboard){Write-Host 'Up/Down: select | Enter: full message/XML | PgUp/PgDn: pages | R: refresh | F: filter | Left/Esc: back'}
+        $answer=Read-PcEventChoice $keyboard 'Number: full message / XML | N/P: pages | R: refresh | F: filtered view | B / 0: back'
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim().ToUpperInvariant()) {
-            'N' { $page=[math]::Min($pages-1,$page+1); continue events }
-            'P' { $page=[math]::Max(0,$page-1); continue events }
-            'R' { $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit);$page=0;continue events }
+            '@UP'{$selected=[math]::Max(0,$selected-1);$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
+            '@DOWN'{$selected=[math]::Max(0,[math]::Min($events.Count-1,$selected+1));$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
+            '@HOME'{$selected=0;$page=0;continue events}
+            '@END'{$selected=[math]::Max(0,$events.Count-1);$page=[int][math]::Floor($selected/[double]$pageSize);continue events}
+            '@ENTER'{if($events.Count){Show-PcEventDetails $events[$selected]};continue events}
+            'N' { $page=[math]::Min($pages-1,$page+1);$selected=$page*$pageSize; continue events }
+            'P' { $page=[math]::Max(0,$page-1);$selected=$page*$pageSize; continue events }
+            'R' { $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit);$page=0;$selected=0;continue events }
             'F' { try{Start-PcEventBrowser -DefaultLog $log -FixedLog}catch [OperationCanceledException]{};continue events }
         }
         $number=0
-        if ([int]::TryParse($answer,[ref]$number) -and $number -gt 0 -and $number -le $events.Count) { $events[$number-1] | Format-List | Out-Host }
+        if ([int]::TryParse($answer,[ref]$number) -and $number -gt 0 -and $number -le $events.Count) { $selected=$number-1;$page=[int][math]::Floor($selected/[double]$pageSize);Show-PcEventDetails $events[$selected] }
         else { Write-Warning 'Choose an event number, N, P or 0.' }
     }
 }
@@ -335,25 +406,36 @@ function Get-PcEventLogChoices {
     )
 }
 function Start-PcEventLogMenu {
+    $keyboard=Test-PcEventKeyboard;$selected=0
     while($true){
+        if($keyboard){Clear-Host}
         Write-Host "`nWINDOWS TOOLKIT > EVENT LOGS" -ForegroundColor Cyan
         $choices=@(Get-PcEventLogChoices)
-        for($i=0;$i -lt $choices.Count;$i++){Write-Host (' [{0}] {1}' -f ($i+1),$choices[$i].Name)}
+        for($i=0;$i -lt $choices.Count;$i++){$marker=if($i -eq $selected){'>'}else{' '};$color=if($i -eq $selected){'Cyan'}else{'Gray'};Write-Host ('{0}[{1}] {2}' -f $marker,($i+1),$choices[$i].Name) -ForegroundColor $color}
         Write-Host ' [C] Custom log / advanced filters   [L] List/search available logs'
         Write-Host ' [B / 0] Back'
         Write-Host 'Choose a log to immediately view its latest 200 events from the last 24 hours. F changes filters inside the browser.'
-        $answer=Read-Host 'Select';$number=0
+        if($keyboard){Write-Host 'Up/Down: select | Enter: open log | Left/Esc: back'}
+        $answer=Read-PcEventChoice $keyboard;$number=0
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
+        switch($answer){
+            '@UP'{$selected=[math]::Max(0,$selected-1);continue}
+            '@DOWN'{$selected=[math]::Min($choices.Count-1,$selected+1);continue}
+            '@HOME'{$selected=0;continue}
+            '@END'{$selected=$choices.Count-1;continue}
+            '@ENTER'{$answer=[string]($selected+1)}
+        }
+        if($answer -in @('@UP','@DOWN','@HOME','@END')){continue}
         try{
             if($answer.Trim() -eq 'C'){Start-PcEventBrowser;continue}
-            if($answer.Trim() -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;continue}
+            if($answer.Trim() -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;if($keyboard){$null=Read-Host 'Enter to return'};continue}
             if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $choices.Count){Write-Warning 'Choose a listed log.';continue}
-            $log=$choices[$number-1].Log
+            $selected=$number-1;$log=$choices[$selected].Log
             $info=Get-WinEvent -ListLog $log -ErrorAction Stop
-            if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";continue}
+            if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";if($keyboard){$null=Read-Host 'Enter to return'};continue}
             Start-PcEventBrowser -DefaultLog $log -Quick
         }catch [OperationCanceledException] {continue}
-        catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message)}
+        catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message);if($keyboard){$null=Read-Host 'Enter to return'}}
     }
 }
 
@@ -1332,7 +1414,7 @@ function Start-ToolkitCleanup {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.7.3' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.7.4' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'

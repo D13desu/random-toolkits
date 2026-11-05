@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Toolkit v0.7.3 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.7.4 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools

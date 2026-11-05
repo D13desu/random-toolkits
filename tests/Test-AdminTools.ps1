@@ -25,7 +25,7 @@ foreach ($bad in @('1,abc','-1','65536')) {
 }
 $script:Mode='ok'
 $script:Answers=New-Object 'System.Collections.Generic.Queue[string]'
-foreach ($answer in @('','','','','','','','1','N','P','0')) { $script:Answers.Enqueue($answer) }
+foreach ($answer in @('','','','','','','','1','B','N','P','0')) { $script:Answers.Enqueue($answer) }
 function Read-Host { param($Prompt) if ($script:Answers.Count -eq 0) { throw "Unexpected prompt: $Prompt" }; $script:Answers.Dequeue() }
 Start-PcEventBrowser
 Assert-True ($script:Answers.Count -eq 0) 'Event browser filter prompts, detail, paging and exit work'
