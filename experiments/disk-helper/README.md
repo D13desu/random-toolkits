@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.7.0
+# Standalone disk helper experiment 0.7.1
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -22,7 +22,7 @@ For an unelevated folder test:
 .\Start-DiskHelper.ps1 -Path "$env:USERPROFILE\Documents" -Engine native
 ```
 
-Q cancels scanning and opens partial results. Folder numbers, U, N/P, S and E provide navigation, paging, sorting and diagnostics. T shows MFT phase timings and memory samples; progress names the current phase. Exit disposes the helper process and releases its scan tree. Ctrl+C runs client cleanup. The client checks the executable against the package manifest before launch. This is an unsigned test binary; it performs no automatic installation, elevation or update.
+B returns to the parent folder, then drive selection, then the calling launcher (or exits when run standalone). During a scan, B cancels and returns to drive selection; Q cancels scanning and opens partial results. Folder numbers, U, N/P, S and E provide navigation, paging, sorting and diagnostics. T shows MFT phase timings and memory samples; progress names the current phase. Exit disposes the helper process and releases its scan tree. Ctrl+C runs client cleanup. The client checks the executable against the package manifest before launch. This is an unsigned test binary; it performs no automatic installation, elevation or update.
 
 The packaged runner needs Windows, the full .NET Framework 4.5.1 or later runtime and PowerShell 5.1 or 7. Tests used .NET Framework 4.8.10008; older Windows/.NET installations and 32-bit hosts have not been validated. It does not require a modern dotnet SDK, NuGet, runtime Add-Type, or a network connection.
 

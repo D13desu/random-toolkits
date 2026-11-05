@@ -24,6 +24,7 @@ function Show-HelperAccounting($Summary) {
     Write-Host 'The difference from volume-used bytes is not a measured NTFS-overhead total. Live scans and other tools may use different accounting rules.'
     $a.metadataSamples | Select-Object group,record,sequence,name,directory,knownDataAllocation,allocationUnknown | Format-Table -AutoSize | Out-Host
 }
+:drives while ($true) {
 $session=$null
 try {
     $session=Start-DiskHelper (Join-Path $HelperDirectory 'DiskHelper.exe') (Join-Path $HelperDirectory 'manifest.json')
@@ -31,22 +32,27 @@ try {
     if(-not $Path){
         $drives=@([IO.DriveInfo]::GetDrives() | Where-Object {$_.IsReady -and $_.DriveType -eq 'Fixed'})
         for($i=0;$i -lt $drives.Count;$i++){Write-Host (' [{0}] {1} | Used {2} | Free {3}' -f ($i+1),$drives[$i].Name,(Format-HelperBytes ($drives[$i].TotalSize-$drives[$i].TotalFreeSpace)),(Format-HelperBytes $drives[$i].TotalFreeSpace))}
-        $inputPath=Read-Host 'Drive number or path (Enter: first drive; 0: exit)'
-        if($inputPath -eq '0'){return}
+        $inputPath=Read-Host 'Drive number or path (Enter: first drive; B / 0: back to launcher)'
+        if($null -eq $inputPath -or $inputPath.Trim() -in @('0','B')){return}
         $selection=0
         if([string]::IsNullOrWhiteSpace($inputPath) -and $drives.Count){$Path=$drives[0].Name}
         elseif([int]::TryParse($inputPath,[ref]$selection) -and $selection -ge 1 -and $selection -le $drives.Count){$Path=$drives[$selection-1].Name}
         else{$Path=$inputPath}
     }
-    if($Path -match '^[A-Za-z]:$'){$Path+='\'}
-    $Path=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
-    $null=Invoke-DiskHelper $session @{command='scan';path=$Path;engine=$Engine}
-    Write-Host 'Q stops the scan and opens partial results. Ctrl+C exits.'
+    try {
+        if($Path -match '^[A-Za-z]:$'){$Path+='\'}
+        $Path=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $null=Invoke-DiskHelper $session @{command='scan';path=$Path;engine=$Engine}
+    } catch {Write-Warning $_.Exception.Message;continue drives}
+    Write-Host 'Q: stop and browse partial results | B: cancel and return to drives'
     do {
         $status=Invoke-DiskHelper $session @{command='status'}
         if($status.state -eq 'ready'){break}
         Write-Progress -Activity 'C# helper scanning' -Status ('{0} | {1:N0} records | {2:N0} files | {3:N1}s' -f $status.phase,$status.records,$status.files,$status.seconds)
-        try {if(-not [Console]::IsInputRedirected -and [Console]::KeyAvailable -and [Console]::ReadKey($true).Key -eq 'Q'){$null=Invoke-DiskHelper $session @{command='cancel'}}} catch {}
+        $key=$null
+        try {if(-not [Console]::IsInputRedirected -and [Console]::KeyAvailable){$key=[Console]::ReadKey($true).Key}} catch {}
+        if($key -eq 'B'){continue drives}
+        if($key -eq 'Q'){$null=Invoke-DiskHelper $session @{command='cancel'}}
         Start-Sleep -Milliseconds 200
     } while($true)
     Write-Progress -Activity 'C# helper scanning' -Completed
@@ -67,10 +73,11 @@ try {
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
             Write-Host (' [{0,2}] {1,14} | {2,12} | {3,-4} {4}' -f ($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name)
         }
-        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | A: accounting | T: timings | 0: exit' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
+        Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | A: accounting | T: timings | B: back (parent/drives) | 0: drives' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
         $choice=Read-Host 'Select';$number=0
-        switch($choice.ToUpperInvariant()){
-            '0'{return}
+        switch(([string]$choice).Trim().ToUpperInvariant()){
+            '0'{continue drives}
+            'B'{if($page.parent){$current=$page.parent;$offset=0}else{continue drives}}
             'U'{if($page.parent){$current=$page.parent;$offset=0}}
             'N'{if($offset+20 -lt $page.total){$offset+=20}}
             'P'{$offset=[math]::Max(0,$offset-20)}
@@ -97,4 +104,5 @@ try {
             default{if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $rows.Count -and $rows[$number-1].Kind -eq 'DIR'){$current=$rows[$number-1].Path;$offset=0}}
         }
     }
-} finally {Write-Progress -Activity 'C# helper scanning' -Completed;Stop-DiskHelper $session}
+} finally {Write-Progress -Activity 'C# helper scanning' -Completed;Stop-DiskHelper $session;$Path=$null}
+}
