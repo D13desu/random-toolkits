@@ -8,7 +8,7 @@ $storage=Get-NetworkCategories | Where-Object Id -eq 'storage'
 $items=@(Get-NetworkMenuItems $storage)
 Assert ($items.Count -eq 2 -and $items[0].Entry.Id -eq 'disk' -and $items[1].Entry.Id -eq 'disk-helper') 'Production and experimental explorers are reachable in Storage'
 $entry=$items[1].Entry
-Assert ($entry.Admin -and $entry.MinPS -eq '5.1' -and $entry.Name -match '0.6.0') 'Experimental requirements and version are explicit'
+Assert ($entry.Admin -and $entry.MinPS -eq '5.1' -and $entry.Name -match '0.7.0') 'Experimental requirements and version are explicit'
 Assert ((Get-NetworkAvailability $entry -Version '5.0').Reason -match 'Requires PowerShell 5.1') 'Older PowerShell is marked unavailable'
 $runtimeFunction=(Get-Item Function:Get-PcDiskHelperRuntimeReason).ScriptBlock
 function Get-PcDiskHelperRuntimeReason {'Requires test runtime'}
