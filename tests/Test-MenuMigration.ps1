@@ -20,7 +20,7 @@ foreach($key in @('7','2','2','B','B','12','5','B','10','2','B','6','C','B','1',
 Start-WindowsMenu
 Assert (($script:Calls -join ',') -eq 'Registry:rdp,Repair:RepairFiles,Startup:Task,Events,Network:connectivity') 'Root/category numbers dispatch only the selected mocked actions'
 Assert ($script:Keys.Count -eq 0) 'Nested Back returns exactly one level'
-Assert (@($script:Output | Where-Object {$_ -match '^ \[12\] Windows repair centre'}).Count -gt 0) 'Root shows all twelve sections without paging'
+Assert (@($script:Output | Where-Object {$_ -match '^[> ] \[12\] Windows repair centre'}).Count -gt 0) 'Root shows all twelve sections without paging'
 $script:Calls.Clear()
 function Invoke-PcServiceAction {param($Name,$Action) $script:Calls.Add($Name+':'+$Action)}
 function Get-PcServiceInventory {[pscustomobject]@{Name='Fixture';DisplayName='Fixture';State='Running';StartMode='Auto'}}
@@ -28,3 +28,12 @@ foreach($key in @('1','B')){$script:Keys.Enqueue($key)}
 Show-PcServiceDetails (Get-PcServiceInventory)
 Assert (($script:Calls -join ',') -eq 'Fixture:Start') 'Service action menu uses the numbered selection'
 Assert ($script:Keys.Count -eq 0) 'Service action returns cleanly'
+
+$script:Keys.Enqueue('Down');$script:Keys.Enqueue('Select')
+$state=@{}
+$items=@(New-PcMenuItem '9' 'First';New-PcMenuItem '1' 'Second')
+Assert ((Read-PcCategoryMenu 'Hybrid' $items $state) -eq '1') 'Arrows select by row independently of numeric shortcut'
+$script:Keys.Enqueue('Select')
+Assert ((Read-PcCategoryMenu 'Hybrid' $items $state) -eq '1') 'Hybrid menu preserves selection on return'
+$script:Keys.Enqueue('9')
+Assert ((Read-PcCategoryMenu 'Hybrid' $items $state) -eq '9') 'Number shortcut remains available alongside arrows'

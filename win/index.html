@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.14.1
+# Random Toolkits | Windows Toolkit 0.14.2
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -1907,7 +1907,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.1',
+        [string]$Version='0.14.2',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2011,23 +2011,39 @@ function New-PcMenuItem {
 }
 function Read-PcCategoryMenu {
     param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    $keyboard=Test-PcMenuKeyboard;$selected=0
+    for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
-        if(Test-PcMenuKeyboard){Clear-Host}
-        Write-Host ("`nWINDOWS 0.14.1 | "+$Title) -ForegroundColor Cyan
-        if($Description){Write-Host $Description -ForegroundColor DarkGray}
-        foreach($item in $Items){
-            $color=if($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}
-            $label=' [{0}] {1}' -f $item.Key,$item.Label
+        $width=120
+        if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
+        Write-Host ("`nWINDOWS 0.14.2 | "+$Title) -ForegroundColor Cyan
+        if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
+        for($i=0;$i -lt $Items.Count;$i++){
+            $item=$Items[$i]
+            $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}
+            $marker=if($keyboard -and $i -eq $selected){'>'}else{' '}
+            $label='{0} [{1}] {2}' -f $marker,$item.Key,$item.Label
             if($item.Kind -eq 'Change'){$label+=' [CHANGES SYSTEM]'}
-            if($item.Detail){$label+=' - '+($item.Detail -join ' ')}
             if($item.DisabledReason){$label+=' [UNAVAILABLE: '+$item.DisabledReason+']'}
-            Write-Host $label -ForegroundColor $color
+            elseif($item.Detail){$label+=' - '+($item.Detail -join ' ')}
+            Write-Host (Format-PcMenuText $label $width) -ForegroundColor $color
         }
-        Write-Host ' [B / 0] Back'
-        $answer=Read-Host 'Select number'
-        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return 'B'}
-        $item=$Items | Where-Object Key -EQ $answer.Trim() | Select-Object -First 1
-        if(-not $item){Write-Warning 'Choose a listed number or shortcut.';Wait-PcMenuReturn;continue}
+        if($keyboard){Write-Host 'Arrows + Enter or number + Enter | Esc/Backspace/B/0: back'}
+        else{Write-Host 'Number + Enter | B / 0: back'}
+        $answer=Read-PcMenuInput $keyboard
+        if($null -eq $answer -or $answer.Trim() -in @('Back','B','0')){return 'B'}
+        $item=$null
+        switch($answer.Trim().ToUpperInvariant()){
+            'UP'{$selected=[math]::Max(0,$selected-1)}
+            'DOWN'{$selected=[math]::Min($Items.Count-1,$selected+1)}
+            'FIRST'{$selected=0} 'LAST'{$selected=$Items.Count-1}
+            {$_ -in @('SELECT','')}{if($Items.Count){$item=$Items[$selected]}}
+            default{$item=$Items | Where-Object Key -EQ $answer.Trim() | Select-Object -First 1;if(-not $item){Write-Warning 'Choose a listed number or shortcut.';Wait-PcMenuReturn}}
+        }
+        if($selected -ge 0 -and $selected -lt $Items.Count){$State.SelectedId=[string]$Items[$selected].Id}
+        if(-not $item){continue}
+        for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $item.Id){$selected=$i;break}}
+        $State.SelectedId=[string]$item.Id
         if($item.DisabledReason){Write-Warning $item.DisabledReason;Wait-PcMenuReturn;continue}
         $State.SelectedId=[string]$item.Id
         return [string]$item.Id
