@@ -18,8 +18,8 @@ $output=[IO.Path]::GetFullPath($OutputDirectory);$null=[IO.Directory]::CreateDir
 $enginePath=Join-Path $output 'Engine.generated.cs'
 [IO.File]::WriteAllText($enginePath,$engine,[Text.UTF8Encoding]::new($false))
 $exe=Join-Path $output 'DiskHelper.exe'
-& $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $enginePath (Join-Path $PSScriptRoot 'Program.cs')
+& $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $enginePath (Join-Path $PSScriptRoot 'Program.cs') (Join-Path $PSScriptRoot 'CompactIndex.cs')
 if($LASTEXITCODE -ne 0){throw 'Helper compilation failed.'}
-$manifest=[ordered]@{Version='0.1.0-experiment';Protocol=1;EngineVersion='0.4.4';File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
+$manifest=[ordered]@{Version='0.2.0-experiment';Protocol=1;EngineVersion='0.4.4';File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'manifest.json') -Encoding UTF8
 [pscustomobject]@{Executable=$exe;Manifest=(Join-Path $output 'manifest.json');Bytes=(Get-Item $exe).Length}

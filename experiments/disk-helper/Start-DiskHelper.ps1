@@ -39,6 +39,7 @@ try {
         $page=Invoke-DiskHelper $session @{command='list';path=$current;offset=$offset;limit=20;sort=$sort}
         Write-Host ("`nDISK HELPER {0} | {1}" -f $session.Hello.version,$page.path) -ForegroundColor Cyan
         Write-Host ('On disk: {0} | Logical: {1} | Files: {2:N0} | Scan: {3:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$page.files,$summary.seconds)
+        Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
         if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; E shows diagnostics.' -ForegroundColor Yellow}
         if($Engine -eq 'mft'){
             Write-Host ('Volume used: {0} | Accounted DATA: {1} | Difference: {2}' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))

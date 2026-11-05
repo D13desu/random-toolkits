@@ -9,9 +9,12 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.1.0-experiment";
+  const string Version="0.2.0-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
+  static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
+  static List<Issue> issues;static Dictionary<string,int> causes;static int issueCount;
+  static double cleanupMilliseconds,compactMilliseconds;
   static Stopwatch elapsed; static string mode, cachedPath, cachedSort; static Row[] cachedRows;
   static bool Running {get {return (native!=null && !native.Done) || (mft!=null && !mft.Done);}}
   static string Text(Dictionary<string,object> request,string key,string fallback) {
@@ -23,11 +26,19 @@ namespace RandomToolkits.HelperExperiment {
   }
   static void Cancel() {if(native!=null) native.CancelRequested=true;if(mft!=null) mft.CancelRequested=true;}
   static void Finish() {
-   if(scan!=null || Running || (native==null && mft==null)) return;
+   if(completedSummary!=null || Running || (native==null && mft==null)) return;
    string error=mft!=null?mft.Error:native.Error;
    if(elapsed!=null) elapsed.Stop();
    if(error!=null) throw new IOException(error);
    scan=mft!=null?mft.Result:native.Result;
+   object summary=Summary();issues=scan.Issues;causes=scan.IssueCounts;issueCount=scan.IssueCount;
+   if(mode=="mft") {
+    var timer=Stopwatch.StartNew();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
+    timer.Restart();compact=new CompactIndex(scan);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
+    scan=null;mft=null;
+    timer.Restart();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
+   }
+   completedSummary=summary;
   }
   static object Summary() {
    Node root=scan.Nodes[scan.Root];bool allocated=mode=="mft";
@@ -40,7 +51,9 @@ namespace RandomToolkits.HelperExperiment {
   }
   static object Status() {
    Finish();
-   if(scan!=null) return new {type="status",state="ready",summary=Summary(),workingSet=Process.GetCurrentProcess().WorkingSet64};
+   if(completedSummary!=null) return new {type="status",state="ready",summary=completedSummary,workingSet=Process.GetCurrentProcess().WorkingSet64,
+    managedBytes=GC.GetTotalMemory(false),cleanupMilliseconds=cleanupMilliseconds,compactMilliseconds=compactMilliseconds,
+    readySeconds=elapsed.Elapsed.TotalSeconds+(cleanupMilliseconds+compactMilliseconds)/1000};
    if(native==null && mft==null) return new {type="status",state="idle"};
    return new {type="status",state="scanning",files=mft!=null?mft.FilesSeen:native.FilesSeen,
     folders=mft!=null?mft.DirectoriesSeen:native.DirectoriesSeen,records=mft!=null?mft.RecordsSeen:0,
@@ -59,17 +72,38 @@ namespace RandomToolkits.HelperExperiment {
     if(!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) throw new UnauthorizedAccessException("MFT scanning requires an administrator PowerShell. No automatic elevation.");
     var drive=new DriveInfo(path);if(drive.DriveType==DriveType.Network || drive.DriveFormat!="NTFS") throw new ArgumentException("MFT requires a local NTFS volume.");
    }
-   mode=engine;scan=null;native=null;mft=null;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
+   mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;
+   cleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
    if(engine=="mft") mft=MftScanner.Start(path);else native=Scanner.Start(path);
    return new {type="accepted",engine=engine,path=path};
   }
-  static void RequireReady() {Finish();if(scan==null) throw new InvalidOperationException("Wait for scan completion before browsing.");}
+  static void RequireReady() {Finish();if(completedSummary==null) throw new InvalidOperationException("Wait for scan completion before browsing.");}
+  static object Memory(Dictionary<string,object> request) {
+   RequireReady();long managedBefore=GC.GetTotalMemory(false),workingBefore=Process.GetCurrentProcess().WorkingSet64;
+   bool collect=Text(request,"collect","false").Equals("true",StringComparison.OrdinalIgnoreCase);
+   var timer=Stopwatch.StartNew();
+   if(collect) {GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();}
+   timer.Stop();long rows=compact==null?0:compact.RowCount;
+   return new {type="memory",collected=collect,collectionMilliseconds=timer.Elapsed.TotalMilliseconds,
+    managedBefore=managedBefore,managedAfter=GC.GetTotalMemory(false),workingSetBefore=workingBefore,
+    workingSetAfter=Process.GetCurrentProcess().WorkingSet64,privateBytes=Process.GetCurrentProcess().PrivateMemorySize64,
+    peakWorkingSet=Process.GetCurrentProcess().PeakWorkingSet64,folders=compact!=null?compact.FolderCount:scan.Nodes.Count,cachedRows=rows};
+  }
   static object List(Dictionary<string,object> request) {
-   RequireReady();string path=Text(request,"path",scan.Root);Node node;
-   if(!scan.Nodes.TryGetValue(path,out node)) throw new ArgumentException("Path is outside the cached scan.");
+   RequireReady();string path=Text(request,"path",compact!=null?compact.Root:scan.Root);
    string sort=Text(request,"sort",mode=="mft"?"allocated":"logical");
    if(sort!="allocated" && sort!="logical" && sort!="name") throw new ArgumentException("Unknown sort order.");
    int offset=Number(request,"offset",0,0,Int32.MaxValue),limit=Number(request,"limit",20,1,100);
+   if(compact!=null) {
+    int id;if(!compact.Find(path,out id)) throw new ArgumentException("Path is outside the cached scan.");
+    CompactIndex.Folder folder=compact.GetFolder(id);
+    if(cachedOrder==null || cachedPath!=path || cachedSort!=sort){cachedOrder=compact.Sort(id,sort);cachedPath=path;cachedSort=sort;}
+    offset=Math.Min(offset,folder.Count);int compactCount=Math.Min(limit,folder.Count-offset);
+    return new {type="listing",path=compact.GetPath(id),parent=folder.Parent<0?null:compact.GetPath(folder.Parent),sort=sort,offset=offset,total=folder.Count,
+     logical=folder.Logical,allocated=(long?)folder.Allocated,partial=folder.Partial,allocationUnknown=folder.Unknown,files=folder.Files,
+     rows=compact.Page(id,cachedOrder,offset,compactCount)};
+   }
+   Node node;if(!scan.Nodes.TryGetValue(path,out node)) throw new ArgumentException("Path is outside the cached scan.");
    if(cachedRows==null || cachedPath!=path || cachedSort!=sort) {
     cachedRows=scan.CachedRows!=null?scan.CachedRows[path].ToArray():Scanner.Children(scan,path);
     Array.Sort(cachedRows,delegate(Row a,Row b) {
@@ -89,10 +123,11 @@ namespace RandomToolkits.HelperExperiment {
     case "status":return Status();
     case "cancel":Cancel();return new {type="cancelled",message="Cancellation requested; poll status for partial results."};
     case "list":return List(request);
+    case "memory":return Memory(request);
     case "issues":
      RequireReady();int offset=Number(request,"offset",0,0,Int32.MaxValue),limit=Number(request,"limit",20,1,100);
-     offset=Math.Min(offset,scan.Issues.Count);return new {type="issues",total=scan.IssueCount,sampled=scan.Issues.Count,
-      causes=scan.IssueCounts,offset=offset,rows=scan.Issues.GetRange(offset,Math.Min(limit,scan.Issues.Count-offset))};
+     offset=Math.Min(offset,issues.Count);return new {type="issues",total=issueCount,sampled=issues.Count,
+      causes=causes,offset=offset,rows=issues.GetRange(offset,Math.Min(limit,issues.Count-offset))};
     default:throw new ArgumentException("Unknown command.");
    }
   }

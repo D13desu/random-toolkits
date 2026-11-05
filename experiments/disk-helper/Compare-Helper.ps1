@@ -30,6 +30,9 @@ try {
         Start-Sleep -Milliseconds 200
     } while($true)
     $report.Helper=$status.summary;$report.HelperWorkingSet=$status.workingSet
+    $report.ReadySeconds=$status.readySeconds
+    $report.CleanupMilliseconds=$status.cleanupMilliseconds
+    $report.CompactMilliseconds=$status.compactMilliseconds
     $report.InterfaceWorkingSet=[Diagnostics.Process]::GetCurrentProcess().WorkingSet64
     $fixturePage=Invoke-DiskHelper $session @{command='list';path=$fixture;limit=20}
     $report.HelperFixture=$fixturePage;$report.FixturePageBytes=$session.LastResponseBytes
