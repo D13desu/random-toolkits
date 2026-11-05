@@ -32,3 +32,18 @@ Start-NetworkMenu
 Assert-True ($script:Answers.Count -eq 0 -and ($script:Output -join '|') -match 'No AD domain trust exists') 'Unavailable AD repair displays its reason'
 Assert-True ('DC hostname [automatic discovery]' -notin $script:Output) 'Unavailable repair is blocked before collecting inputs'
 Write-Output "Menu tests passed on PowerShell $($PSVersionTable.PSVersion)."
+
+foreach ($answer in @('1','1','b','b','2','b','3','b','4','b','5','b','6','b','7','2','b','b','0')) { $script:Answers.Enqueue($answer) }
+Start-WindowsMenu
+Assert-True ($script:Answers.Count -eq 0) 'B returns from every Windows section and cancels registry input'
+foreach ($answer in @('1','b','b')) { $script:Answers.Enqueue($answer) }
+Start-NetworkCategory connectivity
+Assert-True ($script:Answers.Count -eq 0) 'B cancels target entry directly to its menu without running a check'
+$script:Answers.Enqueue('0')
+Assert-True ((Read-PcInput 'Event level') -eq '0') 'Numeric zero remains valid data input'
+$script:Answers.Enqueue('')
+Assert-True ((Read-PcInput 'Default input') -eq '') 'Blank data input preserves defaults'
+function Invoke-InteractiveCheck { param($Item) }
+foreach ($answer in @('1','2','b')) { $script:Answers.Enqueue($answer) }
+Start-NetworkCategory storage
+Assert-True ($script:Answers.Count -eq 0) 'Both disk tools return directly to Storage without an extra pause'

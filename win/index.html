@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.6.6
+# Random Toolkits | Windows Toolkit 0.6.7
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -8,6 +8,13 @@ param(
     [ValidateRange(1,65535)][int]$Port = 443,
     [string]$DomainController
 )
+
+function Read-PcInput {
+    param([string]$Prompt)
+    $answer=Read-Host ($Prompt+' [B: back]')
+    if ($null -ne $answer -and $answer.Trim() -eq 'B') { throw [OperationCanceledException]::new('Back to menu.') }
+    return $answer
+}
 
 function Get-PcRegistryTweak {
     param([ValidateSet('outlook','rdp')][string]$Id)
@@ -93,19 +100,19 @@ function Start-PcRegistryMenu {
         Write-Host ' [3] Reset Outlook size overrides - CHANGES SYSTEM'
         Write-Host ' [4] Restore older RDP warning (administrator) - CHANGES SYSTEM'
         Write-Host ' [5] Reset RDP warning override (administrator) - CHANGES SYSTEM'
-        Write-Host ' [0] Back'
+        Write-Host ' [B / 0] Back'
         $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         try {
             switch ($answer.Trim()) {
                 '1' { foreach ($id in @('outlook','rdp')) { $tweak=Get-PcRegistryTweak $id; Write-Host $tweak.Path; Get-PcRegistryValues $tweak | Format-Table -AutoSize | Out-Host } }
-                '2' { $size=Read-Host 'Maximum GB (1-1000; Enter for 100)'; if ([string]::IsNullOrWhiteSpace($size)) { $size='100' }; if ($size -notmatch '^\d+$') { throw 'Enter a whole number of GB.' }; Invoke-PcRegistryTweak outlook -SizeGB ([int]$size) }
+                '2' { $size=Read-PcInput 'Maximum GB (1-1000; Enter for 100)'; if ([string]::IsNullOrWhiteSpace($size)) { $size='100' }; if ($size -notmatch '^\d+$') { throw 'Enter a whole number of GB.' }; Invoke-PcRegistryTweak outlook -SizeGB ([int]$size) }
                 '3' { Invoke-PcRegistryTweak outlook -Reset }
                 '4' { Invoke-PcRegistryTweak rdp }
                 '5' { Invoke-PcRegistryTweak rdp -Reset }
                 default { Write-Warning 'Choose a listed option.' }
             }
-        } catch { Write-Warning $_.Exception.Message }
+        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
     }
 }
 
@@ -273,15 +280,15 @@ function ConvertTo-PcEventNumbers {
 
 function Start-PcEventBrowser {
     param([string]$DefaultLog='System')
-    $log=Read-Host "Log name [$DefaultLog]"
+    $log=Read-PcInput "Log name [$DefaultLog]"
     if ([string]::IsNullOrWhiteSpace($log)) { $log=$DefaultLog } else { $log=$log.Trim() }
-    $hours=24; $answer=Read-Host 'Look back hours [24; max 8760]'
+    $hours=24; $answer=Read-PcInput 'Look back hours [24; max 8760]'
     if ($answer -and (-not [int]::TryParse($answer,[ref]$hours) -or $hours -lt 1 -or $hours -gt 8760)) { throw 'Hours must be 1-8760.' }
-    $ids=@(ConvertTo-PcEventNumbers (Read-Host 'Event IDs, comma-separated [all]') 65535)
-    $levels=@(ConvertTo-PcEventNumbers (Read-Host 'Levels: 0=log always,1=critical,2=error,3=warning,4=information,5=verbose [all]') 5)
-    $provider=Read-Host 'Provider name or wildcard [all]'
-    $text=Read-Host 'Message contains text [any]'
-    $limit=200; $answer=Read-Host 'Maximum recent candidates [200; max 1000]'
+    $ids=@(ConvertTo-PcEventNumbers (Read-PcInput 'Event IDs, comma-separated [all]') 65535)
+    $levels=@(ConvertTo-PcEventNumbers (Read-PcInput 'Levels: 0=log always,1=critical,2=error,3=warning,4=information,5=verbose [all]') 5)
+    $provider=Read-PcInput 'Provider name or wildcard [all]'
+    $text=Read-PcInput 'Message contains text [any]'
+    $limit=200; $answer=Read-PcInput 'Maximum recent candidates [200; max 1000]'
     if ($answer -and (-not [int]::TryParse($answer,[ref]$limit) -or $limit -lt 1 -or $limit -gt 1000)) { throw 'Limit must be 1-1000.' }
     Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
@@ -294,8 +301,8 @@ function Start-PcEventBrowser {
             $event=$events[$i]
             Write-Host (' [{0}] {1} | {2} | ID {3} | {4}' -f ($i+1),$event.Time,$event.Level,$event.Id,$event.Provider)
         }
-        $answer=Read-Host 'Number: full message | N/P: pages | 0: back'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        $answer=Read-Host 'Number: full message | N/P: pages | B / 0: back'
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim().ToUpperInvariant()) {
             'N' { $page=[math]::Min($pages-1,$page+1); continue events }
             'P' { $page=[math]::Max(0,$page-1); continue events }
@@ -307,7 +314,7 @@ function Start-PcEventBrowser {
 }
 
 function Get-PcEventLogs {
-    $pattern=Read-Host 'Log name pattern [*]'
+    $pattern=Read-PcInput 'Log name pattern [*]'
     if ([string]::IsNullOrWhiteSpace($pattern)) { $pattern='*' }
     # Preserve warnings for inaccessible logs; disabled logs are shown but never enabled automatically.
     Get-WinEvent -ListLog $pattern -ErrorAction Continue | Sort-Object LogName | Select-Object LogName,IsEnabled,RecordCount,LogMode,MaximumSizeInBytes
@@ -369,11 +376,11 @@ function Get-PcQualityChecks {
 }
 
 function Start-PcDiskExplorer {
-    $revision='c6469659c9d7cea9e1f12c96f34999a232a1ae98'
-    $expected='AD00B99861E3176308A5A8175033D4DABDBFB8753F74F3A8588E80F15BB05BBB'
+    $revision='10efb47886b97a1619756f297d7d6bbf7d3b1295'
+    $expected='827A4432D7DF2DF66C2E048331268F5D806A38A601641C07FC88D2B9DE21E3F2'
     $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
     try {
-        Write-Host 'Downloading verified Disk Usage 0.4.4 from D13desu/random-toolkits...'
+        Write-Host 'Downloading verified Disk Usage 0.4.5 from D13desu/random-toolkits...'
         Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/D13desu/random-toolkits/$revision/win/disk/Disk-Usage.ps1" -OutFile $download -TimeoutSec 60 -ErrorAction Stop
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $expected) { throw 'Disk explorer checksum mismatch. Script not executed.' }
         & $download
@@ -387,9 +394,9 @@ function Get-PcDiskHelperRuntimeReason {
 
 function Get-PcDiskHelperPackage {
     [pscustomobject]@{
-        Version='0.7.0-experiment'
-        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.7.0/DiskHelper-0.7.0-experiment.zip'
-        Sha256='C08C3B97D068117148C376D2E33606060C9BDEB59C038002DD71805A8897BBE9'
+        Version='0.7.1-experiment'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.7.1/DiskHelper-0.7.1-experiment.zip'
+        Sha256='C5268479B7F40B1AF55E1630C7C665900D9FCDBFF2CB146BB1D2BF9E1D29B670'
     }
 }
 
@@ -730,18 +737,18 @@ function Invoke-InteractiveRepair {
         $plans=@(Get-PcPowerPlans)
         for ($i=0; $i -lt $plans.Count; $i++) { Write-Host " [$($i+1)] $($plans[$i].Name) | Active: $($plans[$i].Active) | $($plans[$i].Guid)" }
         $number=0
-        if (-not [int]::TryParse((Read-Host 'Plan number'),[ref]$number) -or $number -lt 1 -or $number -gt $plans.Count) { throw 'Choose a listed plan.' }
+        if (-not [int]::TryParse((Read-PcInput 'Plan number'),[ref]$number) -or $number -lt 1 -or $number -gt $plans.Count) { throw 'Choose a listed plan.' }
         $repairParameters.PlanGuid=$plans[$number-1].Guid
     }
     if ($Entry.Id -eq 'nic-awake') {
         $nics=@(Get-NetAdapter -Physical -ErrorAction Stop)
         $nics | Select-Object InterfaceIndex,Name,Status,InterfaceDescription | Format-Table -AutoSize | Out-Host
         $index=-1
-        if (-not [int]::TryParse((Read-Host 'NIC InterfaceIndex'),[ref]$index) -or $index -notin $nics.InterfaceIndex) { throw 'Choose a listed physical NIC.' }
+        if (-not [int]::TryParse((Read-PcInput 'NIC InterfaceIndex'),[ref]$index) -or $index -notin $nics.InterfaceIndex) { throw 'Choose a listed physical NIC.' }
         $repairParameters.InterfaceIndex=$index
     }
     if ($Entry.Id -eq 'repair-trust') {
-        $answer = Read-Host 'DC hostname [automatic discovery]'
+        $answer = Read-PcInput 'DC hostname [automatic discovery]'
         if ($answer) { $repairParameters.Controller = $answer.Trim() }
     }
     if ($Entry.Id -eq 'renew-dhcp') {
@@ -749,7 +756,7 @@ function Invoke-InteractiveRepair {
         if ($adapters.Count -eq 0) { throw 'No active DHCP-enabled IPv4 adapters found.' }
         $adapters | Format-Table -AutoSize | Out-Host
         $index = -1
-        if (-not [int]::TryParse((Read-Host 'InterfaceIndex to renew'), [ref]$index) -or $index -notin $adapters.InterfaceIndex) { throw 'Choose an InterfaceIndex from the list.' }
+        if (-not [int]::TryParse((Read-PcInput 'InterfaceIndex to renew'), [ref]$index) -or $index -notin $adapters.InterfaceIndex) { throw 'Choose an InterfaceIndex from the list.' }
         $repairParameters.InterfaceIndex = $index
     }
     Invoke-NetworkRepair @repairParameters
@@ -773,7 +780,7 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
         [pscustomobject]@{Key='disk';Id='disk';Name='Open disk usage explorer (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
-        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.7.0 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.7.1 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -857,7 +864,7 @@ function Invoke-InteractiveCheck {
     if ($Item.Kind -eq 'AD') {
         $dcName = $null
         if ($entry.Id -in @('ad-secure','ad-time','ad-shares')) {
-            $answer = Read-Host 'DC hostname [automatic discovery]'
+            $answer = Read-PcInput 'DC hostname [automatic discovery]'
             if ($answer) { $dcName = $answer.Trim() }
             if ($dcName) { $null = Get-AdController $dcName }
         }
@@ -867,12 +874,12 @@ function Invoke-InteractiveCheck {
     $probeTarget = 'example.com'
     $probePort = 443
     if ($entry.Id -in @('connectivity','dns','tcp','quick')) {
-        $answer = Read-Host 'Target hostname or IP [example.com]'
+        $answer = Read-PcInput 'Target hostname or IP [example.com]'
         if (-not [string]::IsNullOrWhiteSpace($answer)) { $probeTarget = $answer.Trim() }
         Test-NetworkTarget $probeTarget
     }
     if ($entry.Id -eq 'tcp') {
-        $answer = Read-Host 'TCP port [443]'
+        $answer = Read-PcInput 'TCP port [443]'
         if (-not [string]::IsNullOrWhiteSpace($answer)) {
             if (-not [int]::TryParse($answer, [ref]$probePort) -or $probePort -lt 1 -or $probePort -gt 65535) { throw 'Port must be between 1 and 65535.' }
         }
@@ -913,16 +920,17 @@ function Start-NetworkCategory {
             Write-Host " [$($item.Key)] $($entry.Name) [$label]" -ForegroundColor $color
             if (-not $availability.Available) { Write-Host "     $($availability.Reason)" -ForegroundColor DarkGray }
         }
-        Write-Host "`n [0] Back"
+        Write-Host "`n [B / 0] Back"
         $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         $item = $items | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
         if (-not $item) { Write-Warning 'Unknown selection'; continue }
         try {
             $availability = Get-NetworkItemAvailability $item (Get-AdContext)
             if (-not $availability.Available) { throw $availability.Reason }
             Invoke-InteractiveCheck $item | Format-List | Out-Host
-        } catch { Write-Warning $_.Exception.Message }
+        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
+        if ($item.Entry.Id -in @('disk','disk-helper','event-browser')) { continue }
         $null = Read-Host 'Press Enter to return'
     }
 }
@@ -934,10 +942,10 @@ function Start-NetworkMenu {
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         foreach ($category in @(Get-NetworkCategories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { Write-Host " [$($category.Key)] $($category.Name)" }
-        Write-Host "`n [0] Back"
+        Write-Host "`n [B / 0] Back"
         Write-Host 'Checks and repairs are grouped by topic. Repairs ask before making changes.' -ForegroundColor DarkGray
         $selection = Read-Host 'Select'
-        if ($null -eq $selection -or $selection.Trim() -eq '0') { return }
+        if ($null -eq $selection -or $selection.Trim() -in @('0','B')) { return }
         # Retain the former AD shortcut for existing users.
         if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
         $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() -and $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') } | Select-Object -First 1
@@ -949,7 +957,7 @@ function Start-NetworkMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.6' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.6.7' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
@@ -959,10 +967,10 @@ function Start-WindowsMenu {
         Write-Host ' [5] Group Policy - results, refresh and events'
         Write-Host ' [6] Event Logs - filtered CLI viewer'
         Write-Host ' [7] Registry tweaks - Outlook file limits and RDP warning'
-        Write-Host "`n [0] Exit"
+        Write-Host "`n [B / 0] Exit"
         Write-Host 'Repair options ask before making changes. M365 remains a separate toolkit.' -ForegroundColor DarkGray
         $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -eq '0') { return }
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-NetworkMenu }
             '2' { Start-NetworkCategory 'power' }
