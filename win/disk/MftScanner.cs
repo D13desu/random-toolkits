@@ -1,17 +1,25 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
-// Read-only Windows FSCTL_GET_NTFS_FILE_RECORD prototype; not a raw-sector reader.
-namespace RandomToolkits.DiskV7 {
+// Read-only file-record queries plus bounded raw reads of ATTRIBUTE_LIST metadata.
+namespace RandomToolkits.DiskV8 {
  public class MftStream { public string Name; public long Allocated; public bool Known; }
  public class MftName { public ulong Parent; public string Name; }
+ public class MftRun { public long Cluster, Count; }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
   public bool HasAttributeList, HasStandardInformation;
   public ulong BaseReference; public ushort LinkCount; public uint ReparseTag;
   public int NameAttributeCount;
+  public int ExpectedNameCount;
+  public System.Collections.Generic.Dictionary<ulong,int> ExpectedNames;
+  public bool LinkCountMismatch;
   public string ExtensionIssue;
   public long UnnamedAllocated, Allocated;
   public bool UnnamedAllocationKnown=true, AllocationKnown, AllocationListKnown;
   public string AllocationIssue;
+  public string AttributeListIssue;
+  public long AttributeListSize;
+  public byte[] AttributeListMapping;
+  public long AttributeListLastVcn;
   public System.Collections.Generic.List<MftStream> NamedStreams;
   public System.Collections.Generic.List<string> ExpectedStreams;
   public System.Collections.Generic.List<ulong> ExtensionReferences;
@@ -23,6 +31,10 @@ namespace RandomToolkits.DiskV7 {
   [System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)]
   [return:System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
   static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle handle,uint code,byte[] input,int inputSize,byte[] output,int outputSize,out int returned,System.IntPtr overlapped);
+  [System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)]
+  static extern bool SetFilePointerEx(Microsoft.Win32.SafeHandles.SafeFileHandle handle,long distance,out long position,uint method);
+  [System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)]
+  static extern bool ReadFile(Microsoft.Win32.SafeHandles.SafeFileHandle handle,System.IntPtr buffer,int count,out int read,System.IntPtr overlapped);
   const ulong IndexMask=0x0000ffffffffffffUL;
   public Scan Result=new Scan(); public volatile bool Done, CancelRequested;
   public string Error; public long FilesSeen, BytesSeen, RecordsSeen; public int DirectoriesSeen;
@@ -56,18 +68,15 @@ namespace RandomToolkits.DiskV7 {
     }
     if(type==0x20) {
      r.HasAttributeList=true;
-     if(!nonresident && size>0) {
-      r.ExpectedStreams=new System.Collections.Generic.List<string>();int q=p+value, limit=q+size;
-      r.ExtensionReferences=new System.Collections.Generic.List<ulong>();
-      while(q<limit) {
-       Need(limit-q>=26);int entryLength=U16(b,q+4), chars=b[q+6], nameOffset=b[q+7];
-       Need(entryLength>=26 && entryLength%8==0 && entryLength<=limit-q);
-       Need(chars==0 || (nameOffset>=26 && nameOffset+chars*2<=entryLength));
-       if(U32(b,q)==0x80 && U64(b,q+8)==0) r.ExpectedStreams.Add(chars==0?"":System.Text.Encoding.Unicode.GetString(b,q+nameOffset,chars*2));
-       ulong reference=U64(b,q+16);if(reference!=r.Reference && !r.ExtensionReferences.Contains(reference)) r.ExtensionReferences.Add(reference);
-       q+=entryLength;
+     if(!nonresident && size>0) {byte[] list=new byte[size];System.Buffer.BlockCopy(b,p+value,list,0,size);ParseAttributeList(r,list);}
+     else if(nonresident) {
+      int mapping=U16(b,p+32);
+      if(U64(b,p+16)!=0 || U16(b,p+12)!=0 || mapping<64 || mapping>=length || U64(b,p+56)<U64(b,p+48))
+       r.AttributeListIssue="Unsupported or uninitialized nonresident attribute list.";
+      else {
+       r.AttributeListSize=System.BitConverter.ToInt64(b,p+48);r.AttributeListLastVcn=System.BitConverter.ToInt64(b,p+24);
+       r.AttributeListMapping=new byte[length-mapping];System.Buffer.BlockCopy(b,p+mapping,r.AttributeListMapping,0,length-mapping);
       }
-      r.AllocationListKnown=true;
      }
     }
     if(type==0xc0) {
@@ -118,6 +127,67 @@ namespace RandomToolkits.DiskV7 {
    CalculateAllocation(r);
    return r;
   }
+  // Commit parsed lists only after every entry passes bounds checks.
+  public static void ParseAttributeList(MftRecord r,byte[] b) {
+   Need(b!=null && b.Length>0 && b.Length<=1048576);
+   var streams=new System.Collections.Generic.List<string>();var refs=new System.Collections.Generic.List<ulong>();
+   int q=0,names=0;var expectedNames=new System.Collections.Generic.Dictionary<ulong,int>();
+   while(q<b.Length) {
+    Need(b.Length-q>=26);int length=U16(b,q+4), chars=b[q+6], offset=b[q+7];
+    Need(length>=26 && length%8==0 && length<=b.Length-q);
+    Need(chars==0 || (offset>=26 && offset+chars*2<=length));
+    if(U32(b,q)==0x80 && U64(b,q+8)==0) streams.Add(chars==0?"":System.Text.Encoding.Unicode.GetString(b,q+offset,chars*2));
+    if(U32(b,q)==0x30) {names++;ulong nameRef=U64(b,q+16);int count;expectedNames.TryGetValue(nameRef,out count);expectedNames[nameRef]=count+1;}
+    ulong reference=U64(b,q+16);if(reference!=r.Reference && !refs.Contains(reference)) refs.Add(reference);
+    q+=length;
+   }
+   r.ExpectedStreams=streams;r.ExpectedNameCount=names;r.ExpectedNames=expectedNames;r.ExtensionReferences=refs;r.AllocationListKnown=true;r.AttributeListIssue=null;
+  }
+  // Mapping pairs encode unsigned lengths and signed, relative LCN offsets.
+  // ATTRIBUTE_LIST cannot contain sparse runs. Reject gaps and out-of-volume reads.
+  public static MftRun[] DecodeAttributeListRuns(byte[] mapping,long lastVcn,long totalClusters) {
+   Need(mapping!=null && lastVcn>=0 && totalClusters>0);
+   var runs=new System.Collections.Generic.List<MftRun>();int p=0;long lcn=0,vcn=0;bool end=false;
+   while(p<mapping.Length) {
+    int head=mapping[p++];if(head==0) {end=true;break;}
+    int n=head&15,d=head>>4;Need(n>=1 && n<=8 && d>=1 && d<=8 && n+d<=mapping.Length-p);
+    ulong count=0,delta=0;for(int i=0;i<n;i++) count|=(ulong)mapping[p++]<<(8*i);
+    for(int i=0;i<d;i++) delta|=(ulong)mapping[p++]<<(8*i);
+    if(d<8 && (delta&(1UL<<(d*8-1)))!=0) delta|=ulong.MaxValue<<(d*8);
+    Need(count>0 && count<=long.MaxValue);lcn=checked(lcn+unchecked((long)delta));
+    Need(lcn>=0 && lcn<totalClusters && (long)count<=totalClusters-lcn);
+    vcn=checked(vcn+(long)count);Need(vcn<=checked(lastVcn+1) && runs.Count<4096);
+    runs.Add(new MftRun {Cluster=lcn,Count=(long)count});
+   }
+   Need(end && vcn==checked(lastVcn+1));return runs.ToArray();
+  }
+  static void LoadAttributeList(Microsoft.Win32.SafeHandles.SafeFileHandle handle,MftRecord r,byte[] volume) {
+   if(r.AttributeListMapping==null) return;
+   try {
+    long cluster=U32(volume,44),sector=U32(volume,40),total=System.BitConverter.ToInt64(volume,16);
+    Need(sector>=512 && cluster>=sector && cluster<=2097152 && cluster%sector==0);
+    Need(r.AttributeListSize>0 && r.AttributeListSize<=1048576);
+    MftRun[] runs=DecodeAttributeListRuns(r.AttributeListMapping,r.AttributeListLastVcn,total);
+    Need(checked((r.AttributeListLastVcn+1)*cluster)>=r.AttributeListSize);
+    byte[] list=new byte[(int)r.AttributeListSize];int copied=0;
+    foreach(MftRun run in runs) {
+     int wanted=(int)System.Math.Min(checked(run.Count*cluster),list.Length-copied);
+     if(wanted==0) break;
+     int aligned=checked((int)(((wanted+cluster-1)/cluster)*cluster));long position;
+     long offset=checked(run.Cluster*cluster);
+     if(!SetFilePointerEx(handle,offset,out position,0) || position!=offset) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+     System.IntPtr allocation=System.Runtime.InteropServices.Marshal.AllocHGlobal(checked(aligned+(int)cluster));
+     try {
+      long address=allocation.ToInt64();System.IntPtr buffer=new System.IntPtr(checked(((address+cluster-1)/cluster)*cluster));
+      int read;if(!ReadFile(handle,buffer,aligned,out read,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+      if(read!=aligned) throw new System.IO.IOException("Short attribute-list metadata read.");
+      System.Runtime.InteropServices.Marshal.Copy(buffer,list,copied,wanted);copied+=wanted;
+     } finally {System.Runtime.InteropServices.Marshal.FreeHGlobal(allocation);}
+    }
+    Need(copied==list.Length);ParseAttributeList(r,list);
+   } catch(System.Exception ex) {r.AllocationListKnown=false;r.AttributeListIssue="Attribute list unavailable: "+ex.Message;}
+   r.AttributeListMapping=null;CalculateAllocation(r);
+  }
   public static void CalculateAllocation(MftRecord r) {
    r.Allocated=0;r.AllocationKnown=true;r.AllocationIssue=null;
    if(!r.HasAttributeList && r.NamedStreams==null) {
@@ -137,7 +207,7 @@ namespace RandomToolkits.DiskV7 {
     else {r.AllocationKnown=false;r.AllocationIssue="Missing, conflicting or unsupported stream allocation header.";}
    }
    if(r.HasAttributeList) {
-    if(!r.AllocationListKnown || r.ExpectedStreams==null) {r.AllocationKnown=false;r.AllocationIssue="Attribute list is nonresident or unavailable; stream completeness is unknown.";}
+    if(!r.AllocationListKnown || r.ExpectedStreams==null) {r.AllocationKnown=false;r.AllocationIssue=r.AttributeListIssue??"Attribute list is unavailable; stream completeness is unknown.";}
     else {
      var expected=new System.Collections.Generic.HashSet<string>(r.ExpectedStreams,System.StringComparer.Ordinal);
      if(expected.Count!=r.ExpectedStreams.Count || !expected.SetEquals(streams.Keys)) {r.AllocationKnown=false;r.AllocationIssue="Data stream list does not match the assembled initial extents.";}
@@ -150,11 +220,22 @@ namespace RandomToolkits.DiskV7 {
   public static MftRecord[] Assemble(MftRecord[] records) {
    var result=new System.Collections.Generic.List<MftRecord>();
    var bases=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
+   var extensions=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
+   foreach(MftRecord r in records) if(r!=null && r.BaseReference!=0) extensions[r.Reference]=r;
    foreach(MftRecord r in records) {
     if(r==null || r.BaseReference!=0 || bases.ContainsKey(r.Reference)) continue;
     if(!r.HasAttributeList) {result.Add(r);continue;}
     // Clone only records being assembled; repeated builds must not append names twice.
     var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,NameAttributeCount=r.NameAttributeCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes,UnnamedAllocated=r.UnnamedAllocated,UnnamedAllocationKnown=r.UnnamedAllocationKnown,AllocationListKnown=r.AllocationListKnown,ExpectedStreams=r.ExpectedStreams};
+    copy.AttributeListIssue=r.AttributeListIssue;copy.ExtensionIssue=r.ExtensionIssue;copy.ExtensionReferences=r.ExtensionReferences;copy.ExpectedNameCount=r.ExpectedNameCount;copy.ExpectedNames=r.ExpectedNames;
+    if(r.AllocationListKnown && r.ExtensionReferences!=null) foreach(ulong reference in r.ExtensionReferences) {
+     MftRecord extra;if(!extensions.TryGetValue(reference,out extra) || extra.BaseReference!=r.Reference) copy.ExtensionIssue="Attribute list references a missing, reused or differently owned extension.";
+    }
+    if(r.AllocationListKnown && r.ExpectedNames!=null) foreach(var name in r.ExpectedNames) {
+     MftRecord part=r;
+     if(name.Key!=r.Reference && !extensions.TryGetValue(name.Key,out part)) {copy.ExtensionIssue="Filename extension missing.";continue;}
+     if(part.NameAttributeCount!=name.Value) copy.ExtensionIssue="Filename attributes do not match the attribute list for their record.";
+    }
     if(r.NamedStreams!=null) copy.NamedStreams=new System.Collections.Generic.List<MftStream>(r.NamedStreams);
     copy.Names.AddRange(r.Names);bases.Add(copy.Reference,copy);result.Add(copy);
    }
@@ -182,10 +263,12 @@ namespace RandomToolkits.DiskV7 {
     var names=new System.Collections.Generic.List<MftName>();
     foreach(MftName n in r.Names) if(unique.Add(n.Parent.ToString()+":"+n.Name)) names.Add(n);
     r.Names=names;
-    // NTFS's header count includes separate DOS FILE_NAME attributes. Retain
-    // those in the completeness check but never display/count them as extra files.
+    // Prefer the verified attribute list over the header's link count. Projected
+    // metadata can expose a different header count despite a complete name list.
+    bool namesComplete=r.AllocationListKnown && r.ExpectedNameCount>0 ? r.NameAttributeCount==r.ExpectedNameCount : r.NameAttributeCount==r.LinkCount;
+    r.LinkCountMismatch=namesComplete && r.NameAttributeCount!=r.LinkCount;
     r.Unsupported=r.ExtensionIssue!=null || !r.HasStandardInformation || r.Names.Count==0 ||
-      (r.Directory ? r.Names.Count!=1 : (!r.HasData || r.LinkCount==0 || r.NameAttributeCount!=r.LinkCount));
+      (r.Directory ? r.Names.Count!=1 : (!r.HasData || r.LinkCount==0 || !namesComplete));
     CalculateAllocation(r);
     if(r.ExtensionIssue!=null) {r.AllocationKnown=false;r.AllocationIssue=r.ExtensionIssue;}
    }
@@ -260,19 +343,22 @@ namespace RandomToolkits.DiskV7 {
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
     if(r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),"Incomplete/conflicting metadata: data="+r.HasData+", standardInfo="+r.HasStandardInformation+", name attributes="+r.NameAttributeCount+", header count="+r.LinkCount+"; "+r.ExtensionIssue,"FileUnsupported");continue;}
+    if(r.LinkCountMismatch) Issue(s,Describe(r),"Included using verified attribute-list filenames; header link count differs (names="+r.NameAttributeCount+", header="+r.LinkCount+").","IncludedLinkCountMismatch");
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
-    string linkFailure=null;
+    string linkFailure=null;bool metadataOnly=true;
     foreach(MftName n in r.Names) {
      string parent; if(!paths.TryGetValue(n.Parent,out parent)) {
       Issue cause;
-      if(linkFailure==null) linkFailure="Unresolved parent MFT #"+(n.Parent&IndexMask)+" (sequence "+(n.Parent>>48)+") for "+n.Name+(blocked.TryGetValue(n.Parent,out cause)?"; "+cause.Reason:"; parent absent or changed.");
+      bool blockedParent=blocked.TryGetValue(n.Parent,out cause);
+      metadataOnly&=(n.Parent&IndexMask)<16 || (blockedParent && cause.Category=="DirectorySystemMetadata");
+      if(linkFailure==null) linkFailure="Unresolved parent MFT #"+(n.Parent&IndexMask)+" (sequence "+(n.Parent>>48)+") for "+n.Name+(blockedParent?"; "+cause.Reason:"; parent absent or changed.");
       continue;
      }
      string path=parent.TrimEnd('\\')+"\\"+n.Name; names[path]=parent;
     }
     bool charged=false;
     foreach(var pair in names) {
-     if(!occupied.Add(pair.Key)) {if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
+     if(!occupied.Add(pair.Key)) {metadataOnly=false;if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
      long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);
      long allocated=charged?0:r.Allocated;node.Allocated=checked(node.Allocated+allocated);
      if(!charged) {
@@ -285,8 +371,8 @@ namespace RandomToolkits.DiskV7 {
      s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":(IsContainer(r)?"WCI":(r.Reparse?"RP":"FILE")),Bytes=bytes,Allocated=allocated,AllocationUnknown=!charged && !r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null}); charged=true;
     }
     if(!charged) s.MftOmittedFiles++;
-    // At most one diagnostic per file: do not count each missing parent and then count the file again.
-    if(linkFailure!=null || !charged) Issue(s,Describe(r),linkFailure??"No resolvable filename; file omitted.",charged?"PartialFileLinks":"FilePathUnresolved");
+    // At most one path diagnostic per file, independent of allocation/header diagnostics.
+    if(linkFailure!=null || !charged) Issue(s,Describe(r),linkFailure??"No resolvable filename; file omitted.",charged?"PartialFileLinks":(linkFailure!=null && metadataOnly?"FileSystemMetadata":"FilePathUnresolved"));
    }
    var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);
    order.Sort(delegate(Node a,Node b){return b.Path.Length.CompareTo(a.Path.Length);});
@@ -321,7 +407,7 @@ namespace RandomToolkits.DiskV7 {
      if(!DeviceIoControl(handle,0x90068,input,8,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
      Need(returned>=12 && (U64(output,0)&IndexMask)==(reference&IndexMask));int size=checked((int)U32(output,8));Need(size>=48 && size<=recordSize && size<=returned-12);
      byte[] bytes=new byte[size];System.Buffer.BlockCopy(output,12,bytes,0,size);MftRecord r=Parse(bytes,reference&IndexMask);
-     Need(r!=null && ((reference>>48)==0 || r.Reference==reference));records.Add(r);
+     Need(r!=null && ((reference>>48)==0 || r.Reference==reference));LoadAttributeList(handle,r,volume);records.Add(r);
      if(r.ExtensionReferences!=null) foreach(ulong extra in r.ExtensionReferences) queue.Enqueue(extra);
     }
    }
@@ -360,6 +446,31 @@ namespace RandomToolkits.DiskV7 {
    }
    return lines.ToArray();
   }
+  // Re-query referenced extensions missing from descending enumeration. Verify both
+  // the sequence and owning base reference; never attach a reused record slot.
+  void CompleteExtensions(Microsoft.Win32.SafeHandles.SafeFileHandle handle,System.Collections.Generic.List<MftRecord> records,byte[] volume,int recordSize) {
+   var extensions=new System.Collections.Generic.Dictionary<ulong,MftRecord>();
+   foreach(MftRecord r in records) if(r.BaseReference!=0) extensions[r.Reference]=r;
+   int originalCount=records.Count;byte[] output=new byte[recordSize+16];
+   for(int i=0;i<originalCount && !CancelRequested;i++) {
+    MftRecord owner=records[i];if(owner.BaseReference!=0 || owner.ExtensionReferences==null) continue;
+    foreach(ulong reference in owner.ExtensionReferences) {
+     if(CancelRequested) break;
+     try {
+      MftRecord extra;
+      if(!extensions.TryGetValue(reference,out extra)) {
+       int returned;byte[] input=System.BitConverter.GetBytes(reference&IndexMask);
+       if(!DeviceIoControl(handle,0x90068,input,8,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+       Need(returned>=12 && (U64(output,0)&IndexMask)==(reference&IndexMask));int size=checked((int)U32(output,8));Need(size>=48 && size<=recordSize && size<=returned-12);
+       byte[] bytes=new byte[size];System.Buffer.BlockCopy(output,12,bytes,0,size);extra=Parse(bytes,reference&IndexMask);
+       Need(extra!=null && extra.Reference==reference && extra.BaseReference==owner.Reference);
+       LoadAttributeList(handle,extra,volume);extensions.Add(reference,extra);records.Add(extra);
+      }
+      Need(extra.BaseReference==owner.Reference);
+     } catch(System.Exception ex) {owner.ExtensionIssue="Referenced extension #"+(reference&IndexMask)+" could not be verified: "+ex.Message;}
+    }
+   }
+  }
   void Run() {
    string root=Result.Root; System.DateTime started=System.DateTime.Now;
    try {
@@ -386,12 +497,13 @@ namespace RandomToolkits.DiskV7 {
       Need(returned>=12);ulong actual=U64(output,0)&IndexMask;int size=checked((int)U32(output,8));
       Need(actual<=next && size>=48 && size<=recordSize && size<=returned-12);
       byte[] record=new byte[size];System.Buffer.BlockCopy(output,12,record,0,size);
-      try {MftRecord r=Parse(record,actual);if(r!=null && actual!=5) {records.Add(r);if(r.BaseReference==0) {if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}}
+      try {MftRecord r=Parse(record,actual);if(r!=null && actual!=5) {LoadAttributeList(handle,r,volume);records.Add(r);if(r.BaseReference==0) {if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}}
       catch(System.IO.InvalidDataException ex) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": "+ex.Message);}
       catch(System.OverflowException) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": oversized record field.");}
       System.Threading.Interlocked.Increment(ref RecordsSeen);
       if(actual==0) break;next=actual-1;
      }
+     if(!CancelRequested) CompleteExtensions(handle,records,volume,recordSize);
      Result=Build(root,records.ToArray(),CancelRequested);Result.Started=started;
      try {var drive=new System.IO.DriveInfo(root);Result.VolumeUsed=drive.TotalSize-drive.TotalFreeSpace;} catch { }
      if(CancelRequested && !Result.Cancelled) {

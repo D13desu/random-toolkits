@@ -7,7 +7,7 @@ try {
     . (Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1') -NoMenu
     $reason=Get-DiskMftUnavailableReason $Drive;if ($reason) {throw $reason}
     Initialize-DiskScanner
-    $worker=[RandomToolkits.DiskV7.MftScanner]::Start([IO.Path]::GetFullPath($Drive))
+    $worker=[RandomToolkits.DiskV8.MftScanner]::Start([IO.Path]::GetFullPath($Drive))
     $last=0
     while (-not $worker.Done) {
         if ($timer.Elapsed.TotalSeconds -gt $TimeoutSeconds -or ($CancelPath -and [IO.File]::Exists($CancelPath))) { $worker.CancelRequested=$true }

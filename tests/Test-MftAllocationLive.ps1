@@ -54,7 +54,7 @@ public class AllocationOracle {
     $files+=$alias
     $oracles=@{}; $ids=New-Object 'System.Collections.Generic.List[uint64]'
     foreach ($path in $files) { $oracle=[AllocationOracle]::Query($path);$oracles[$path]=$oracle;if (-not $ids.Contains($oracle.Reference)) {$ids.Add($oracle.Reference)} }
-    $records=[RandomToolkits.DiskV7.MftScanner]::ReadRecordsForValidation([IO.Path]::GetPathRoot($fixture),$ids.ToArray())
+    $records=[RandomToolkits.DiskV8.MftScanner]::ReadRecordsForValidation([IO.Path]::GetPathRoot($fixture),$ids.ToArray())
     foreach ($path in $files) {
         $oracle=$oracles[$path];$record=@($records | Where-Object { $_.Reference -eq $oracle.Reference })
         if ($record.Count -ne 1) { throw "Missing fixture record: $path" }
