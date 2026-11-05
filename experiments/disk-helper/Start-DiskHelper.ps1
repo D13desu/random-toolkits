@@ -2,6 +2,8 @@
 param([string]$Path,[ValidateSet('mft','native')][string]$Engine='mft',[string]$HelperDirectory)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Helper-Client.ps1')
+. (Join-Path $PSScriptRoot 'Helper-Ui.ps1')
+$keyboard=Test-HelperConsole
 if(-not $HelperDirectory){$HelperDirectory=Join-Path $PSScriptRoot 'out'}
 function Format-HelperBytes($Bytes) {
     if($null -eq $Bytes){return '-'}
@@ -56,9 +58,12 @@ try {
         Start-Sleep -Milliseconds 200
     } while($true)
     Write-Progress -Activity 'C# helper scanning' -Completed
-    $summary=$status.summary;$current=$summary.root;$offset=0;$sort=if($Engine -eq 'mft'){'allocated'}else{'logical'}
+    $summary=$status.summary;$current=$summary.root;$offset=0;$selected=0;$lastView='';$sort=if($Engine -eq 'mft'){'allocated'}else{'logical'}
     while($true){
         $page=Invoke-DiskHelper $session @{command='list';path=$current;offset=$offset;limit=20;sort=$sort}
+        $view=$current+'|'+$offset+'|'+$sort
+        if($view -ne $lastView){$selected=0;$lastView=$view}
+        if($keyboard){Clear-Host}
         Write-Host ("`nDISK HELPER {0} | {1}" -f $session.Hello.version,$page.path) -ForegroundColor Cyan
         Write-Host ('On disk: {0} | Logical: {1} | Files: {2:N0} | Scan: {3:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$page.files,$summary.seconds)
         Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
@@ -71,11 +76,22 @@ try {
         for($i=0;$i -lt $rows.Count;$i++){
             $row=$rows[$i];$allocation=if($Engine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
-            Write-Host (' [{0,2}] {1,14} | {2,12} | {3,-4} {4}' -f ($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name)
+            $marker=if($i -eq $selected){'>'}else{' '}
+            $color=if($i -eq $selected){'Cyan'}else{'Gray'}
+            Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-4} {5}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name) -ForegroundColor $color
         }
         Write-Host ('Page {0}/{1} | Sort: {2} | Number: folder | U: up | N/P: pages | S: sort | E: diagnostics | A: accounting | T: timings | B: back (parent/drives) | 0: drives' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
-        $choice=Read-Host 'Select';$number=0
+        if($keyboard){Write-Host 'Up/Down: select | Enter/Right: enter folder | Left/Backspace: back | Ctrl+Enter / O: Explorer | digits + Enter: folder'}
+        $choice=Read-HelperChoice $keyboard;$number=0
         switch(([string]$choice).Trim().ToUpperInvariant()){
+            '@UP'{if($selected -gt 0){$selected--}elseif($offset -gt 0){$offset=[math]::Max(0,$offset-20)}}
+            '@DOWN'{if($selected+1 -lt $rows.Count){$selected++}elseif($offset+20 -lt $page.total){$offset+=20}}
+            '@ENTER'{if($rows.Count -and $rows[$selected].Kind -eq 'DIR'){$current=$rows[$selected].Path;$offset=0}}
+            {$_ -in @('@EXPLORER','O')}{
+                $openPath=$current
+                if($rows.Count -and $rows[$selected].Kind -eq 'DIR'){$openPath=$rows[$selected].Path}
+                try {Open-HelperDirectory $openPath} catch {Write-Warning $_.Exception.Message;$null=Read-Host 'Enter to return'}
+            }
             '0'{continue drives}
             'B'{if($page.parent){$current=$page.parent;$offset=0}else{continue drives}}
             'U'{if($page.parent){$current=$page.parent;$offset=0}}

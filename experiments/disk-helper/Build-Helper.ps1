@@ -9,7 +9,7 @@ if(-not $match.Success){throw 'Embedded engine source not found.'}
 $engine=$match.Groups[1].Value
 $mft=Get-Content (Join-Path $root 'win/disk/MftScanner.cs') -Raw
 $embedded=($engine -split '// BEGIN EMBEDDED MFT SCANNER',2)[1] -split '// END EMBEDDED MFT SCANNER',2
-if($embedded[0].Trim() -ne $mft.Trim()){throw 'MFT source is not synchronized; run tests/Sync-DiskMft.ps1 first.'}
+if($embedded[0].Replace("`r`n","`n").Trim() -ne $mft.Replace("`r`n","`n").Trim()){throw 'MFT source is not synchronized; run tests/Sync-DiskMft.ps1 first.'}
 . (Join-Path $PSScriptRoot 'Transform-Engine.ps1')
 $engine=ConvertTo-HelperEngine ($engine.Replace("`r`n","`n")) -CompactNames:(-not $BaselineStorage) -ReleaseRecords:(-not $BaselineStorage)
 $framework=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
@@ -25,6 +25,6 @@ if(-not $BaselineStorage){$sources+=Join-Path $PSScriptRoot 'MftNames.cs'}
 $defines=if($LegacyRows -or $BaselineStorage){'/define:LEGACY_ROWS'}elseif($LegacyFolders){'/define:DIRECT_ROWS'}elseif($LegacyPaths){'/define:DIRECT_ROWS,COMPACT_FOLDERS'}else{'/define:DIRECT_ROWS,COMPACT_FOLDERS,LAZY_PATHS'}
 & $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output $defines ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $sources
 if($LASTEXITCODE -ne 0){throw 'Helper compilation failed.'}
-$manifest=[ordered]@{Version='0.7.1-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}elseif($LegacyRows){'inline names, released records'}elseif($LegacyFolders){'direct compact rows, inline names, released records'}elseif($LegacyPaths){'compact folders, direct rows, retained paths'}else{'on-demand paths, compact folders, direct rows'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
+$manifest=[ordered]@{Version='0.8.0-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}elseif($LegacyRows){'inline names, released records'}elseif($LegacyFolders){'direct compact rows, inline names, released records'}elseif($LegacyPaths){'compact folders, direct rows, retained paths'}else{'on-demand paths, compact folders, direct rows'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'manifest.json') -Encoding UTF8
 [pscustomobject]@{Executable=$exe;Manifest=(Join-Path $output 'manifest.json');Bytes=(Get-Item $exe).Length}

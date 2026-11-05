@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.7.1
+# Standalone disk helper experiment 0.8.0
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -168,3 +168,6 @@ On 2026-11-05, protocol/client tests passed on Windows PowerShell 5.1 and PowerS
 These are sequential live-volume samples, not a controlled speed benchmark or peak-memory measurements. Whole-volume totals differed by 188,348 logical bytes and 151,552 allocated bytes; the immutable test fixture matched exactly. Caches, filesystem changes and GC timing affect measurements. Extraction isolates memory from PowerShell but does not yet reduce engine memory, and this comparison does not establish a reliable scan-speed improvement.
 
 Tests: Test-Helper.ps1 (non-admin protocol), Test-Engine.ps1 (non-admin shared MFT regressions against the built helper), Test-CompactIndex.ps1 (non-admin cache equivalence), Test-MftCancel.ps1 (admin, cancellation after real MFT progress), Compare-Helper.ps1 (admin, helper then embedded full-volume comparison), Measure-Memory.ps1 (admin, full MFT scan, phase samples and memory collection with unchanged root-page assertion). Validation writes only build output, isolated TEMP fixtures and requested report files. Reports can contain local paths and should stay local.
+
+### Keyboard browsing (0.8.0)
+In an interactive console, Up/Down selects a row; Enter or Right enters a directory. Left, Backspace or Escape goes back. PageUp/PageDown changes pages. Ctrl+Enter (or O) opens the selected directory in Explorer; with a file selected it opens the current directory. Missing/inaccessible paths report an error. Existing commands remain available, including numbers followed by Enter. Redirected or unsupported hosts retain line input. The scanner remains read-only; Explorer is a separate Windows application.
