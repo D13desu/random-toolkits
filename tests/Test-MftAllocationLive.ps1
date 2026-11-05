@@ -54,7 +54,7 @@ public class AllocationOracle {
     $files+=$alias
     $oracles=@{}; $ids=New-Object 'System.Collections.Generic.List[uint64]'
     foreach ($path in $files) { $oracle=[AllocationOracle]::Query($path);$oracles[$path]=$oracle;if (-not $ids.Contains($oracle.Reference)) {$ids.Add($oracle.Reference)} }
-    $records=[RandomToolkits.DiskV9.MftScanner]::ReadRecordsForValidation([IO.Path]::GetPathRoot($fixture),$ids.ToArray())
+    $records=[RandomToolkits.DiskV10.MftScanner]::ReadRecordsForValidation([IO.Path]::GetPathRoot($fixture),$ids.ToArray())
     foreach ($path in $files) {
         $oracle=$oracles[$path];$record=@($records | Where-Object { $_.Reference -eq $oracle.Reference })
         if ($record.Count -ne 1) { throw "Missing fixture record: $path" }
@@ -62,7 +62,7 @@ public class AllocationOracle {
         if ([IO.Path]::GetFileName($path) -eq 'streams.bin') { $allocated+=[AllocationOracle]::Query($ads).Allocated }
         $pass=$record[0].AllocationKnown -and $record[0].Allocated -eq $allocated -and $record[0].Bytes -eq $oracle.Logical
         $paths=[string[]]@($files | Where-Object {$oracles[$_].Reference -eq $oracle.Reference})
-        $apiIssue=[RandomToolkits.DiskV9.MftApi]::Verify([IO.Path]::GetPathRoot($fixture),$record[0],$paths)
+        $apiIssue=[RandomToolkits.DiskV10.MftApi]::Verify([IO.Path]::GetPathRoot($fixture),$record[0],$paths)
         $pass=$pass -and $null -eq $apiIssue
         $report.Rows+=@{File=[IO.Path]::GetFileName($path);Logical=$oracle.Logical;WindowsAllocated=$allocated;MftAllocated=$record[0].Allocated;Known=$record[0].AllocationKnown;Pass=$pass;Detail=$record[0].AllocationIssue;ApiIssue=$apiIssue}
     }

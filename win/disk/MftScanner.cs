@@ -1,6 +1,6 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only file-record queries plus bounded raw reads of ATTRIBUTE_LIST metadata.
-namespace RandomToolkits.DiskV9 {
+namespace RandomToolkits.DiskV10 {
  public class MftStream { public string Name; public long Allocated; public bool Known; }
  public class MftName { public ulong Parent; public string Name; }
  public class MftRun { public long Cluster, Count; }
@@ -360,7 +360,7 @@ namespace RandomToolkits.DiskV9 {
      string path=parent.TrimEnd('\\')+"\\"+n.Name; names[path]=parent;
     }
     if(names.Count==0 && linkFailure!=null && metadataOnly) {s.MftOmittedFiles++;Issue(s,Describe(r),linkFailure,"FileSystemMetadata");continue;}
-    if(verify!=null && !cancelled && (r.Unsupported || !r.AllocationKnown) && r.HasAttributeList && !r.AllocationListKnown && r.ExtensionIssue==null && r.HasData && r.HasStandardInformation && !r.Reparse && linkFailure==null && names.Count>0) {
+    if(verify!=null && !cancelled && (r.Unsupported || !r.AllocationKnown) && r.HasAttributeList && !r.AllocationListKnown && r.ExtensionIssue==null && r.HasData && r.HasStandardInformation && MftApi.Eligible(r) && linkFailure==null && names.Count>0) {
      try {r.ApiIssue=verify(r,new System.Collections.Generic.List<string>(names.Keys).ToArray());}
      catch(System.Exception ex) {r.ApiIssue=ex.Message;}
      if(System.String.IsNullOrEmpty(r.ApiIssue)) {r.ApiVerified=true;r.Unsupported=false;r.AllocationKnown=true;r.AllocationIssue=null;}
@@ -538,7 +538,7 @@ namespace RandomToolkits.DiskV9 {
  }
 }
 
-namespace RandomToolkits.DiskV9 {
+namespace RandomToolkits.DiskV10 {
 
 using System;
 using System.Text;
@@ -557,6 +557,7 @@ public class MftApi {
  [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr h);
  public ulong RequestedReference,ReturnedReference; public uint Attributes,Links;
  public long Allocation,Logical; public string Path,Error,LinkError; public List<string> Names=new List<string>();
+ public int LinkErrorCode;
  public string StreamError;public List<StreamRow> Streams=new List<StreamRow>();
  public static MftApi Query(string root,ulong reference) {
   var r=new MftApi {RequestedReference=reference};
@@ -594,7 +595,7 @@ public class MftApi {
     if(count==0 || count>=32768) {r.Error="Path query: "+Marshal.GetLastWin32Error();return r;} r.Path=path.ToString();
     // Query names only: no file data read or target traversal.
     uint nameCapacity=32768;var name=new StringBuilder(32768);IntPtr find=FindFirstFileNameW(r.Path,0,ref nameCapacity,name);
-    if(find==new IntPtr(-1)) {r.LinkError="FindFirstFileName: "+Marshal.GetLastWin32Error();return r;}
+    if(find==new IntPtr(-1)) {r.LinkErrorCode=Marshal.GetLastWin32Error();r.LinkError="FindFirstFileName: "+r.LinkErrorCode;return r;}
     try {
      do {r.Names.Add(name.ToString());if(r.Names.Count>=4096){r.LinkError="Hard-link enumeration limit";break;}nameCapacity=32768;name.Clear();}
      while(FindNextFileNameW(find,ref nameCapacity,name));
@@ -604,17 +605,33 @@ public class MftApi {
   }
   return r;
  }
- public static string Validate(MftApi a,RandomToolkits.DiskV9.MftRecord r,string[] paths) {
-  if(a.Error!=null || a.LinkError!=null || a.StreamError!=null) return a.Error??a.LinkError??a.StreamError;
+ public static string Validate(MftApi a,RandomToolkits.DiskV10.MftRecord r,string[] paths) {
+  if(!Eligible(r) || (a.Attributes&0x400)!=0) return "Reparse metadata fallback is disabled for this record or handle.";
+  bool singleLink=a.LinkError!=null && a.LinkErrorCode==50 && !r.Reparse && a.Links==1 && paths.Length==1 && a.Names.Count==0;
+  if(a.Error!=null || (a.LinkError!=null && !singleLink) || a.StreamError!=null) return a.Error??a.StreamError??a.LinkError;
   if(a.ReturnedReference!=r.Reference || a.Logical!=r.Bytes || a.Links==0 || a.Links!=paths.Length) return "File identity, size or link count changed.";
   var expected=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
   foreach(string path in paths) {if(path.Length<3 || path[1]!=':') return "Invalid cached path.";expected.Add(path.Substring(2));}
-  if(expected.Count!=paths.Length || a.Names.Count!=paths.Length || !expected.SetEquals(a.Names)) return "Windows links do not match cached MFT paths.";
+  if(singleLink) {
+   // No path enumeration is necessary when Windows confirms exactly one link.
+   // Accept only the same absolute DOS path obtained from the verified handle.
+   string opened=a.Path;if(opened!=null && opened.StartsWith(@"\\?\",StringComparison.Ordinal)) opened=opened.Substring(4);
+   if(!String.Equals(opened,paths[0],StringComparison.OrdinalIgnoreCase)) return "Single-link handle path differs from cached MFT path.";
+  } else if(expected.Count!=paths.Length || a.Names.Count!=paths.Length || !expected.SetEquals(a.Names)) return "Windows links do not match cached MFT paths.";
   var streams=new Dictionary<string,long>(StringComparer.Ordinal);
   if(!r.HasData || !r.UnnamedAllocationKnown) return "Unnamed allocation is unavailable.";
   streams.Add("::$DATA",r.UnnamedAllocated);
   if(r.NamedStreams!=null) foreach(var s in r.NamedStreams) {
    string name=":"+s.Name+":$DATA";if(!s.Known || streams.ContainsKey(name)) return "Stream allocation is incomplete.";streams.Add(name,s.Allocated);
+  }
+  // WOF can present its compressed backing allocation through the unnamed API
+  // stream, hiding WofCompressedData. Reconcile only this documented layout:
+  // zero local unnamed allocation, known WOF backing stream, exact total match.
+  // Other named streams remain mandatory and must match individually.
+  long backing;bool exposesBacking=false;
+  foreach(var s in a.Streams) if(s.Name==":WofCompressedData:$DATA") exposesBacking=true;
+  if(r.Reparse && r.ReparseTag==0x80000017U && r.UnnamedAllocated==0 && !exposesBacking && streams.TryGetValue(":WofCompressedData:$DATA",out backing)) {
+   streams.Remove(":WofCompressedData:$DATA");streams["::$DATA"]=backing;
   }
   if(a.Streams.Count!=streams.Count) return "Windows stream list differs from assembled metadata.";
   var seen=new HashSet<string>(StringComparer.Ordinal);long total=0;
@@ -622,8 +639,9 @@ public class MftApi {
   if(total!=r.Allocated) return "Stream allocation total differs.";
   return null;
  }
- public static string Verify(string root,RandomToolkits.DiskV9.MftRecord record,string[] paths) {
-  if(record.Reparse) return "Reparse metadata fallback is disabled.";
+ public static bool Eligible(RandomToolkits.DiskV10.MftRecord record) {return !record.Reparse || record.ReparseTag==0x80000017U;}
+ public static string Verify(string root,RandomToolkits.DiskV10.MftRecord record,string[] paths) {
+  if(!Eligible(record)) return "Reparse metadata fallback is disabled.";
   MftApi first=Query(root,record.Reference);string issue=Validate(first,record,paths);if(issue!=null) return issue;
   // Repeat independent metadata queries to detect changes during enumeration.
   MftApi second=Query(root,record.Reference);return Validate(second,record,paths);

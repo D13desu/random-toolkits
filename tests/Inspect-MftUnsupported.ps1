@@ -5,11 +5,12 @@ param([string]$Drive='C:\',[Parameter(Mandatory=$true)][string]$ReportPath)
 $ErrorActionPreference='Stop'
 try {
     $source=Get-Content (Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1') -Raw
-    $source=$source.Replace('RandomToolkits.DiskV9','RandomToolkits.DiskInvestigation1')
+    $source=$source.Replace('RandomToolkits.DiskV10','RandomToolkits.DiskInvestigation1')
     $marker='if(r.Unsupported) {s.MftOmittedFiles++;'
     if (-not $source.Contains($marker)) {throw 'Scanner instrumentation marker changed; review this diagnostic.'}
-    $source=$source.Replace('public class MftScanner {','public class MftScanner { public static System.Collections.Generic.List<MftRecord> UnsupportedSample = new System.Collections.Generic.List<MftRecord>();')
+    $source=$source.Replace('public class MftScanner {','public class MftScanner { public static System.Collections.Generic.List<MftRecord> UnsupportedSample = new System.Collections.Generic.List<MftRecord>(); public static System.Collections.Generic.List<MftRecord> UnknownSample = new System.Collections.Generic.List<MftRecord>();')
     $source=$source.Replace($marker,'if(r.Unsupported) {UnsupportedSample.Add(r);s.MftOmittedFiles++;')
+    $source=$source.Replace('if(!r.AllocationKnown) {s.MftUnknownAllocations++;','if(!r.AllocationKnown) {UnknownSample.Add(r);s.MftUnknownAllocations++;').Replace('if(!r.AllocationKnown) {node.AllocationUnknown=true;','if(!r.AllocationKnown) {UnknownSample.Add(r);node.AllocationUnknown=true;')
     . ([scriptblock]::Create($source)) -NoMenu
     $reason=Get-DiskMftUnavailableReason $Drive;if($reason){throw $reason}
     Initialize-DiskScanner
@@ -66,6 +67,7 @@ public class MftMetadataProbe {
     } else if(r.StreamError==null) r.StreamError="Stream buffer limit";
     var path=new StringBuilder(32768);uint count=GetFinalPathNameByHandleW(file,path,32768,8);
     if(count==0 || count>=32768) {r.Error="Path query: "+Marshal.GetLastWin32Error();return r;} r.Path=path.ToString();
+    if((r.Attributes&0x400)!=0) {r.LinkError="Reparse path enumeration deliberately skipped.";return r;}
     // Query names only: no file data read or target traversal.
     uint nameCapacity=32768;var name=new StringBuilder(32768);IntPtr find=FindFirstFileNameW(r.Path,0,ref nameCapacity,name);
     if(find==new IntPtr(-1)) {r.LinkError="FindFirstFileName: "+Marshal.GetLastWin32Error();return r;}
@@ -93,19 +95,21 @@ public class MftMetadataProbe {
     }
     if($worker.Error){throw $worker.Error}
     $records=[RandomToolkits.DiskInvestigation1.MftScanner]::UnsupportedSample
-    $groups=@($records | Group-Object { 'List='+$_.HasAttributeList+'; Known='+$_.AllocationListKnown+'; Data='+$_.HasData+'; Standard='+$_.HasStandardInformation+'; ListIssue='+$_.AttributeListIssue+'; ExtensionIssue='+$_.ExtensionIssue })
+    $unknown=[RandomToolkits.DiskInvestigation1.MftScanner]::UnknownSample
+    $all=@($records)+@($unknown)
+    $groups=@($all | Group-Object { 'Unsupported='+$_.Unsupported+'; Reparse='+$_.Reparse+'; Tag=0x'+$_.ReparseTag.ToString('X8')+'; Directory='+$_.Directory+'; '+ 'List='+$_.HasAttributeList+'; Known='+$_.AllocationListKnown+'; Data='+$_.HasData+'; Standard='+$_.HasStandardInformation+'; ListIssue='+$_.AttributeListIssue+'; ExtensionIssue='+$_.ExtensionIssue })
     $selected=@($records | Where-Object {($_.Reference -band 281474976710655) -in @(5030641,4373548,4330640,4319349)})
     foreach($group in $groups){$selected+=@($group.Group | Select-Object -First 3)}
-    $ordinary=@($records | Where-Object HasData | Sort-Object Reference)
+    $ordinary=@($all | Where-Object HasData | Sort-Object Reference)
     for($i=0;$i -lt 48 -and $ordinary.Count;$i++) {$selected+=$ordinary[[int][math]::Floor($i*($ordinary.Count-1)/47)]}
     $samples=foreach($record in @($selected | Sort-Object Reference -Unique | Select-Object -First 64)) {
         [ordered]@{
             Index=($record.Reference -band 281474976710655);Reference=$record.Reference
-            Mft=($record | Select-Object Names,HasAttributeList,AllocationListKnown,HasData,HasStandardInformation,NameAttributeCount,ExpectedNameCount,LinkCount,Reparse,ReparseTag,Bytes,Allocated,AllocationKnown,AttributeListIssue,ExtensionIssue,AllocationIssue,ExtensionReferences)
+            Mft=($record | Select-Object Unsupported,Directory,ApiIssue,Names,HasAttributeList,AllocationListKnown,HasData,HasStandardInformation,NameAttributeCount,ExpectedNameCount,LinkCount,Reparse,ReparseTag,Bytes,Allocated,AllocationKnown,AttributeListIssue,ExtensionIssue,AllocationIssue,ExtensionReferences)
             Windows=[MftMetadataProbe]::Query($Drive,$record.Reference)
         }
     }
-    $report=[ordered]@{Status='Complete';Seconds=[math]::Round($timer.Elapsed.TotalSeconds,1);Cancelled=$worker.Result.Cancelled;Unsupported=$records.Count;Causes=$worker.Result.IssueCounts;Groups=@($groups | Select-Object Name,Count);Samples=@($samples)}
+    $report=[ordered]@{Status='Complete';Seconds=[math]::Round($timer.Elapsed.TotalSeconds,1);Cancelled=$worker.Result.Cancelled;Unsupported=$records.Count;Unknown=$unknown.Count;Causes=$worker.Result.IssueCounts;Groups=@($groups | Select-Object Name,Count);Samples=@($samples)}
     $report | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $ReportPath
 } catch {
     @{Status='FAIL';Error=$_.Exception.ToString()} | ConvertTo-Json | Set-Content -LiteralPath $ReportPath

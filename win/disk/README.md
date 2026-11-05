@@ -1,4 +1,4 @@
-# Disk Usage 0.4.3
+# Disk Usage 0.4.4
 
 Read-only drive and folder explorer for PowerShell 5.0+; tested on Windows PowerShell 5.1 and PowerShell 7. Open it from the unified Windows launcher: **Storage > Open disk usage explorer**.
 
@@ -50,8 +50,18 @@ Validation for 0.4.2 on 2026-11-05: parser and reconstruction tests passed on Po
 
 ## Windows metadata fallback (0.4.3)
 
-When an ordinary file has an unreadable attribute list and incomplete names/allocation, the scanner can verify it through Windows metadata APIs. It opens by file ID with FILE_READ_ATTRIBUTES, OPEN_REPARSE_POINT and OPEN_NO_RECALL; verifies the full record reference, cached hard-link paths, unnamed logical size, stream names and per-stream allocation; then repeats the checks. It accepts only metadata that agrees with the assembled MFT record. Missing paths, changed IDs, incomplete enumeration, access errors or allocation discrepancies remain exclusions/unknowns. Reparse records are deliberately ineligible for this fallback. No file contents are read, and it remains a live scan without snapshot guarantees.
+When an ordinary file has an unreadable attribute list and incomplete names/allocation, the scanner can verify it through Windows metadata APIs. It opens by file ID with FILE_READ_ATTRIBUTES, OPEN_REPARSE_POINT and OPEN_NO_RECALL; verifies the full record reference, cached hard-link paths, unnamed logical size, stream names and per-stream allocation; then repeats the checks. It accepts only metadata that agrees with the assembled MFT record. Missing paths, changed IDs, incomplete enumeration, access errors or allocation discrepancies remain exclusions/unknowns. Container, symlink and unknown-tag reparse records are ineligible. Version 0.4.4 adds the narrow WOF exception described below. No file contents are read, and it remains a live scan without snapshot guarantees.
 
 The results screen reports the number verified by this fallback. Failed attempts appear as ApiVerificationFailed alongside the original omission or uncertainty. NTFS system metadata is classified before requiring an unnamed DATA stream.
 
 Validation on 2026-11-05: resident, ordinary, compressed, sparse, named-stream and hard-link fixtures passed on PowerShell 5.1 and 7.6.5. Synthetic tests reject changed identities/paths, extra streams and allocation mismatches, preserve exclusions on API errors, and prevent reparse callbacks. A full C: scan took 45.6 seconds with zero parse errors: FileUnsupported fell from 4,966 to 171; uncertain allocations fell from 1,016 to 534. Three API attempts failed hard-link enumeration with Windows error 50 and remained incomplete. These machine-specific counts are not a guarantee that every file can be recovered.
+
+## WOF and single-link verification (0.4.4)
+
+Known WOF records (tag 0x80000017) may attempt API verification, but an opened handle still reporting a reparse point remains blocked. Windows can hide the WofCompressedData backing stream and report its allocation through the unnamed stream. The scanner reconciles only this specific layout: zero local unnamed allocation, a known WofCompressedData allocation, matching logical size, exact total allocation, and matching independent named streams. It never substitutes a larger projected allocation for local allocation. All file identity and complete hard-link path checks still run twice. See [Microsoft's WOF explanation](https://devblogs.microsoft.com/oldnewthing/20190618-00/?p=102597).
+
+For ordinary files only, FindFirstFileName error 50 (not supported) may be resolved when Windows reports exactly one link and the opened handle's absolute path equals the single cached MFT path. Access-denied errors, multiple links, WOF/reparse records and changed paths cannot use this exception.
+
+Tests cover normalized WOF allocation, missing unrelated streams, allocation mismatches, changed paths, access denial and multiple links. Test-MftWofLive.ps1 creates an isolated TEMP fixture with compact /EXE:LZX to validate real WOF metadata without modifying existing files. Container and unknown-tag records retain their explicit uncertainty.
+
+Validation on 2026-11-05: the real WOF fixture verified successfully on PowerShell 5.1 and 7.6.5; the existing resident, ordinary, compressed, sparse, ADS and hard-link fixtures also passed. Final C: scan: 44.6 seconds, 5,612 API-verified records, zero FileUnsupported, zero ApiVerificationFailed and zero parse errors. AllocationUnknown fell from 534 to 366. Fifteen system metadata files and four system metadata directories remained intentionally excluded. The remaining uncertain records are container-tagged or have an unavailable reparse tag; their allocations were not guessed.
