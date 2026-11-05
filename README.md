@@ -21,7 +21,7 @@ Printing includes inventory, queues, ports/drivers, spooler status and printing 
 
 The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
 
-Disk Usage 0.4.1 offers native directory scanning and an optional elevated NTFS MFT view with On disk allocation, logical sizes, cached navigation and explicit incomplete totals. See its documentation for allocation semantics and independent Windows API validation.
+Disk Usage 0.4.2 offers native directory scanning and an optional elevated NTFS MFT view with On disk allocation, logical sizes, cached navigation and explicit incomplete totals. See its documentation for allocation semantics and independent Windows API validation.
 
 Repairs appear beside their related checks: DHCP renewal under Connectivity, cache flush under DNS, and trust repair/time resync under Active Directory and time. Repairs require an administrator session and yes/no confirmation. Workgroup PCs have no AD trust to repair; the toolkit does not automatically join domains.
 
