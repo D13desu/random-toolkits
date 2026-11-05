@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.9.1
+# Random Toolkits | Windows Toolkit 0.9.2
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -61,7 +61,10 @@ function Invoke-PcRegistryTweak {
     $before = @(Get-PcRegistryValues $tweak)
     Write-Host $tweak.Path
     $before | Format-Table Name,Exists,Value -AutoSize | Out-Host
-    if ($Reset) { Write-Host 'Remove these overrides and use application/Windows defaults. Existing large Outlook files may then exceed the default limit.' }
+    if ($Reset) {
+        Write-Host 'Remove these overrides and use defaults.'
+        if ($Id -eq 'outlook') { Write-Host 'Existing large Outlook files may then exceed the default limit.' }
+    }
     else {
         for ($i=0; $i -lt $tweak.Names.Count; $i++) { Write-Host "$($tweak.Names[$i]) = $($values[$i]) (REG_DWORD, decimal)" }
     }
@@ -88,31 +91,59 @@ function Invoke-PcRegistryTweak {
         for ($i=0; $i -lt $after.Count; $i++) {
             if (($Reset -and $after[$i].Exists) -or (-not $Reset -and (-not $after[$i].Exists -or $after[$i].Value -ne $values[$i]))) { throw 'Registry read-back did not match the requested change.' }
         }
-        Write-Host 'Registry values verified. Reopen Outlook / start a new RDP connection to use the setting.'
+        if ($Id -eq 'outlook') { Write-Host 'Registry values verified. Reopen Outlook to use the setting.' }
+        else { Write-Host 'Registry values verified. Start a new RDP connection to use the setting.' }
     } catch { throw "Change failed or was partially applied: $($_.Exception.Message) Restore previous values with $backup" }
+}
+
+function Start-PcRegistryCategory {
+    param([ValidateSet('outlook','rdp')][string]$Id)
+    while ($true) {
+        if ($Id -eq 'outlook') {
+            Write-Host "`nOUTLOOK | Classic Outlook PST/OST limits | Current account"
+            Write-Host ' [1] Inspect current size overrides'
+            Write-Host ' [2] Set PST/OST size limit - CHANGES SYSTEM'
+            Write-Host ' [3] Reset size overrides to defaults - CHANGES SYSTEM'
+        } else {
+            Write-Host "`nREMOTE DESKTOP | RDP redirection warning | Machine-wide"
+            Write-Host ' [1] Inspect current warning override'
+            Write-Host ' [2] Restore older warning dialog (administrator) - CHANGES SYSTEM'
+            Write-Host ' [3] Reset warning override to Windows default (administrator) - CHANGES SYSTEM'
+        }
+        Write-Host ' [B / 0] Back to registry tweaks'
+        $answer=Read-Host 'Select'
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        try {
+            switch ($answer.Trim()) {
+                '1' { $tweak=Get-PcRegistryTweak $Id; Write-Host $tweak.Path; Get-PcRegistryValues $tweak | Format-Table -AutoSize | Out-Host }
+                '2' {
+                    if ($Id -eq 'outlook') {
+                        $size=Read-PcInput 'Maximum GB (1-1000; Enter for 100)'
+                        if ([string]::IsNullOrWhiteSpace($size)) { $size='100' }
+                        if ($size -notmatch '^\d+$') { throw 'Enter a whole number of GB.' }
+                        Invoke-PcRegistryTweak outlook -SizeGB ([int]$size)
+                    } else { Invoke-PcRegistryTweak rdp }
+                }
+                '3' { Invoke-PcRegistryTweak $Id -Reset }
+                default { Write-Warning 'Choose a listed option.' }
+            }
+        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
+    }
 }
 
 function Start-PcRegistryMenu {
     while ($true) {
         Write-Host "`nREGISTRY TWEAKS | PowerShell 5.0+"
-        Write-Host ' [1] Inspect Outlook and RDP values'
-        Write-Host ' [2] Set classic Outlook PST/OST size (current account) - CHANGES SYSTEM'
-        Write-Host ' [3] Reset Outlook size overrides - CHANGES SYSTEM'
-        Write-Host ' [4] Restore older RDP warning (administrator) - CHANGES SYSTEM'
-        Write-Host ' [5] Reset RDP warning override (administrator) - CHANGES SYSTEM'
+        Write-Host ' [1] Outlook - PST/OST file size limits'
+        Write-Host ' [2] Remote Desktop - RDP warning dialog'
         Write-Host ' [B / 0] Back'
-        $answer = Read-Host 'Select'
+        $answer=Read-Host 'Select'
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
-        try {
-            switch ($answer.Trim()) {
-                '1' { foreach ($id in @('outlook','rdp')) { $tweak=Get-PcRegistryTweak $id; Write-Host $tweak.Path; Get-PcRegistryValues $tweak | Format-Table -AutoSize | Out-Host } }
-                '2' { $size=Read-PcInput 'Maximum GB (1-1000; Enter for 100)'; if ([string]::IsNullOrWhiteSpace($size)) { $size='100' }; if ($size -notmatch '^\d+$') { throw 'Enter a whole number of GB.' }; Invoke-PcRegistryTweak outlook -SizeGB ([int]$size) }
-                '3' { Invoke-PcRegistryTweak outlook -Reset }
-                '4' { Invoke-PcRegistryTweak rdp }
-                '5' { Invoke-PcRegistryTweak rdp -Reset }
-                default { Write-Warning 'Choose a listed option.' }
-            }
-        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
+        switch ($answer.Trim()) {
+            '1' { Start-PcRegistryCategory outlook }
+            '2' { Start-PcRegistryCategory rdp }
+            default { Write-Warning 'Choose a listed option.' }
+        }
     }
 }
 
@@ -1704,7 +1735,7 @@ function Start-PcStartupTaskMenu {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.9.1' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.9.2' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [9] Health dashboard - start here'

@@ -33,7 +33,7 @@ Assert-True ($script:Answers.Count -eq 0 -and ($script:Output -join '|') -match 
 Assert-True ('DC hostname [automatic discovery]' -notin $script:Output) 'Unavailable repair is blocked before collecting inputs'
 Write-Output "Menu tests passed on PowerShell $($PSVersionTable.PSVersion)."
 
-foreach ($answer in @('1','1','b','b','2','b','3','b','4','b','5','b','6','b','7','2','b','b','0')) { $script:Answers.Enqueue($answer) }
+foreach ($answer in @('1','1','b','b','2','b','3','b','4','b','5','b','6','b','7','1','2','b','b','2','b','b','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
 Assert-True ($script:Answers.Count -eq 0) 'B returns from every Windows section and cancels registry input'
 foreach ($answer in @('1','b','b')) { $script:Answers.Enqueue($answer) }
