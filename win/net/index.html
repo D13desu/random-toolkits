@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.7.2
+# Random Toolkits | Windows Toolkit 0.7.3
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -279,8 +279,10 @@ function ConvertTo-PcEventNumbers {
 }
 
 function Start-PcEventBrowser {
-    param([string]$DefaultLog='System')
-    $log=Read-PcInput "Log name [$DefaultLog]"
+    param([string]$DefaultLog='System',[switch]$Quick,[switch]$FixedLog)
+    $log=$DefaultLog;$hours=24;$ids=@();$levels=@();$provider='';$text='';$limit=200
+    if(-not $Quick){
+    if(-not $FixedLog){$log=Read-PcInput "Log name [$DefaultLog]"}
     if ([string]::IsNullOrWhiteSpace($log)) { $log=$DefaultLog } else { $log=$log.Trim() }
     $hours=24; $answer=Read-PcInput 'Look back hours [24; max 8760]'
     if ($answer -and (-not [int]::TryParse($answer,[ref]$hours) -or $hours -lt 1 -or $hours -gt 8760)) { throw 'Hours must be 1-8760.' }
@@ -290,26 +292,68 @@ function Start-PcEventBrowser {
     $text=Read-PcInput 'Message contains text [any]'
     $limit=200; $answer=Read-PcInput 'Maximum recent candidates [200; max 1000]'
     if ($answer -and (-not [int]::TryParse($answer,[ref]$limit) -or $limit -lt 1 -or $limit -gt 1000)) { throw 'Limit must be 1-1000.' }
+    }
     Write-Host 'Newest first. Message text filtering applies only to the capped candidate set; older matches may be omitted.' -ForegroundColor Yellow
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
-    if ($events.Count -eq 0) { Write-Host 'No matching events in the queried window/candidate set.'; return }
     $page=0
     :events while ($true) {
-        $pages=[math]::Ceiling($events.Count/20.0)
+        $pages=[math]::Max(1,[math]::Ceiling($events.Count/20.0))
         Write-Host "`n EVENTS | $log | $($events.Count) results | page $($page+1)/$pages" -ForegroundColor Cyan
+        Write-Host ("Last {0} hours | Candidate cap: {1} | IDs: {2} | Levels: {3}" -f $hours,$limit,($ids -join ','),($levels -join ','))
+        if(-not $events.Count){Write-Host 'No matching events in this window. F opens filters to widen the search.'}
         for ($i=$page*20; $i -lt [math]::Min($events.Count,($page+1)*20); $i++) {
             $event=$events[$i]
             Write-Host (' [{0}] {1} | {2} | ID {3} | {4}' -f ($i+1),$event.Time,$event.Level,$event.Id,$event.Provider)
         }
-        $answer=Read-Host 'Number: full message | N/P: pages | B / 0: back'
+        $answer=Read-Host 'Number: full message | N/P: pages | R: refresh | F: filtered view | B / 0: back'
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim().ToUpperInvariant()) {
             'N' { $page=[math]::Min($pages-1,$page+1); continue events }
             'P' { $page=[math]::Max(0,$page-1); continue events }
+            'R' { $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit);$page=0;continue events }
+            'F' { try{Start-PcEventBrowser -DefaultLog $log -FixedLog}catch [OperationCanceledException]{};continue events }
         }
         $number=0
         if ([int]::TryParse($answer,[ref]$number) -and $number -gt 0 -and $number -le $events.Count) { $events[$number-1] | Format-List | Out-Host }
         else { Write-Warning 'Choose an event number, N, P or 0.' }
+    }
+}
+
+function Get-PcEventLogChoices {
+    @(
+        [pscustomobject]@{Name='Application';Log='Application'}
+        [pscustomobject]@{Name='System';Log='System'}
+        [pscustomobject]@{Name='Security (may require elevated access)';Log='Security'}
+        [pscustomobject]@{Name='Setup';Log='Setup'}
+        [pscustomobject]@{Name='Forwarded Events';Log='ForwardedEvents'}
+        [pscustomobject]@{Name='Windows PowerShell';Log='Windows PowerShell'}
+        [pscustomobject]@{Name='PowerShell Operational';Log='Microsoft-Windows-PowerShell/Operational'}
+        [pscustomobject]@{Name='Microsoft Defender';Log='Microsoft-Windows-Windows Defender/Operational'}
+        [pscustomobject]@{Name='Windows Update';Log='Microsoft-Windows-WindowsUpdateClient/Operational'}
+        [pscustomobject]@{Name='Group Policy';Log='Microsoft-Windows-GroupPolicy/Operational'}
+        [pscustomobject]@{Name='Printing';Log='Microsoft-Windows-PrintService/Admin'}
+    )
+}
+function Start-PcEventLogMenu {
+    while($true){
+        Write-Host "`nWINDOWS TOOLKIT > EVENT LOGS" -ForegroundColor Cyan
+        $choices=@(Get-PcEventLogChoices)
+        for($i=0;$i -lt $choices.Count;$i++){Write-Host (' [{0}] {1}' -f ($i+1),$choices[$i].Name)}
+        Write-Host ' [C] Custom log / advanced filters   [L] List/search available logs'
+        Write-Host ' [B / 0] Back'
+        Write-Host 'Choose a log to immediately view its latest 200 events from the last 24 hours. F changes filters inside the browser.'
+        $answer=Read-Host 'Select';$number=0
+        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
+        try{
+            if($answer.Trim() -eq 'C'){Start-PcEventBrowser;continue}
+            if($answer.Trim() -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;continue}
+            if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $choices.Count){Write-Warning 'Choose a listed log.';continue}
+            $log=$choices[$number-1].Log
+            $info=Get-WinEvent -ListLog $log -ErrorAction Stop
+            if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";continue}
+            Start-PcEventBrowser -DefaultLog $log -Quick
+        }catch [OperationCanceledException] {continue}
+        catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message)}
     }
 }
 
@@ -1288,7 +1332,7 @@ function Start-ToolkitCleanup {
 function Start-WindowsMenu {
     while ($true) {
         Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.7.2' -ForegroundColor Cyan
+        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.7.3' -ForegroundColor Cyan
         Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
         Write-Host '============================================' -ForegroundColor Cyan
         Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
@@ -1309,7 +1353,7 @@ function Start-WindowsMenu {
             '3' { Start-NetworkCategory 'storage' }
             '4' { Start-NetworkCategory 'printing' }
             '5' { Start-NetworkCategory 'policy' }
-            '6' { Start-NetworkCategory 'events' }
+            '6' { Start-PcEventLogMenu }
             '7' { Start-PcRegistryMenu }
             '8' { Start-ToolkitCleanup }
             default { Write-Warning 'Choose a listed section.' }

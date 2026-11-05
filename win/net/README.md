@@ -1,4 +1,4 @@
-# Windows Toolkit 0.7.2
+# Windows Toolkit 0.7.3
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -223,3 +223,9 @@ Cleanup preserves user-chosen exports, M365 reports, registry undo files, instal
 Items modified within ten minutes, helper packages while DiskHelper is running, inaccessible paths, and trees containing links/reparse points are skipped. Paths and contents are revalidated after confirmation. Deletion is nonrecursive, permanent and not a secure erase. A failure can leave partially removed contents and is reported. No existing reports/caches were removed while implementing this option; validation used isolated synthetic fixtures.
 
 Maintain `win/net/Toolkit-Cleanup.ps1`, then run `tests/Sync-ToolkitCleanup.ps1` to update its embedded launcher block and Pages copies. `tests/Test-ToolkitCleanup.ps1` verifies boundaries, links, preservation, changed contents, active/recent items and declined confirmation on PowerShell 5.1 and 7.
+
+### Event log picker
+
+Windows menu **6: Event Logs** now offers Application, System, Security, Setup, Forwarded Events, Windows PowerShell, PowerShell Operational, Defender, Windows Update, Group Policy and Printing. Selecting a preset immediately displays up to 200 recent events from the last 24 hours, including all levels (Security audit events are not filtered out). Disabled/missing/inaccessible logs report their status without enabling logs or changing permissions.
+
+Inside a log, R refreshes the current query, F opens a filtered child view for that log, an event number displays full details, and N/P pages. B returns to the previous view/menu. Empty results keep the browser available so filters can widen the time window. C in the picker opens a custom exact log name and advanced filters; L lists/searches available logs. Advanced filters retain time, event IDs, levels, provider and literal message search, with a candidate cap of 1000. Message filtering applies after the candidate cap. Security and some operational logs may require elevated access.
