@@ -1,4 +1,4 @@
-# Windows Toolkit 0.14.1
+# Windows Toolkit 0.14.2
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -331,3 +331,8 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 ### Navigation adjustment (0.14.1)
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
+
+
+### Compact hybrid menus (0.14.2)
+
+Navigation and action menus accept both arrow selection plus Enter and existing number/letter shortcuts. All options are shown without paging, using one clipped line per option. Selection is retained on return; Esc/Backspace/B/0 goes back. Unsupported/redirected consoles retain line input. Change labels and unavailable-action checks remain in place. This replaces the number-only input introduced in 0.14.1; scrollable result lists remain unchanged.
