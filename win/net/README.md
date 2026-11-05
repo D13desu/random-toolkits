@@ -1,4 +1,4 @@
-# Windows Toolkit 0.12.0
+# Windows Toolkit 0.13.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -34,7 +34,7 @@ The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **
 
 ## Storage
 
-**1** opens production Disk Usage 0.4.5. **2** opens experimental C# Disk Helper 0.8.1 in MFT mode. After scanning, **A** shows unique-file versus hard-link accounting and separate metadata observations; **E** separates informational diagnostics from exclusions and uncertainty. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
+**1** opens **Disk Usage 1.0.0**, the preferred C# helper, in automatic mode: elevated fixed local NTFS drive roots use MFT; folders, other filesystems and unelevated sessions use native enumeration. Native scans show logical sizes, not physical allocation. **2** retains **Disk Usage 0.4.5** as the compatibility scanner. F1 opens helper accounting, diagnostics and timing reports; legacy A/E/T commands still work. PowerShell 5.1+, .NET Framework 4.5.1+ and archive/hash commands are required for the helper; missing requirements are marked unavailable. The compatibility option supports PowerShell 5.0+. There is no automatic elevation or silent retry of an MFT failure using a different scan mode.
 
 The helper downloads from a pinned GitHub release, with the ZIP's SHA-256 checked before extraction. Its client verifies the executable hash and version handshake. It runs from an isolated temporary directory that is removed on exit. No separate `irm` command or permanent installation is required. The noninteractive action ID is `disk-helper`.
 
@@ -255,7 +255,7 @@ Up/Down and Enter navigate; N/P pages; F filters literal name/location text; C t
 Tests on PowerShell 5.1 and 7 cover path ambiguity, missing files, network/user-context paths, scheduler informational codes, unsigned/signed results, per-task permission failures, filtering and navigation. A live read-only sample inspected 19 startup entries and 212 visible tasks in 2.45 seconds; counts and speed vary by PC. Maintain Startup-Tasks.ps1 and run tests/Sync-StartupTasks.ps1 to update the embedded launcher and Pages endpoints.
 
 
-## Services and Windows repair centre (0.12.0)
+## Services and Windows repair centre (0.10.0)
 
 Root **11 Services** lists local Win32 services with state, startup mode and executable command. Arrow keys select; Enter opens service account, description, dependencies and actions. F filters name/display name/path, R refreshes, N/P page, B/Esc returns. Start/stop/restart require administrator rights and yes/no confirmation. Stop/restart refuse active dependents and never use Force. The toolkit does not alter startup types. Starting a service can start its prerequisites; stopping services may interrupt applications or connectivity. Windows enforces service permissions and protected-service restrictions.
 
@@ -288,7 +288,7 @@ $choice = Show-PcMenu -Title 'Windows > Example' -State $state -Filterable -Refr
 Run `tests/Sync-MenuEngine.ps1` after editing the module. Tests cover navigation, disabled items, empty views, state preservation, filtering/cancellation, fallback input, confirmations and source synchronization on PowerShell 5.1 and 7. Root/category and list-browser migration is complete.
 
 
-### Menu migration (0.12.0)
+### Menu migration (0.11.0)
 
 The shared renderer now drives Windows root, Network and its categories (including Power, Storage, Printing and Group Policy), Registry and both tweak submenus, the Event Log picker, Startup/tasks, Cleanup, service actions, and Windows repair centre. Arrows/Enter select, Escape/Backspace return one level, and Home/End/PageUp/PageDown navigate. Existing numbered shortcuts remain stable even when a menu is reordered or paged (Health remains 9). The legacy Network A shortcut, event picker C/L, and service D/E shortcuts are also supported. Backspace edits a partially typed number before acting as Back.
 
@@ -306,3 +306,12 @@ Events keep inline message previews (three lines for the selected event) and cac
 Discovery now supports selection and full device details, F text filtering, R rescan of the same scope/ports/timeout, A all/responding, D MAC/probe view, M lookup, E export, and L scan/vendor notes. Rescan replaces the snapshot; cancellation retains explicitly partial results. CSV export still includes every collected scan row and partial-scan context, irrespective of the current filter. Vendor data and neighbor observations retain their previous limitations.
 
 The menu engine accepts nonconflicting `Commands`, multiline details, expanded selected previews, and opaque `Data` carried back to callers. Shared detail screens accept Enter/Esc/Backspace/B. Disk Helper already follows arrows/Enter, Esc/Backspace and PageUp/PageDown and retains Ctrl+Enter for Explorer, sorting and F1 reports; its scanner/package is unchanged by this UI release.
+
+
+### Disk Usage graduation (Windows 0.13.0 / helper 1.0.0)
+
+The default disk tool is now the C# helper; its source remains under `experiments/disk-helper` to preserve build paths/history. The production release is `disk-helper-v1.0.0`. Package and executable hashes plus the version handshake remain mandatory. No scanner/accounting algorithm changed for this promotion. Compatibility scanning remains a separate menu choice, including on older or restricted systems.
+
+Validated environments are x64 Windows with .NET Framework 4.8 and PowerShell 5.1/7. Older Windows/.NET and 32-bit hosts are not validated. Cancellation is cooperative; reconstruction can take time to finish. Intentional metadata exclusions and unknown allocations remain visible, and unreconciled allocation is not a missing-file total or measured NTFS overhead.
+
+Graduation validation on the maintainer's PC: packaged-launcher/hash checks, native protocol/navigation, MFT regression and compact-cache suites passed on PowerShell 5.1 and 7. The elevated C: comparison reported 2,949,533 files, zero parse errors, 40.3 seconds to browsing, and exact hard-link fixture equality with the compatibility engine. An early cancellation check returned partial results in 172 ms. These are live-volume observations, not performance guarantees; reports remain local.

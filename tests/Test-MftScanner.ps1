@@ -277,7 +277,7 @@ $systemView=[RandomToolkits.DiskV10.MftScanner]::Build('Z:\',@($root,$systemFile
 Assert ($systemView.IssueCounts['FileSystemMetadata'] -eq 1 -and -not $systemView.IssueCounts.ContainsKey('FileUnsupported')) 'System metadata without DATA is intentionally excluded before validation'
 $source=Get-Content (Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1') -Raw
 $embedded=($source -split '// BEGIN EMBEDDED MFT SCANNER',2)[1] -split '// END EMBEDDED MFT SCANNER',2
-Assert ($embedded[0].Trim() -eq (Get-Content (Join-Path $PSScriptRoot '../win/disk/MftScanner.cs') -Raw).Trim()) 'Embedded C# matches maintained source'
+Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq (Get-Content (Join-Path $PSScriptRoot '../win/disk/MftScanner.cs') -Raw).Replace("`r`n","`n").Trim()) 'Embedded C# matches maintained source'
 # Test fallback without initiating a production drive scan.
 function Get-DiskMftUnavailableReason { 'Simulated unavailable elevation or filesystem' }
 function Measure-DiskTreeFallback { [pscustomobject]@{Fallback=$true} }
