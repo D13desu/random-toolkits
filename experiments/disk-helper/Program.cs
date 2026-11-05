@@ -9,7 +9,7 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.3.0-experiment";
+  const string Version="0.4.0-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -36,9 +36,12 @@ namespace RandomToolkits.HelperExperiment {
    if(mode=="mft") {
     profile.Mark("cache cleanup");
     var timer=Stopwatch.StartNew();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
-    profile.Mark("cache compaction");timer.Restart();compact=new CompactIndex(scan);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
+    profile.Mark("cache compaction");timer.Restart();compact=scan.DirectRows==null?new CompactIndex(scan):new CompactIndex(scan,scan.DirectRows);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
     scan=null;mft=null;
-    timer.Restart();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
+    timer.Restart();
+    // Reclaim gaps left by the discarded reconstruction tree and large indexes.
+    System.Runtime.GCSettings.LargeObjectHeapCompactionMode=System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+    GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
     profile.Mark("ready");
    }
    completedSummary=summary;

@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.3.0
+# Standalone disk helper experiment 0.4.0
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -24,7 +24,7 @@ For an unelevated folder test:
 
 Q cancels scanning and opens partial results. Folder numbers, U, N/P, S and E provide navigation, paging, sorting and diagnostics. T shows MFT phase timings and memory samples; progress names the current phase. Exit disposes the helper process and releases its scan tree. Ctrl+C runs client cleanup. The client checks the executable against the package manifest before launch. This is an unsigned test binary; it performs no automatic installation, elevation or update.
 
-The packaged runner needs Windows, the full .NET Framework 4.x runtime and PowerShell 5.1 or 7. Tests used .NET Framework 4.8.10008; older Windows/.NET installations and 32-bit hosts have not been validated. It does not require a modern dotnet SDK, NuGet, runtime Add-Type, or a network connection.
+The packaged runner needs Windows, the full .NET Framework 4.5.1 or later runtime and PowerShell 5.1 or 7. Tests used .NET Framework 4.8.10008; older Windows/.NET installations and 32-bit hosts have not been validated. It does not require a modern dotnet SDK, NuGet, runtime Add-Type, or a network connection.
 
 ## Build from this repository
 
@@ -35,7 +35,7 @@ The packaged runner needs Windows, the full .NET Framework 4.x runtime and Power
 
 The build invokes the installed .NET Framework csc.exe, producing an AnyCPU executable (x64 on the tested machine). Build output and local reports are ignored by Git. It extracts the shared C# engine from Disk-Usage.ps1 and checks that its MFT block matches MftScanner.cs before compiling. This avoids maintaining a divergent experimental copy of the scanner. Runtime execution does not parse the PowerShell scanner or compile C#.
 
-Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptations to the extracted MFT block. Every replacement requires exactly one matching anchor and fails the build if the maintained source changes unexpectedly. Production sources and launcher pins are untouched. Build with `-BaselineStorage -OutputDirectory out/baseline` to retain original filename storage and record lifetimes while keeping identical profiling hooks. The manifest records the storage mode and generated engine hash.
+Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptations to the extracted MFT block. Every replacement checks its expected occurrence count and fails the build if the maintained source changes unexpectedly. Production sources and launcher pins are untouched. Build with `-BaselineStorage -OutputDirectory out/baseline` to retain original filename storage, record lifetimes and row caching while keeping profiling hooks. `-LegacyRows -OutputDirectory out/legacy` keeps the 0.3.0 record-storage improvements but restores the intermediate row cache. Both comparison modes use the current final heap cleanup. The manifest records the storage mode and generated engine hash.
 
 ## Protocol
 
@@ -55,6 +55,29 @@ UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper e
 Requests are limited to 64 KiB. Only paths in the cached scan can be browsed. All MFT file rows stay in C# memory; native mode caches the current directory listing. No write/delete/repair command exists.
 
 ## Validation and measured limits
+
+### 0.4.0: direct compact rows
+
+The MFT worker writes file and directory browsing rows directly into packed blocks of 4,096 entries. Entries store filenames, sizes, kinds, tags and uncertainty flags; folder chains use integer row IDs. Completed browsing reuses those blocks instead of copying millions of Row objects. Directory nodes and full directory paths still exist during reconstruction and are the next memory target.
+
+Duplicate detection uses a case-insensitive folder-ID/filename key, avoiding retained full file paths. Full file paths still exist transiently for ordinal hard-link ownership, diagnostics and API verification. The original accounting/verification rules remain unchanged. Folder summaries are transferred after aggregation, and the current folder is sorted on demand. Late cancellation or record errors force row partial flags without rewriting every block.
+
+Final cleanup compacts the managed heaps after releasing reconstruction data to reduce retained heap gaps. It remains synchronous; preparation time is included in the displayed ready time.
+
+The shared MFT suite passes against the direct writer on PowerShell 5.1 and 7. `Test-Engine.ps1 -DirectRows` uses a test-only adapter to materialize the direct cache for the unchanged suite's assertions and rejects any build that silently used the legacy cache. The cache-equivalence test checks 15,640 rows across 41 folders, all three sort orders/pages, several block boundaries, case-insensitive collisions, parent navigation and late partial flags. Protocol/client tests also pass on both shells.
+
+Elevated C: validation on the user's PC (2026-11-05), about 5.10 million records and 5.11 million browsing rows:
+
+| Measurement | Previous 0.3.0 sample | 0.4.0 final-build sample |
+| --- | --- | --- |
+| Peak process working set | 6.85 GiB | 5.47 GiB |
+| Scan plus cache preparation | 48.89 s | 40.69 s |
+| Cache preparation | 7.34 s | 3.36 s |
+| Completed browsing working set | 1.69 GiB | 1.73 GiB |
+
+These are sequential live-volume samples, not a controlled benchmark. Packed row links increase retained managed data by about 43 MiB; the gain is lower peak memory and less conversion work. The fixed hard-link fixture matched the embedded engine exactly for logical bytes, allocation, unique file counts and rows. Both live scans reported 366 unknown allocations, 5,612 API-verified records, zero parse errors and identical diagnostic counts. Whole-volume totals changed slightly while the filesystem was live.
+
+Live cancellation tests passed during record collection and during file-path reconstruction. The latter checked partial flags on both directory and file rows and took 11.99 seconds to finish: cancellation still waits for remaining reconstruction/aggregation rather than interrupting every phase immediately. Run `Test-MftCancel.ps1 -DuringReconstruction -ReportPath <local-json-path>` for that case.
 
 ### 0.3.0: phase profiling and temporary storage
 

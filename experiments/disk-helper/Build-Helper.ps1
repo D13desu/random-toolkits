@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OutputDirectory,[switch]$BaselineStorage)
+param([string]$OutputDirectory,[switch]$BaselineStorage,[switch]$LegacyRows)
 $ErrorActionPreference='Stop'
 if(-not $OutputDirectory){$OutputDirectory=Join-Path $PSScriptRoot 'out'}
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -20,10 +20,11 @@ $output=[IO.Path]::GetFullPath($OutputDirectory);$null=[IO.Directory]::CreateDir
 $enginePath=Join-Path $output 'Engine.generated.cs'
 [IO.File]::WriteAllText($enginePath,$engine,[Text.UTF8Encoding]::new($false))
 $exe=Join-Path $output 'DiskHelper.exe'
-$sources=@($enginePath,(Join-Path $PSScriptRoot 'Program.cs'),(Join-Path $PSScriptRoot 'CompactIndex.cs'),(Join-Path $PSScriptRoot 'ScanProfile.cs'))
+$sources=@($enginePath,(Join-Path $PSScriptRoot 'Program.cs'),(Join-Path $PSScriptRoot 'CompactIndex.cs'),(Join-Path $PSScriptRoot 'ScanProfile.cs'),(Join-Path $PSScriptRoot 'DirectRows.cs'))
 if(-not $BaselineStorage){$sources+=Join-Path $PSScriptRoot 'MftNames.cs'}
-& $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $sources
+$defines=if($LegacyRows -or $BaselineStorage){'/define:LEGACY_ROWS'}else{'/define:DIRECT_ROWS'}
+& $compiler /nologo /target:exe /platform:anycpu /optimize+ /utf8output $defines ("/out:"+$exe) ("/reference:"+(Join-Path $framework 'System.Web.Extensions.dll')) $sources
 if($LASTEXITCODE -ne 0){throw 'Helper compilation failed.'}
-$manifest=[ordered]@{Version='0.3.0-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}else{'inline names, released records'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
+$manifest=[ordered]@{Version='0.4.0-experiment';Protocol=1;EngineVersion='0.4.4';Storage=$(if($BaselineStorage){'baseline'}elseif($LegacyRows){'inline names, released records'}else{'direct compact rows, inline names, released records'});File='DiskHelper.exe';Sha256=(Get-FileHash $exe -Algorithm SHA256).Hash;EngineSha256=(Get-FileHash $enginePath -Algorithm SHA256).Hash}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'manifest.json') -Encoding UTF8
 [pscustomobject]@{Executable=$exe;Manifest=(Join-Path $output 'manifest.json');Bytes=(Get-Item $exe).Length}

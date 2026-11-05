@@ -9,17 +9,27 @@ namespace RandomToolkits.HelperExperiment {
   internal struct Folder {
    public int Parent,Start,Count;public long Logical,Allocated,Files;public bool Partial,Unknown;
   }
-  struct Entry {
+  internal struct Entry {
    public string Name,Tag;public long Logical,Allocated;public byte Kind,Flags;
   }
   readonly Dictionary<string,int> ids;
   readonly string[] paths;
   readonly Folder[] folders;
   readonly Entry[] entries;
+  readonly PackedRows packed;
   public string Root {get;private set;}
-  static readonly string[] Kinds={"DIR","FILE","LINK","RP","WCI"};
+  internal static readonly string[] Kinds={"DIR","FILE","LINK","RP","WCI"};
   public int FolderCount {get{return folders.Length;}}
-  public int RowCount {get{return entries.Length;}}
+  public int RowCount {get{return packed!=null?packed.Count:entries.Length;}}
+  internal CompactIndex(Scan scan,DirectRows direct) {
+   Root=scan.Root;ids=direct.Ids;paths=direct.Paths.ToArray();folders=new Folder[paths.Length];packed=direct.Rows;
+   for(int id=0;id<paths.Length;id++) {
+    Node node=scan.Nodes[paths[id]];var chain=direct.Chains[id];
+    folders[id]=new Folder {Parent=node.Parent==null?-1:ids[node.Parent],Start=chain.Head,Count=chain.Count,
+     Logical=node.Bytes,Allocated=node.Allocated,Files=node.Files,Partial=node.Partial,Unknown=node.AllocationUnknown};
+   }
+  }
+  Entry GetEntry(int index){return packed!=null?packed.Get(index):entries[index];}
   public CompactIndex(Scan scan) {
    if(scan.CachedRows==null) throw new ArgumentException("Only completed MFT caches can be compacted.");
    Root=scan.Root;ids=new Dictionary<string,int>(scan.Nodes.Count,StringComparer.OrdinalIgnoreCase);
@@ -45,16 +55,17 @@ namespace RandomToolkits.HelperExperiment {
   public string GetPath(int id){return paths[id];}
   public int[] Sort(int id,string sort) {
    Folder folder=folders[id];int[] order=new int[folder.Count];
-   for(int i=0;i<order.Length;i++) order[i]=folder.Start+i;
+   int next=folder.Start;
+   for(int i=0;i<order.Length;i++){order[i]=packed==null?folder.Start+i:next;if(packed!=null)next=packed.Next(next);}
    Array.Sort(order,delegate(int a,int b){
-    Entry left=entries[a],right=entries[b];int size=sort=="name"?0:(sort=="allocated"?right.Allocated.CompareTo(left.Allocated):right.Logical.CompareTo(left.Logical));
+    Entry left=GetEntry(a),right=GetEntry(b);int size=sort=="name"?0:(sort=="allocated"?right.Allocated.CompareTo(left.Allocated):right.Logical.CompareTo(left.Logical));
     return size!=0?size:StringComparer.Ordinal.Compare(left.Name,right.Name);
    });return order;
   }
   public Row[] Page(int id,int[] order,int offset,int count) {
    Row[] rows=new Row[count];string parent=paths[id].TrimEnd('\\')+"\\";
    for(int i=0;i<count;i++){
-    Entry e=entries[order[offset+i]];rows[i]=new Row {Name=e.Name,Path=parent+e.Name,Kind=Kinds[e.Kind],ReparseTag=e.Tag,
+    Entry e=GetEntry(order[offset+i]);rows[i]=new Row {Name=e.Name,Path=parent+e.Name,Kind=Kinds[e.Kind],ReparseTag=e.Tag,
      Bytes=e.Logical,Allocated=e.Allocated,Partial=(e.Flags&1)!=0,AllocationUnknown=(e.Flags&2)!=0};
    }return rows;
   }

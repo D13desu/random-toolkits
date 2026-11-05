@@ -28,5 +28,23 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
         $new="for(int recordIndex=0;recordIndex<records.Length;recordIndex++) {`n    MftRecord r=records[recordIndex];records[recordIndex]=null;`n    if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;"
         $Source=Replace-One $Source $old $new
     }
+    $prefix=Replace-One $prefix 'public Dictionary<string,List<Row>> CachedRows;' 'internal RandomToolkits.HelperExperiment.DirectRows DirectRows; public Dictionary<string,List<Row>> CachedRows;'
+    $Source=Replace-One $Source 's.CachedRows=new System.Collections.Generic.Dictionary<string,System.Collections.Generic.List<Row>>(System.StringComparer.OrdinalIgnoreCase);' 'var direct=ScanProfile.Current!=null && ScanProfile.Current.UseDirectRows ? new RandomToolkits.HelperExperiment.DirectRows(root):null; s.DirectRows=direct; if(direct==null) s.CachedRows=new System.Collections.Generic.Dictionary<string,System.Collections.Generic.List<Row>>(System.StringComparer.OrdinalIgnoreCase);'
+    $Source=Replace-One $Source 's.CachedRows.Add(root,new System.Collections.Generic.List<Row>());' 'if(direct==null) s.CachedRows.Add(root,new System.Collections.Generic.List<Row>());'
+    $Source=Replace-One $Source 's.CachedRows.Add(path,new System.Collections.Generic.List<Row>());' 'if(direct==null) s.CachedRows.Add(path,new System.Collections.Generic.List<Row>());else direct.AddFolder(path,parent);'
+    $Source=Replace-One $Source 'var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);' 'var occupied=direct==null?new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase):null;'
+    $Source=Replace-One $Source 'if(!occupied.Add(pair.Key))' 'string fileName=System.IO.Path.GetFileName(pair.Key); if(!(direct==null?occupied.Add(pair.Key):direct.Occupy(pair.Value,fileName)))'
+    $old='s.CachedRows[pair.Value].Add(new Row {Name=System.IO.Path.GetFileName(pair.Key),Path=pair.Key,Kind=charged?"LINK":(IsContainer(r)?"WCI":(r.Reparse?"RP":"FILE")),Bytes=bytes,Allocated=allocated,AllocationUnknown=!charged && !r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null}); charged=true;'
+    $new='if(direct!=null) direct.Add(pair.Value,fileName,charged?"LINK":(IsContainer(r)?"WCI":(r.Reparse?"RP":"FILE")),bytes,allocated,!charged && !r.AllocationKnown,false,r.Reparse?Tag(r):null);else '+$old
+    # The charged state must advance in both paths.
+    $new=$new.Replace('}); charged=true;','});')+' charged=true;'
+    $Source=Replace-One $Source $old $new
+    $Source=Replace-One $Source 'ScanProfile.MarkCurrent("aggregation and row sorting");' 'if(direct!=null) direct.EndFiles(); ScanProfile.MarkCurrent("aggregation and row sorting");'
+    $old='s.CachedRows[n.Path].Add(new Row {Name=System.IO.Path.GetFileName(p),Path=p,Kind="DIR",Bytes=child.Bytes,Allocated=child.Allocated,AllocationUnknown=child.AllocationUnknown,Partial=child.Partial,ReparseTag=child.ReparseTag});'
+    $Source=Replace-One $Source $old ('if(direct!=null) direct.Add(n.Path,System.IO.Path.GetFileName(p),"DIR",child.Bytes,child.Allocated,child.AllocationUnknown,child.Partial,child.ReparseTag);else '+$old)
+    $Source=Replace-One $Source 's.CachedRows[n.Path].Sort(' 'if(direct==null) s.CachedRows[n.Path].Sort('
+    $old='foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;'
+    if(([regex]::Matches($Source,[regex]::Escape($old))).Count -ne 2){throw 'Late partial-result adaptation anchors changed.'}
+    $Source=$Source.Replace($old,'if(Result.DirectRows!=null) Result.DirectRows.Rows.ForcePartial=true;else '+$old)
     return $prefix+$Source+$suffix
 }

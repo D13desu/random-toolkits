@@ -7,6 +7,12 @@ namespace RandomToolkits.DiskV10 {
   readonly object gate=new object(); readonly Stopwatch timer=Stopwatch.StartNew();
   readonly List<object> samples=new List<object>();
   public volatile string Phase="starting";
+  public bool UseDirectRows=
+#if DIRECT_ROWS
+   true;
+#else
+   false;
+#endif
   long total,single,multiple,empty,names,attributeLists,extensions;
   public static void MarkCurrent(string phase){if(Current!=null) Current.Mark(phase);}
   public static MftRecord[] TakeRecords(List<MftRecord> records){var result=records.ToArray();records.Clear();return result;}
