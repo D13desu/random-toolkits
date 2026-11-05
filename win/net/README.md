@@ -1,4 +1,4 @@
-# Windows Toolkit 0.7.0
+# Windows Toolkit 0.7.1
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -201,3 +201,13 @@ Uses .NET ICMP and ordinary TCP connections, with no Nmap installation or admini
 B/Esc during scanning stops queued work, disposes workers, and opens completed partial results. Results initially show responding addresses; A toggles all completed addresses. N/P pages, E exports all completed rows to a new CSV (including scope and completion counters), and B returns to Connectivity. No response is not proof a device is offline; a short timeout or firewall may hide it. TCP refusal is distinct from unanswered probes and other errors. Port numbers alone do not identify applications. Testing uses loopback listeners, not a LAN sweep.
 
 `win/net/Network-Discovery.ps1` is the maintained module source, embedded between markers in the self-contained launcher. Keep the embedded block and both Pages copies synchronized; `tests/Test-NetworkDiscovery.ps1` checks the block.
+
+### MAC and IEEE assignment lookup
+
+Discovery now displays exact-IP Windows neighbor-cache MACs and the IEEE registered organization. MAC status distinguishes local/randomized, multicast/broadcast, no match, missing data and conflicting MACs across interfaces. Cached entries (including Stale) are observations, not proof of liveness; no gateway MAC is substituted for a routed target. Proxy ARP can still represent a proxy rather than the endpoint. The assignee is not a verified device manufacturer or model.
+
+D toggles MAC and TCP-detail views. M looks up a MAC manually; colon, hyphen, dotted and plain hexadecimal forms are accepted. CSV includes MAC, matched prefix/length, vendor, status, interface indexes, neighbor state and registry retrieval time/status.
+
+The [IEEE public MA-L, MA-M and MA-S registries](https://standards.ieee.org/products-programs/regauth/) are downloaded over HTTPS and cached under `%LOCALAPPDATA%\Random-Toolkits\oui`. Matching prefers /36, then /28, then /24. No discovered IP or MAC is sent to IEEE. Cache refresh is attempted after 30 days, with at least 24 hours between attempts; a failed refresh retains the last valid data. With no data, discovery continues and reports lookup unavailable. The neighbor table is read using [Get-NetNeighbor](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netneighbor); unavailable neighbor support does not block scanning. Local/randomized MACs deliberately receive no IEEE vendor inference.
+
+Use `tests/Sync-NetworkDiscovery.ps1` after editing the maintained module. Tests cover synthetic prefixes, special MACs, ambiguous interfaces, missing/routed neighbors, cache downloads, offline fallback and retry throttling on PowerShell 5.1 and 7.

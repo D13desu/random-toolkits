@@ -26,6 +26,7 @@ $module=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Discovery.ps1')
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded module matches maintained source'
 Assert ('discovery' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -eq connectivity)).Entry.Id) 'Discovery reachable under connectivity'
 $script:ExportPath=Join-Path $env:TEMP ('discovery-test-'+[guid]::NewGuid().ToString('N')+'.csv')
+function Get-DiscoveryOuiDatabase {[pscustomobject]@{Entries=@{};RetrievedUtc='';Status='Test offline'}}
 function Invoke-NetworkDiscovery {
  param($Scope,$Ports,$TimeoutMs)
  [pscustomobject]@{Scope=$Scope;Requested=2;Completed=1;Cancelled=$true;Rows=@([pscustomobject]@{Address='127.0.0.1';Responded=$true;Ping='Success';LatencyMs=0;OpenTCP='';ClosedTCP='';NoResponseTCP='1';ErrorTCP=''})}
