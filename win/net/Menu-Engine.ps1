@@ -37,7 +37,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.0',
+        [string]$Version='0.14.1',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -87,7 +87,7 @@ function Show-PcMenu {
             if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
             if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
             if(-not $detail.Count){$detail=@('')}
-            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width)}
+            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width) -ForegroundColor $color}
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
@@ -141,9 +141,27 @@ function New-PcMenuItem {
 }
 function Read-PcCategoryMenu {
     param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
-    $choice=Show-PcMenu -Title $Title -Items $Items -State $State -Description $Description
-    if($choice.Action -eq 'Back'){return 'B'}
-    return [string]$choice.Item.Id
+    while($true){
+        if(Test-PcMenuKeyboard){Clear-Host}
+        Write-Host ("`nWINDOWS 0.14.1 | "+$Title) -ForegroundColor Cyan
+        if($Description){Write-Host $Description -ForegroundColor DarkGray}
+        foreach($item in $Items){
+            $color=if($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}
+            $label=' [{0}] {1}' -f $item.Key,$item.Label
+            if($item.Kind -eq 'Change'){$label+=' [CHANGES SYSTEM]'}
+            if($item.Detail){$label+=' - '+($item.Detail -join ' ')}
+            if($item.DisabledReason){$label+=' [UNAVAILABLE: '+$item.DisabledReason+']'}
+            Write-Host $label -ForegroundColor $color
+        }
+        Write-Host ' [B / 0] Back'
+        $answer=Read-Host 'Select number'
+        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return 'B'}
+        $item=$Items | Where-Object Key -EQ $answer.Trim() | Select-Object -First 1
+        if(-not $item){Write-Warning 'Choose a listed number or shortcut.';Wait-PcMenuReturn;continue}
+        if($item.DisabledReason){Write-Warning $item.DisabledReason;Wait-PcMenuReturn;continue}
+        $State.SelectedId=[string]$item.Id
+        return [string]$item.Id
+    }
 }
 function Wait-PcMenuReturn {
     if(Test-PcMenuKeyboard){$null=Read-Host 'Enter to return'}
