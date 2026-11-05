@@ -1,4 +1,4 @@
-# Windows Toolkit 0.7.4
+# Windows Toolkit 0.8.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -231,3 +231,13 @@ Windows menu **6: Event Logs** now offers Application, System, Security, Setup, 
 Inside a log, R refreshes the current query, F opens a filtered child view for that log, an event number displays full details, and N/P pages. B returns to the previous view/menu. Empty results keep the browser available so filters can widen the time window. C in the picker opens a custom exact log name and advanced filters; L lists/searches available logs. Advanced filters retain time, event IDs, levels, provider and literal message search, with a candidate cap of 1000. Message filtering applies after the candidate cap. Security and some operational logs may require elevated access.
 
 Event browsing in 0.7.4 supports Up/Down in both the log picker and event list; selection crosses page boundaries. Enter/Right opens the highlighted item, Left/Esc returns, PageUp/PageDown changes event pages, and Home/End jumps to the first/last item. Event bodies appear inline as up to three wrapped lines, with an ellipsis for longer messages. Full original messages and XML remain unchanged in the detail view (M and X); Enter returns to the same event selection. The XML snapshot is captured with the original event, so opening details does not query a potentially changed log. Unsupported/redirected hosts use typed commands. Preview, selection, cross-page navigation and cached XML tests pass on PowerShell 5.1 and 7.
+
+## Windows health dashboard
+
+Menu **9: Health dashboard — start here** collects a read-only local snapshot, sorted by WARN, REVIEW, UNAVAILABLE, INFO and PASS. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership.
+
+Up/Down selects a finding; Enter shows evidence and offers its related checks/repair menu. N/P pages; R refreshes; B/Esc returns. Repairs retain existing admin/role requirements and yes/no confirmation; collection never invokes repair functions. Missing permissions/providers become UNAVAILABLE, not a pass. Trigger-start services and historic failures are REVIEW items; Balanced is informational. Unaddressed virtual/filter interfaces are grouped to avoid false fault floods. PASS applies only to the stated check, not the entire PC.
+
+**C** adds live gateway ICMP (up to three gateways), system DNS resolution (AD domain, otherwise example.com), and a read-only secure-channel test on domain-member computers only. Subsequent refreshes include those checks. Workgroups and domain controllers do not run the member trust test. DNS waits two seconds; an underlying OS resolver operation may complete later. Secure-channel timing is controlled by the Windows cmdlet. No full disk surface scan, update installation, internet speed test or service restart is performed.
+
+The local smoke test on this PC returned 18 findings in 3.3 seconds (4 INFO, 6 PASS, 6 REVIEW and 2 unavailable NIC-driver settings). This is one live sample, not a speed guarantee or a health certification. Synthetic tests on PowerShell 5.1 and 7 cover thresholds, review vs fault classification, provider errors, AD-role gates and navigation. Maintain `Health-Dashboard.ps1` and use `tests/Sync-HealthDashboard.ps1` to synchronize the embedded launcher and both Pages endpoints.
