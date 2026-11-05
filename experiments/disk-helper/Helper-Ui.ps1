@@ -58,3 +58,19 @@ function Open-HelperDirectory([string]$Path) {
     $argument='"'+$full.TrimEnd('\')+'\.'+'"'
     Start-Process -FilePath (Join-Path $env:WINDIR 'explorer.exe') -ArgumentList $argument -ErrorAction Stop
 }
+
+function Test-HelperElevated {
+    $principal=[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Get-HelperVolumeInfo([string]$Root) { return [IO.DriveInfo]::new($Root) }
+function Get-HelperScanEngine {
+    param([string]$Path,[ValidateSet('auto','mft','native')][string]$Requested='auto')
+    if($Requested -ne 'auto'){return $Requested}
+    $full=[IO.Path]::GetFullPath($Path)
+    $root=[IO.Path]::GetPathRoot($full)
+    if($root -match '^[A-Za-z]:\\$' -and $full.TrimEnd('\') -eq $root.TrimEnd('\') -and (Test-HelperElevated)){
+        try{$drive=Get-HelperVolumeInfo $root;if($drive.IsReady -and $drive.DriveType -eq 'Fixed' -and $drive.DriveFormat -eq 'NTFS'){return 'mft'}}catch{}
+    }
+    return 'native'
+}

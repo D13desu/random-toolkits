@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Path,[ValidateSet('mft','native')][string]$Engine='mft',[string]$HelperDirectory)
+param([string]$Path,[ValidateSet('auto','mft','native')][string]$Engine='auto',[string]$HelperDirectory)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Helper-Client.ps1')
 . (Join-Path $PSScriptRoot 'Helper-Ui.ps1')
@@ -31,7 +31,7 @@ function Show-HelperAccounting($Summary) {
 $session=$null
 try {
     $session=Start-DiskHelper (Join-Path $HelperDirectory 'DiskHelper.exe') (Join-Path $HelperDirectory 'manifest.json')
-    Write-Host ("`nDISK HELPER {0} | Engine {1} | {2} | READ ONLY" -f $session.Hello.version,$session.Hello.engineVersion,$session.Hello.architecture) -ForegroundColor Cyan
+    Write-Host ("`nDISK USAGE {0} | Engine {1} | {2} | READ ONLY" -f $session.Hello.version,$session.Hello.engineVersion,$session.Hello.architecture) -ForegroundColor Cyan
     if(-not $Path){
         $drives=@([IO.DriveInfo]::GetDrives() | Where-Object {$_.IsReady -and $_.DriveType -eq 'Fixed'})
         for($i=0;$i -lt $drives.Count;$i++){Write-Host (' [{0}] {1} | Used {2} | Free {3}' -f ($i+1),$drives[$i].Name,(Format-HelperBytes ($drives[$i].TotalSize-$drives[$i].TotalFreeSpace)),(Format-HelperBytes $drives[$i].TotalFreeSpace))}
@@ -45,7 +45,10 @@ try {
     try {
         if($Path -match '^[A-Za-z]:$'){$Path+='\'}
         $Path=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
-        $null=Invoke-DiskHelper $session @{command='scan';path=$Path;engine=$Engine}
+        $scanEngine=Get-HelperScanEngine -Path $Path -Requested $Engine
+        Write-Host ('Scan mode: '+$scanEngine+' | '+$Path)
+        if($scanEngine -eq 'native'){Write-Host 'Native scan: logical sizes; inaccessible entries and reparse points may be excluded. Elevated local NTFS drive roots use MFT in Auto mode.'}
+        $null=Invoke-DiskHelper $session @{command='scan';path=$Path;engine=$scanEngine}
     } catch {Write-Warning $_.Exception.Message;continue drives}
     Write-Host 'Q: stop and browse partial results | B: cancel and return to drives'
     do {
@@ -59,23 +62,24 @@ try {
         Start-Sleep -Milliseconds 200
     } while($true)
     Write-Progress -Activity 'C# helper scanning' -Completed
-    $summary=$status.summary;$current=$summary.root;$offset=0;$selected=0;$lastView='';$sort=if($Engine -eq 'mft'){'allocated'}else{'logical'}
+    $summary=$status.summary;$current=$summary.root;$offset=0;$selected=0;$lastView='';$sort=if($scanEngine -eq 'mft'){'allocated'}else{'logical'}
     while($true){
         $page=Invoke-DiskHelper $session @{command='list';path=$current;offset=$offset;limit=20;sort=$sort}
         $view=$current+'|'+$offset+'|'+$sort
         if($view -ne $lastView){$selected=0;$lastView=$view}
         if($keyboard){Clear-Host}
-        Write-Host ("`nDISK HELPER {0} | {1}" -f $session.Hello.version,$page.path) -ForegroundColor Cyan
+        Write-Host ("`nDISK USAGE {0} | {1} | {2}" -f $session.Hello.version,$scanEngine.ToUpperInvariant(),$page.path) -ForegroundColor Cyan
         Write-Host ('On disk: {0} | Logical: {1} | Files: {2:N0} | Scan: {3:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$page.files,$summary.seconds)
+        if($scanEngine -eq 'native'){Write-Host 'Native scan: logical sizes only; physical allocation is not measured.'}
         Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
         if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
-        if($Engine -eq 'mft'){
+        if($scanEngine -eq 'mft'){
             if($current -eq $summary.root){Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
             Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
         }
         $rows=@($page.rows)
         for($i=0;$i -lt $rows.Count;$i++){
-            $row=$rows[$i];$allocation=if($Engine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
+            $row=$rows[$i];$allocation=if($scanEngine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
             $marker=if($i -eq $selected){'>'}else{' '}
             $color=if($i -eq $selected){'Cyan'}else{'Gray'}
@@ -102,7 +106,7 @@ try {
             'U'{if($page.parent){$current=$page.parent;$offset=0}}
             'N'{if($offset+20 -lt $page.total){$offset+=20}}
             'P'{$offset=[math]::Max(0,$offset-20)}
-            'S'{$sort=switch($sort){'allocated'{'logical'}'logical'{'name'}default{if($Engine -eq 'mft'){'allocated'}else{'logical'}}};$offset=0}
+            'S'{$sort=switch($sort){'allocated'{'logical'}'logical'{'name'}default{if($scanEngine -eq 'mft'){'allocated'}else{'logical'}}};$offset=0}
             'E'{
                 $issues=Invoke-DiskHelper $session @{command='issues';limit=100}
                 Write-Host 'Included-file information does not mark totals PARTIAL. Metadata exclusions and other incomplete results remain flagged. A shows volume accounting.'

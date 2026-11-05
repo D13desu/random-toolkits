@@ -1,8 +1,8 @@
-# Standalone disk helper experiment 0.8.1
+# Disk Usage 1.0.0
 
-An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
+The preferred C# disk explorer with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
-## Try the packaged experiment
+## Run the packaged disk explorer
 
 Extract the package, open PowerShell in its directory, and run:
 
@@ -10,7 +10,7 @@ Extract the package, open PowerShell in its directory, and run:
 .\Start-DiskHelper.ps1
 ```
 
-MFT mode requires an administrator PowerShell and a local NTFS volume. Enter selects the first fixed drive. To choose a drive directly:
+Auto mode selects MFT only for an elevated, fixed local NTFS drive root. Other paths and unelevated sessions use native directory enumeration (logical sizes, with inaccessible/reparse entries reported as exclusions). Explicit -Engine mft/native remains available. MFT mode requires administrator rights. Enter selects the first fixed drive. To choose a drive directly:
 
 ```powershell
 .\Start-DiskHelper.ps1 -Path C:\ -Engine mft
@@ -22,7 +22,7 @@ For an unelevated folder test:
 .\Start-DiskHelper.ps1 -Path "$env:USERPROFILE\Documents" -Engine native
 ```
 
-B returns to the parent folder, then drive selection, then the calling launcher (or exits when run standalone). During a scan, B cancels and returns to drive selection; Q cancels scanning and opens partial results. Folder numbers, U, N/P, S and E provide navigation, paging, sorting and diagnostics. T shows MFT phase timings and memory samples; progress names the current phase. Exit disposes the helper process and releases its scan tree. Ctrl+C runs client cleanup. The client checks the executable against the package manifest before launch. This is an unsigned test binary; it performs no automatic installation, elevation or update.
+B returns to the parent folder, then drive selection, then the calling launcher (or exits when run standalone). During a scan, B cancels and returns to drive selection; Q cancels scanning and opens partial results. Folder numbers, U, N/P, S and E provide navigation, paging, sorting and diagnostics. T shows MFT phase timings and memory samples; progress names the current phase. Exit disposes the helper process and releases its scan tree. Ctrl+C runs client cleanup. The client checks the executable against the package manifest before launch. This is an unsigned binary; it performs no automatic installation, elevation or update.
 
 The packaged runner needs Windows, the full .NET Framework 4.5.1 or later runtime and PowerShell 5.1 or 7. Tests used .NET Framework 4.8.10008; older Windows/.NET installations and 32-bit hosts have not been validated. It does not require a modern dotnet SDK, NuGet, runtime Add-Type, or a network connection.
 
@@ -35,7 +35,7 @@ The packaged runner needs Windows, the full .NET Framework 4.5.1 or later runtim
 
 The build invokes the installed .NET Framework csc.exe, producing an AnyCPU executable (x64 on the tested machine). Build output and local reports are ignored by Git. It extracts the shared C# engine from Disk-Usage.ps1 and checks that its MFT block matches MftScanner.cs before compiling. This avoids maintaining a divergent experimental copy of the scanner. Runtime execution does not parse the PowerShell scanner or compile C#.
 
-Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptations to the extracted MFT block. Every replacement checks its expected occurrence count and fails the build if the maintained source changes unexpectedly. Production sources and launcher pins are untouched. Build with `-BaselineStorage -OutputDirectory out/baseline` to retain original filename storage, record lifetimes and row caching while keeping profiling hooks. `-LegacyRows -OutputDirectory out/legacy` keeps the 0.3.0 record-storage improvements but restores the intermediate row cache. Both comparison modes use the current final heap cleanup. The manifest records the storage mode and generated engine hash.
+Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptations to the extracted MFT block. Every replacement checks its expected occurrence count and fails the build if the maintained source changes unexpectedly. The maintained source still lives under experiments/disk-helper for build/history compatibility; the published package and launcher are production releases. Build with `-BaselineStorage -OutputDirectory out/baseline` to retain original filename storage, record lifetimes and row caching while keeping profiling hooks. `-LegacyRows -OutputDirectory out/legacy` keeps the 0.3.0 record-storage improvements but restores the intermediate row cache. Both comparison modes use the current final heap cleanup. The manifest records the storage mode and generated engine hash.
 
 `-LegacyFolders -OutputDirectory out/legacy-folders` retains direct rows but uses intermediate folder objects and child lists for comparison. The default build uses compact folder records.
 
@@ -173,3 +173,10 @@ Tests: Test-Helper.ps1 (non-admin protocol), Test-Engine.ps1 (non-admin shared M
 In an interactive console, Up/Down selects a row; Enter or Right enters a directory. Left, Backspace or Escape goes back. PageUp/PageDown changes pages. Ctrl+Enter (or O) opens the selected directory in Explorer; with a file selected it opens the current directory. Missing/inaccessible paths report an error. Existing commands remain available, including numbers followed by Enter. Redirected or unsupported hosts retain line input. The scanner remains read-only; Explorer is a separate Windows application.
 
 Version 0.8.1 groups accounting, diagnostics and timing under F1: Reports (H with line input), with arrow/Enter selection. The browser shows compact navigation hints; legacy commands remain accepted. The root-only Unreconciled figure is volume-used minus included-file allocation, not missing files or a measured overhead total. Reports retain the exact difference and non-additive metadata caveats.
+
+
+## Graduation: 1.0.0
+
+Promoted to Storage option 1 with automatic scan-mode selection; the older Disk Usage 0.4.5 scanner remains option 2 as a compatibility fallback. No scanner/accounting algorithm was changed for graduation. The outer ZIP pin, inner executable checksum, manifest version and handshake checks remain enforced. There is no automatic elevation. The fallback is explicit, including when the helper runtime is unavailable.
+
+Validated runtime: x64 Windows with .NET Framework 4.8 and PowerShell 5.1/7. The declared runtime minimum is still 4.5.1, but older Windows/.NET and 32-bit hosts are not validated. Cancellation is cooperative and can take longer during reconstruction. Unreconciled volume allocation is not a missing-file total or measured NTFS overhead. Historical measurements below describe their named versions rather than a guarantee for every machine.

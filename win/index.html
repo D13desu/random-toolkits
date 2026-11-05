@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.12.0
+# Random Toolkits | Windows Toolkit 0.13.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -512,9 +512,9 @@ function Get-PcDiskHelperRuntimeReason {
 
 function Get-PcDiskHelperPackage {
     [pscustomobject]@{
-        Version='0.8.1-experiment'
-        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-experiment-v0.8.1/DiskHelper-0.8.1-experiment.zip'
-        Sha256='A3C1090C6B0FA6DE1D4A743421B2E362BBB866883EE2EEC2FEB0D5233CDAFD61'
+        Version='1.0.0'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-v1.0.0/DiskHelper-1.0.0.zip'
+        Sha256='52CC33E0BE0EE4EBCB592AF6DC626640B93963D0846237BC0F7D35172B024BD6'
     }
 }
 
@@ -528,7 +528,7 @@ function Start-PcDiskHelper {
     $null=[IO.Directory]::CreateDirectory($work)
     try {
         $archive=Join-Path $work 'helper.zip'
-        Write-Host "Downloading verified experimental Disk Helper $($package.Version)..."
+        Write-Host "Downloading verified Disk Usage $($package.Version)..."
         Invoke-WebRequest -UseBasicParsing -Uri $package.Uri -OutFile $archive -TimeoutSec 60 -ErrorAction Stop
         if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $package.Sha256) { throw 'Disk helper package checksum mismatch. Nothing extracted or executed.' }
         $unpacked=Join-Path $work 'package'
@@ -537,7 +537,7 @@ function Start-PcDiskHelper {
         $manifest=Get-Content -LiteralPath (Join-Path $unpacked 'out/manifest.json') -Raw | ConvertFrom-Json
         if ($manifest.Version -ne $package.Version -or -not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'Unexpected disk helper package layout or version.' }
         # The packaged client also verifies the executable hash and version handshake.
-        & $runner -HelperDirectory (Join-Path $unpacked 'out') -Engine mft
+        & $runner -HelperDirectory (Join-Path $unpacked 'out') -Engine auto
     } finally {
         # Delete only this invocation's GUID directory beneath the resolved TEMP root.
         $resolved=[IO.Path]::GetFullPath($work)
@@ -1129,8 +1129,8 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='sleep';Id='sleep';Name='Sleep states and AC/battery timeouts';MinPS='5.0';Commands=@('powercfg.exe');Admin=$false;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/a'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_SLEEP'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_VIDEO')}}
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
-        [pscustomobject]@{Key='disk';Id='disk';Name='Open disk usage explorer (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
-        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Experimental MFT disk explorer 0.8.1 (C# helper)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$true;Action={param($t,$p) Start-PcDiskHelper}}
+        [pscustomobject]@{Key='disk';Id='disk';Name='Compatibility disk scanner 0.4.5 (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Disk Usage 1.0.0 (automatic MFT/native)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$false;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -1180,7 +1180,7 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
-        [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorers'; Checks=@('disk','disk-helper'); AdChecks=@(); Repairs=@()}
+        [pscustomobject]@{Key='8'; Id='storage'; Name='Disk usage explorers'; Checks=@('disk-helper','disk'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='9';Id='printing';Name='Printing';Checks=@('printers','print-jobs','print-ports','spooler','print-events');AdChecks=@();Repairs=@('restart-spooler')}
         [pscustomobject]@{Key='10';Id='policy';Name='Group Policy';Checks=@('gp-user','gp-computer','gp-events');AdChecks=@('ad-context');Repairs=@('gp-refresh-user','gp-refresh-computer')}
         [pscustomobject]@{Key='11';Id='events';Name='Event Logs';Checks=@('event-logs','event-browser');AdChecks=@();Repairs=@()}
@@ -1834,7 +1834,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.12.0',
+        [string]$Version='0.13.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
