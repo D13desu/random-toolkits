@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
 $script:Output=New-Object 'Collections.Generic.List[string]'
-function Write-Host {param($Object,$ForegroundColor) $script:Output.Add([string]$Object);if(([string]$Object).StartsWith('    ')){$script:DetailColors.Add([string]$ForegroundColor)}}
+function Write-Host {param($Object,$ForegroundColor,[switch]$NoNewline) $script:Output.Add([string]$Object);if(([string]$Object).StartsWith('    ')){$script:DetailColors.Add([string]$ForegroundColor)}}
 $script:DetailColors=New-Object 'Collections.Generic.List[string]'
 function Write-Warning {param($Message) $script:Output.Add([string]$Message)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
@@ -65,3 +65,15 @@ Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n"
 $script:DetailColors.Clear();Feed @('B')
 $null=Show-PcMenu -Title Colors -Items @([pscustomobject]@{Id='one';Label='Selected';Detail=@('path','source')}) -DetailLines 2 -Plain
 Assert (($script:DetailColors -join ',') -eq 'Cyan,Cyan') 'Both description lines share the selected highlight'
+
+$script:RawKeys=New-Object 'Collections.Generic.Queue[ConsoleKeyInfo]'
+function Read-PcMenuKey {if(-not $script:RawKeys.Count){throw 'Unexpected key read'};$script:RawKeys.Dequeue()}
+foreach($pair in @(@('D1','1'),@('D2','2'),@('Backspace',[char]8),@('D0','0'),@('Enter',[char]13))){$script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]$pair[1],[ConsoleKey]$pair[0],$false,$false,$false))}
+$script:Output.Clear()
+Assert ((Read-PcMenuInput $true) -eq '10') 'Visible input supports multidigit selection and Backspace editing'
+Assert (($script:Output -join '|') -match 'Selection: 12_' -and ($script:Output -join '|') -match 'Selection: 10_') 'Typed digits are displayed before submission'
+$script:RawKeys.Enqueue([ConsoleKeyInfo]::new('3',[ConsoleKey]::D3,$false,$false,$false))
+$script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]27,[ConsoleKey]::Escape,$false,$false,$false))
+Assert ((Read-PcMenuInput $true) -eq 'Back') 'Escape cancels pending numeric input'
+$script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]13,[ConsoleKey]::Enter,$false,$false,$false))
+Assert ((Read-PcMenuInput $true) -eq 'Select') 'Pending digits do not leak into subsequent prompts'

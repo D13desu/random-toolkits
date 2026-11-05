@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.14.2
+# Random Toolkits | Windows Toolkit 0.14.3
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -1881,17 +1881,24 @@ function ConvertFrom-PcMenuKey($Key) {
     }
     return [string]$Key.KeyChar
 }
+function Read-PcMenuKey { return [Console]::ReadKey($true) }
+function Write-PcMenuSelection([string]$Digits) {
+    Write-Host ("`rSelection: {0,-10}" -f ($Digits+'_')) -NoNewline -ForegroundColor Cyan
+}
 function Read-PcMenuInput([bool]$Keyboard) {
     if(-not $Keyboard){return Read-Host 'Number / Enter: select | B/0: back'}
     $digits=''
-    while($true){
-        $key=[Console]::ReadKey($true)
-        if($key.Key -eq 'Backspace' -and $digits.Length){$digits=$digits.Substring(0,$digits.Length-1);continue}
-        $value=ConvertFrom-PcMenuKey $key
-        if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};continue}
-        if($value -eq 'Select' -and $digits.Length){return $digits}
-        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d','m','x','s','t')){return $value}
-    }
+    Write-PcMenuSelection $digits
+    try {
+        while($true){
+            $key=Read-PcMenuKey
+            if($key.Key -eq 'Backspace' -and $digits.Length){$digits=$digits.Substring(0,$digits.Length-1);Write-PcMenuSelection $digits;continue}
+            $value=ConvertFrom-PcMenuKey $key
+            if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};Write-PcMenuSelection $digits;continue}
+            if($value -eq 'Select' -and $digits.Length){return $digits}
+            if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d','m','x','s','t')){return $value}
+        }
+    } finally {Write-Host ''}
 }
 function Format-PcMenuText {
     param([AllowNull()][string]$Text,[int]$Width=100)
@@ -1907,7 +1914,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.2',
+        [string]$Version='0.14.3',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2016,7 +2023,7 @@ function Read-PcCategoryMenu {
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
-        Write-Host ("`nWINDOWS 0.14.2 | "+$Title) -ForegroundColor Cyan
+        Write-Host ("`nWINDOWS 0.14.3 | "+$Title) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
