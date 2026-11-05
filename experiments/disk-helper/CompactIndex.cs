@@ -18,12 +18,17 @@ namespace RandomToolkits.HelperExperiment {
   readonly Entry[] entries;
   readonly PackedRows packed;
   readonly PackedFolders packedFolders;
+  readonly DirectoryPaths lazyPaths;
+  public int PathCacheCount {get{return lazyPaths==null?0:lazyPaths.CacheCount;}}
+  public int PathCacheCharacters {get{return lazyPaths==null?0:lazyPaths.CacheCharacters;}}
   public string Root {get;private set;}
   internal static readonly string[] Kinds={"DIR","FILE","LINK","RP","WCI"};
   public int FolderCount {get{return packedFolders!=null?packedFolders.Count:folders.Length;}}
   public int RowCount {get{return packed!=null?packed.Count:entries.Length;}}
   internal CompactIndex(Scan scan,DirectRows direct) {
-   Root=scan.Root;ids=direct.Ids;paths=direct.Paths.ToArray();packed=direct.Rows;
+   Root=scan.Root;packed=direct.Rows;
+   if(direct.Lazy!=null){lazyPaths=direct.Lazy;packedFolders=direct.Folders;return;}
+   ids=direct.Ids;paths=direct.Paths.ToArray();
    if(direct.CompactFolders){packedFolders=direct.Folders;return;}
    folders=new Folder[paths.Length];
    for(int id=0;id<paths.Length;id++) {
@@ -53,9 +58,9 @@ namespace RandomToolkits.HelperExperiment {
     }
    }
   }
-  public bool Find(string path,out int id){return ids.TryGetValue(path,out id);}
+  public bool Find(string path,out int id){return lazyPaths!=null?lazyPaths.Find(path,out id):ids.TryGetValue(path,out id);}
   public Folder GetFolder(int id){if(packedFolders==null)return folders[id];var folder=packedFolders.Get(id);return new Folder {Parent=folder.Parent,Start=folder.Head,Count=folder.Count,Logical=folder.Logical,Allocated=folder.Allocated,Files=folder.Files,Partial=folder.Partial,Unknown=folder.Unknown};}
-  public string GetPath(int id){return paths[id];}
+  public string GetPath(int id){return lazyPaths!=null?lazyPaths.Get(id):paths[id];}
   public int[] Sort(int id,string sort) {
    Folder folder=GetFolder(id);int[] order=new int[folder.Count];
    int next=folder.Start;
@@ -66,7 +71,7 @@ namespace RandomToolkits.HelperExperiment {
    });return order;
   }
   public Row[] Page(int id,int[] order,int offset,int count) {
-   Row[] rows=new Row[count];string parent=paths[id].TrimEnd('\\')+"\\";
+   Row[] rows=new Row[count];string parent=GetPath(id).TrimEnd('\\')+"\\";
    for(int i=0;i<count;i++){
     Entry e=GetEntry(order[offset+i]);rows[i]=new Row {Name=e.Name,Path=parent+e.Name,Kind=Kinds[e.Kind],ReparseTag=e.Tag,
      Bytes=e.Logical,Allocated=e.Allocated,Partial=(e.Flags&1)!=0,AllocationUnknown=(e.Flags&2)!=0};

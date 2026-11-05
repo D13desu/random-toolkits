@@ -31,6 +31,7 @@ try {
     } while($true)
     $report.Helper=$status.summary;$report.HelperWorkingSet=$status.workingSet
     $report.Profile=Invoke-DiskHelper $session @{command='profile'}
+    $report.Memory=Invoke-DiskHelper $session @{command='memory'}
     $report.ReadySeconds=$status.readySeconds
     $report.CleanupMilliseconds=$status.cleanupMilliseconds
     $report.CompactMilliseconds=$status.compactMilliseconds

@@ -23,9 +23,10 @@ internal static class CompactIndexTest {
   }
   records.Reverse();var input=records.ToArray();ScanProfile.Current=null;
   Scan expected=MftScanner.Build(@"Z:\",input,false),actual;
-  try{ScanProfile.Current=new ScanProfile {UseDirectRows=true,UseCompactFolders=true};actual=MftScanner.Build(@"Z:\",input,false);}
+  try{ScanProfile.Current=new ScanProfile {UseDirectRows=true,UseCompactFolders=true,UseLazyPaths=true};actual=MftScanner.Build(@"Z:\",input,false);}
   finally{ScanProfile.Current=null;}
   Assert(actual.Nodes.Count==1 && actual.CachedRows==null,"Compact build retained intermediate folder/row objects.");
+  Assert(actual.DirectRows.Paths==null && actual.DirectRows.Ids==null,"Full directory path index retained.");
   Assert(actual.Files==expected.Files && actual.IssueCount==expected.IssueCount && actual.MftUnknownAllocations==expected.MftUnknownAllocations,"Compact diagnostics/counts changed.");
   var index=new CompactIndex(actual,actual.DirectRows);Assert(index.FolderCount==count+1,"Folder block boundary lost a folder.");
   foreach(var pair in expected.Nodes){int id;Assert(index.Find(pair.Key,out id),"Folder missing across block boundary.");var folder=index.GetFolder(id);var node=pair.Value;
@@ -39,6 +40,22 @@ internal static class CompactIndexTest {
   actual.DirectRows.Folders.ForcePartial=true;actual.DirectRows.Rows.ForcePartial=true;
   for(int id=0;id<index.FolderCount;id++)Assert(index.GetFolder(id).Partial,"Late folder partial flag lost.");
   Console.WriteLine("PASS: 4,206 compact folders across block boundaries match legacy aggregation, navigation, tags, uncertainty and every row/sort.");
+ }
+ static void PathCache(){
+  var paths=new DirectoryPaths(@"Z:\");paths.Add(0,-1,"",@"Z:\");string deep=@"Z:\";int id=0;
+  for(int i=0;i<2200;i++){string name="Deep-"+i;string next=deep.TrimEnd('\\')+"\\"+name;paths.Add(++id,id-1,name,next);deep=next;}
+  int deepest=id;
+  for(int i=0;i<5000;i++){string name="Wide-"+i;paths.Add(++id,0,name,@"Z:\"+name);}
+  Assert(paths.CacheCount<=DirectoryPaths.MaxCacheEntries && paths.CacheCharacters<=DirectoryPaths.MaxCacheCharacters,"Path cache exceeded entry/character bounds.");
+  int found;Assert(paths.Find(deep.ToLowerInvariant(),out found) && found==deepest,"Deep case-insensitive lookup failed after eviction.");
+  Assert(paths.Get(found)==deep,"Deep reconstruction changed canonical path spelling after eviction.");
+  Assert(!paths.Find(deep+"\\",out found) && !paths.Find(@"Z:\\Wide-1",out found) && !paths.Find(@"Y:\Wide-1",out found) && !paths.Find(@"Z:\missing",out found),"Malformed/outside path accepted.");
+  // Long valid components below a deep parent exercise the character cap independently of entry count.
+  int first=id+1;string firstName=null;
+  for(int i=0;i<300;i++){string name=new string('x',180)+i;if(i==0)firstName=name;paths.Add(++id,deepest,name,deep+"\\"+name);}
+  Assert(paths.CacheCount<DirectoryPaths.MaxCacheEntries && paths.CacheCharacters<=DirectoryPaths.MaxCacheCharacters,"Character limit did not evict long paths.");
+  Assert(paths.Get(first)==deep+"\\"+firstName && paths.Find(deep+"\\"+firstName,out found) && found==first,"Character-cap eviction lost a directory.");
+  Console.WriteLine("PASS: path cache entry/character bounds, eviction, 2,200-level nonrecursive paths, case preservation and invalid-path rejection.");
  }
  static int Main() {
   var scan=new Scan {Root=@"Z:\"};scan.CachedRows=new Dictionary<string,List<Row>>(StringComparer.OrdinalIgnoreCase);
@@ -90,6 +107,6 @@ internal static class CompactIndexTest {
   }
   direct.Rows.ForcePartial=true;var partial=new CompactIndex(scan,direct);int partialId;partial.Find(scan.Root+"folder-39",out partialId);
   int[] partialOrder=partial.Sort(partialId,"name");foreach(var row in partial.Page(partialId,partialOrder,0,partialOrder.Length))Assert(row.Partial,"Late partial flag lost.");
-  Console.WriteLine("PASS: legacy and direct caches, "+total+" rows, 41 folders, three sort orders, block boundaries, duplicates, late partial flags and all pages/metadata/parents match.");FolderBlocks();return 0;
+  Console.WriteLine("PASS: legacy and direct caches, "+total+" rows, 41 folders, three sort orders, block boundaries, duplicates, late partial flags and all pages/metadata/parents match.");FolderBlocks();PathCache();return 0;
  }
 }

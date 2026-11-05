@@ -7,6 +7,12 @@ namespace RandomToolkits.DiskV10 {
   readonly object gate=new object(); readonly Stopwatch timer=Stopwatch.StartNew();
   readonly List<object> samples=new List<object>();
   public volatile string Phase="starting";
+  public bool UseLazyPaths=
+#if LAZY_PATHS
+   true;
+#else
+   false;
+#endif
   public bool UseCompactFolders=
 #if COMPACT_FOLDERS
    true;

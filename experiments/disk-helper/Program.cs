@@ -9,7 +9,7 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="0.5.0-experiment";
+  const string Version="0.6.0-experiment";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -48,7 +48,7 @@ namespace RandomToolkits.HelperExperiment {
   }
   static object Summary() {
    Node root=scan.Nodes[scan.Root];bool allocated=mode=="mft";
-   return new {root=scan.Root,engine=scan.Engine,files=scan.Files,folders=scan.DirectRows!=null?scan.DirectRows.Paths.Count:scan.Nodes.Count,
+   return new {root=scan.Root,engine=scan.Engine,files=scan.Files,folders=scan.DirectRows!=null?scan.DirectRows.FolderCount:scan.Nodes.Count,
     logical=root.Bytes,allocated=allocated?(long?)root.Allocated:null,allocationUnknown=allocated && root.AllocationUnknown,
     partial=root.Partial,cancelled=scan.Cancelled,diagnostics=scan.IssueCount,causes=scan.IssueCounts,
     omittedFiles=scan.MftOmittedFiles,omittedDirectories=scan.MftOmittedDirectories,parseErrors=scan.MftRecordErrors,
@@ -93,7 +93,8 @@ namespace RandomToolkits.HelperExperiment {
    return new {type="memory",collected=collect,collectionMilliseconds=timer.Elapsed.TotalMilliseconds,
     managedBefore=managedBefore,managedAfter=GC.GetTotalMemory(false),workingSetBefore=workingBefore,
     workingSetAfter=Process.GetCurrentProcess().WorkingSet64,privateBytes=Process.GetCurrentProcess().PrivateMemorySize64,
-    peakWorkingSet=Process.GetCurrentProcess().PeakWorkingSet64,folders=compact!=null?compact.FolderCount:scan.Nodes.Count,cachedRows=rows};
+    peakWorkingSet=Process.GetCurrentProcess().PeakWorkingSet64,folders=compact!=null?compact.FolderCount:scan.Nodes.Count,cachedRows=rows,
+    pathCacheEntries=compact==null?0:compact.PathCacheCount,pathCacheCharacters=compact==null?0:compact.PathCacheCharacters};
   }
   static object List(Dictionary<string,object> request) {
    RequireReady();string path=Text(request,"path",compact!=null?compact.Root:scan.Root);

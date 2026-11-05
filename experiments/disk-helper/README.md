@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.5.0
+# Standalone disk helper experiment 0.6.0
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -39,6 +39,8 @@ Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptat
 
 `-LegacyFolders -OutputDirectory out/legacy-folders` retains direct rows but uses intermediate folder objects and child lists for comparison. The default build uses compact folder records.
 
+`-LegacyPaths -OutputDirectory out/legacy-paths` retains full directory paths for comparison. The default builds paths on demand.
+
 ## Protocol
 
 UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper emits a versioned hello, then exactly one response per request. Progress is polled, so unsolicited output cannot interleave with replies.
@@ -57,6 +59,18 @@ UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper e
 Requests are limited to 64 KiB. Only paths in the cached scan can be browsed. All MFT file rows stay in C# memory; native mode caches the current directory listing. No write/delete/repair command exists.
 
 ## Validation and measured limits
+
+### 0.6.0: directory paths on demand
+
+Directory identity now consists of a parent ID and the original name, indexed case-insensitively. Resolved MFT references map to folder IDs, retaining their complete sequence-bearing references. The full-path list and full-path-keyed directory dictionary are absent in this mode. Full paths are reconstructed iteratively for browsing, hard-link ordering, diagnostics and API verification; no filesystem traversal is used.
+
+An LRU cache retains at most 4,096 full paths and 2,097,152 UTF-16 characters (about 4 MiB of character data, plus object/index overhead). Directory names and parent IDs remain the authoritative data, so eviction never loses a folder. Cache misses preserve original spelling; arbitrary case-insensitive lookups resolve through parent/name keys. Directory browsing rows share those original name strings. The memory protocol exposes path-cache entry and character counts.
+
+The elevated C: memory run measured 3.88 GiB peak working set, 1.09 GiB while browsing and 39.14 seconds to results, versus the prior 0.5.0 samples of 4.59 GiB, 1.71 GiB and about 37 seconds. Reconstruction trades about two seconds for lower memory in these sequential live-volume samples; this is not a controlled benchmark. The cache held 4,096 entries and 387,652 characters at the measurement point.
+
+Tests cover eviction by both cache limits, 2,200-level iterative paths, case-insensitive lookup after eviction, canonical spelling, malformed/outside paths, 4,206-folder legacy equivalence and 15,640-row paging/sorting equivalence. The shared MFT suite and protocol tests pass on PowerShell 5.1 and 7. The test adapter rejects accidental retention of the full path index.
+
+The final live comparison measured 3.85 GiB peak, 1.04 GiB browsing working set and 39.79 seconds to results. The hard-link fixture matched exactly; both engines reported 2,949,753 files, 366 unknown allocations, 5,612 API-verified records, identical diagnostic counts and zero parse errors. Whole-volume byte totals changed slightly during the sequential scans. Cancellation passed during collection (136 ms) and reconstruction (7.67 seconds), with partial flags preserved on directory and file rows.
 
 ### 0.5.0: compact folder records
 

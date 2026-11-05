@@ -62,5 +62,10 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
     $old='if(Result.DirectRows!=null) Result.DirectRows.Rows.ForcePartial=true;'
     if(([regex]::Matches($Source,[regex]::Escape($old))).Count -ne 2){throw 'Compact folder partial anchors changed.'}
     $Source=$Source.Replace($old,'if(Result.DirectRows!=null) {Result.DirectRows.Rows.ForcePartial=true;Result.DirectRows.Folders.ForcePartial=true;}')
+    $Source=Replace-One $Source 'new RandomToolkits.HelperExperiment.DirectRows(root,ScanProfile.Current.UseCompactFolders)' 'new RandomToolkits.HelperExperiment.DirectRows(root,ScanProfile.Current.UseCompactFolders,ScanProfile.Current.UseLazyPaths)'
+    $Source=Replace-One $Source 'var paths=new System.Collections.Generic.Dictionary<ulong,string>();' 'var paths=new RandomToolkits.HelperExperiment.ResolvedPaths(direct);'
+    $Source=Replace-One $Source 'direct.Ids.ContainsKey(path)' 'direct.ContainsPath(path)'
+    $Source=Replace-One $Source 'paths.Add(r.Reference,path); if(direct==null || !direct.CompactFolders)' 'if(direct==null || !direct.CompactFolders)'
+    $Source=Replace-One $Source 'direct.SetMetadata(path,r.Allocated,!r.AllocationKnown,r.Reparse?Tag(r):null);}' 'direct.SetMetadata(path,r.Allocated,!r.AllocationKnown,r.Reparse?Tag(r):null);} paths.Add(r.Reference,path);'
     return $prefix+$Source+$suffix
 }
