@@ -1,4 +1,4 @@
-# Windows Toolkit 0.6.9
+# Windows Toolkit 0.7.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -191,3 +191,13 @@ Power tests simulate laptop/desktop firmware, localized plan output, missing pla
 Printing/policy/event tests cover query filters (including level 0), literal message matching, empty vs access-denied results, invalid input, paging/detail navigation, per-printer errors, repair cancellation, spooler state handling and scoped gpupdate arguments. Mutations are mocked. Read-only printer inventory and System event retrieval were smoke-tested locally; real service restart and domain policy processing are not exercised by tests.
 
 Experimental disk browsing supports Up/Down selection, Enter/Right to enter a folder, Left/Backspace/Escape to return, and Ctrl+Enter (or O) to open the selected directory in Explorer. With a file selected, Explorer opens the current directory. Line-input navigation remains available in redirected hosts.
+
+## Network discovery
+
+Open Network > Connectivity and adapters > Discover network devices / TCP ports (option 4). Enter an IPv4 CIDR such as `192.168.1.0/24`, a single IPv4 address, or a full range such as `192.168.1.10-192.168.1.50`. Local adapter prefixes are shown for reference; scanning starts only after target, ports and timeout are entered.
+
+Uses .NET ICMP and ordinary TCP connections, with no Nmap installation or administrator requirement. Compatible with PowerShell 5.0+; tested on 5.1 and 7. Limits: 1024 addresses, 16 distinct TCP ports, 32 concurrent hosts by default and 100-2000 ms per probe. ICMP failure does not skip TCP checks. Default ports: 22, 80, 443, 445, 3389, 9100. No UDP scan, service/banner interrogation, OS fingerprinting or credential attempts.
+
+B/Esc during scanning stops queued work, disposes workers, and opens completed partial results. Results initially show responding addresses; A toggles all completed addresses. N/P pages, E exports all completed rows to a new CSV (including scope and completion counters), and B returns to Connectivity. No response is not proof a device is offline; a short timeout or firewall may hide it. TCP refusal is distinct from unanswered probes and other errors. Port numbers alone do not identify applications. Testing uses loopback listeners, not a LAN sweep.
+
+`win/net/Network-Discovery.ps1` is the maintained module source, embedded between markers in the self-contained launcher. Keep the embedded block and both Pages copies synchronized; `tests/Test-NetworkDiscovery.ps1` checks the block.
