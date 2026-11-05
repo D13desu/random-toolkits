@@ -1,4 +1,4 @@
-# Windows Toolkit 0.10.0
+# Windows Toolkit 0.10.1
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -255,7 +255,7 @@ Up/Down and Enter navigate; N/P pages; F filters literal name/location text; C t
 Tests on PowerShell 5.1 and 7 cover path ambiguity, missing files, network/user-context paths, scheduler informational codes, unsigned/signed results, per-task permission failures, filtering and navigation. A live read-only sample inspected 19 startup entries and 212 visible tasks in 2.45 seconds; counts and speed vary by PC. Maintain Startup-Tasks.ps1 and run tests/Sync-StartupTasks.ps1 to update the embedded launcher and Pages endpoints.
 
 
-## Services and Windows repair centre (0.10.0)
+## Services and Windows repair centre (0.10.1)
 
 Root **11 Services** lists local Win32 services with state, startup mode and executable command. Arrow keys select; Enter opens service account, description, dependencies and actions. F filters name/display name/path, R refreshes, N/P page, B/Esc returns. Start/stop/restart require administrator rights and yes/no confirmation. Stop/restart refuse active dependents and never use Force. The toolkit does not alter startup types. Starting a service can start its prerequisites; stopping services may interrupt applications or connectivity. Windows enforces service permissions and protected-service restrictions.
 
@@ -266,3 +266,23 @@ Root **12 Windows repair centre** offers DISM CheckHealth (recorded corruption),
 Native output stays visible until Enter returns to the menu. Exit code, elapsed time and DISM/CBS log paths are shown. A zero exit code is not interpreted as proof of a healthy system, and 3010 is reported as restart required. Commands use explicit Windows system binary paths, including Sysnative for a 32-bit process on 64-bit Windows; health commands require Windows 8 / Server 2012 or later. Source: [Microsoft's Windows image repair guidance](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/repair-a-windows-image) and [System File Checker guidance](https://support.microsoft.com/en-us/windows/experience/backup-recovery/using-system-file-checker-in-windows).
 
 Maintain `System-Maintenance.ps1`, then run `tests/Sync-SystemMaintenance.ps1` to update the embedded launcher and Pages copies. `tests/Test-SystemMaintenance.ps1` mocks all service mutations and native repairs, checking confirmations, elevation, dependent-service protection, fixed arguments and navigation. No live repair or service mutation is performed by the tests.
+
+## Shared menu engine (pass 1)
+
+`Menu-Engine.ps1` supplies `Show-PcMenu`, keyboard mapping/input, bounded row formatting and `Confirm-PcMenuChange` (yes/no, default No). It is embedded in the launcher; existing menus are not migrated yet.
+
+Items require unique nonempty `Id` and `Label`; optional fields are `Kind` (Check, Change, Menu), `Detail`, and `DisabledReason`. Unavailable entries cannot be selected, including by number. The engine returns `Action` (Select, Refresh, Back), `Item`, and `State`, and never executes actions. Callers own execution, availability checks and confirmation. Reuse a hashtable through `-State` to preserve `SelectedId` and `Filter` across calls; missing selections fall back to the first matching row.
+
+Up/Down select; Enter opens; Esc/Backspace return; Home/End and PageUp/PageDown navigate. Numbers plus Enter work; Backspace edits pending digits. B/0 return and N/P page. Optional F filters labels/details literally, and R returns a refresh request. Filter entry uses B to cancel and blank to clear. Empty menus remain navigable. `-Plain` forces numbered input; redirected streams and non-ConsoleHost sessions use it automatically. EOF returns Back. Interactive page capacity adapts to terminal height and rows are clipped to width.
+
+Example (no actions are executed):
+
+```powershell
+$state = @{}
+$choice = Show-PcMenu -Title 'Windows > Example' -State $state -Filterable -Refreshable -Items @(
+    [pscustomobject]@{Id='inspect';Label='Inspect';Kind='Check';Detail='Read current state'},
+    [pscustomobject]@{Id='repair';Label='Repair';Kind='Change';DisabledReason='Requires administrator'}
+)
+```
+
+Run `tests/Sync-MenuEngine.ps1` after editing the module. Tests cover navigation, disabled items, empty views, state preservation, filtering/cancellation, fallback input, confirmations and source synchronization on PowerShell 5.1 and 7. Pass 2 migrates root/category menus; pass 3 aligns list browsers.
