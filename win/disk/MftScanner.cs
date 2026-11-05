@@ -1,6 +1,6 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only file-record queries plus bounded raw reads of ATTRIBUTE_LIST metadata.
-namespace RandomToolkits.DiskV8 {
+namespace RandomToolkits.DiskV9 {
  public class MftStream { public string Name; public long Allocated; public bool Known; }
  public class MftName { public ulong Parent; public string Name; }
  public class MftRun { public long Cluster, Count; }
@@ -12,6 +12,8 @@ namespace RandomToolkits.DiskV8 {
   public int ExpectedNameCount;
   public System.Collections.Generic.Dictionary<ulong,int> ExpectedNames;
   public bool LinkCountMismatch;
+  public bool ApiVerified;
+  public string ApiIssue;
   public string ExtensionIssue;
   public long UnnamedAllocated, Allocated;
   public bool UnnamedAllocationKnown=true, AllocationKnown, AllocationListKnown;
@@ -286,6 +288,9 @@ namespace RandomToolkits.DiskV8 {
   // Deterministic ownership: a hard-linked file is charged to its first ordinal path only.
   // Other links remain visible with zero charged bytes, labelled LINK.
   public static Scan Build(string root,MftRecord[] records,bool cancelled) {
+   return Build(root,records,cancelled,null);
+  }
+  public static Scan Build(string root,MftRecord[] records,bool cancelled,System.Func<MftRecord,string[],string> verify) {
    // This is a graph of local MFT parent IDs. Reparse payloads and target paths
    // are never followed. Their own local DATA allocation can therefore be counted
    // even when the tag is unknown, without traversing a junction or hydrating data.
@@ -342,8 +347,6 @@ namespace RandomToolkits.DiskV8 {
    var occupied=new System.Collections.Generic.HashSet<string>(s.Nodes.Keys,System.StringComparer.OrdinalIgnoreCase);
    foreach(MftRecord r in records) {
     if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
-    if(r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),"Incomplete/conflicting metadata: data="+r.HasData+", standardInfo="+r.HasStandardInformation+", name attributes="+r.NameAttributeCount+", header count="+r.LinkCount+"; "+r.ExtensionIssue,"FileUnsupported");continue;}
-    if(r.LinkCountMismatch) Issue(s,Describe(r),"Included using verified attribute-list filenames; header link count differs (names="+r.NameAttributeCount+", header="+r.LinkCount+").","IncludedLinkCountMismatch");
     var names=new System.Collections.Generic.SortedDictionary<string,string>(System.StringComparer.Ordinal);
     string linkFailure=null;bool metadataOnly=true;
     foreach(MftName n in r.Names) {
@@ -356,6 +359,16 @@ namespace RandomToolkits.DiskV8 {
      }
      string path=parent.TrimEnd('\\')+"\\"+n.Name; names[path]=parent;
     }
+    if(names.Count==0 && linkFailure!=null && metadataOnly) {s.MftOmittedFiles++;Issue(s,Describe(r),linkFailure,"FileSystemMetadata");continue;}
+    if(verify!=null && !cancelled && (r.Unsupported || !r.AllocationKnown) && r.HasAttributeList && !r.AllocationListKnown && r.ExtensionIssue==null && r.HasData && r.HasStandardInformation && !r.Reparse && linkFailure==null && names.Count>0) {
+     try {r.ApiIssue=verify(r,new System.Collections.Generic.List<string>(names.Keys).ToArray());}
+     catch(System.Exception ex) {r.ApiIssue=ex.Message;}
+     if(System.String.IsNullOrEmpty(r.ApiIssue)) {r.ApiVerified=true;r.Unsupported=false;r.AllocationKnown=true;r.AllocationIssue=null;}
+     else Issue(s,Describe(r),r.ApiIssue,"ApiVerificationFailed");
+    }
+    if(r.Unsupported) {s.MftOmittedFiles++;Issue(s,Describe(r),"Incomplete/conflicting metadata: data="+r.HasData+", standardInfo="+r.HasStandardInformation+", name attributes="+r.NameAttributeCount+", header count="+r.LinkCount+"; "+r.ExtensionIssue,"FileUnsupported");continue;}
+    if(r.ApiVerified) s.MftApiVerified++;
+    if(r.LinkCountMismatch) Issue(s,Describe(r),"Included using verified attribute-list filenames; header link count differs (names="+r.NameAttributeCount+", header="+r.LinkCount+").","IncludedLinkCountMismatch");
     bool charged=false;
     foreach(var pair in names) {
      if(!occupied.Add(pair.Key)) {metadataOnly=false;if(linkFailure==null) linkFailure="Duplicate path: "+pair.Key+"; file may have changed during scanning.";continue;}
@@ -504,7 +517,7 @@ namespace RandomToolkits.DiskV8 {
       if(actual==0) break;next=actual-1;
      }
      if(!CancelRequested) CompleteExtensions(handle,records,volume,recordSize);
-     Result=Build(root,records.ToArray(),CancelRequested);Result.Started=started;
+     Result=Build(root,records.ToArray(),CancelRequested,delegate(MftRecord r,string[] names) {return CancelRequested?"Verification cancelled.":MftApi.Verify(root,r,names);});Result.Started=started;
      try {var drive=new System.IO.DriveInfo(root);Result.VolumeUsed=drive.TotalSize-drive.TotalFreeSpace;} catch { }
      if(CancelRequested && !Result.Cancelled) {
       Result.Cancelled=true;Issue(Result,root,"Cancellation requested during tree reconstruction.");
@@ -523,4 +536,97 @@ namespace RandomToolkits.DiskV8 {
    finally {Done=true;}
   }
  }
+}
+
+namespace RandomToolkits.DiskV9 {
+
+using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public class MftApi {
+ public class StreamRow {public string Name;public long Logical,Allocated;}
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFileW(string p,uint a,uint s,IntPtr sec,uint c,uint f,IntPtr t);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern SafeFileHandle OpenFileById(SafeFileHandle h,byte[] id,uint a,uint s,IntPtr sec,uint flags);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle h,byte[] info);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandleEx(SafeFileHandle h,int c,byte[] info,int size);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle h,StringBuilder b,uint n,uint flags);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr FindFirstFileNameW(string p,uint flags,ref uint length,StringBuilder b);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool FindNextFileNameW(IntPtr h,ref uint length,StringBuilder b);
+ [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr h);
+ public ulong RequestedReference,ReturnedReference; public uint Attributes,Links;
+ public long Allocation,Logical; public string Path,Error,LinkError; public List<string> Names=new List<string>();
+ public string StreamError;public List<StreamRow> Streams=new List<StreamRow>();
+ public static MftApi Query(string root,ulong reference) {
+  var r=new MftApi {RequestedReference=reference};
+  using(var volume=CreateFileW(@"\\.\"+root.Substring(0,2),0,7,IntPtr.Zero,3,0,IntPtr.Zero)) {
+   if(volume.IsInvalid) {r.Error="Volume open: "+Marshal.GetLastWin32Error();return r;}
+   byte[] id=new byte[24];Buffer.BlockCopy(BitConverter.GetBytes(24),0,id,0,4);Buffer.BlockCopy(BitConverter.GetBytes(reference),0,id,8,8);
+   // FILE_READ_ATTRIBUTES only; OPEN_REPARSE_POINT and OPEN_NO_RECALL.
+   using(var file=OpenFileById(volume,id,0x80,7,IntPtr.Zero,0x02200000|0x00100000)) {
+    if(file.IsInvalid) {r.Error="OpenFileById: "+Marshal.GetLastWin32Error();return r;}
+    byte[] info=new byte[52];
+    if(!GetFileInformationByHandle(file,info)) {r.Error="File information: "+Marshal.GetLastWin32Error();return r;}
+    r.ReturnedReference=((ulong)BitConverter.ToUInt32(info,44)<<32)|BitConverter.ToUInt32(info,48);
+    if(r.ReturnedReference!=reference) {r.Error="File reference changed";return r;}
+    r.Attributes=BitConverter.ToUInt32(info,0);if((r.Attributes&0x400)!=0){r.Error="Reparse metadata fallback is disabled.";return r;}r.Links=BitConverter.ToUInt32(info,40);
+    byte[] standard=new byte[24];if(GetFileInformationByHandleEx(file,1,standard,24)) {r.Allocation=BitConverter.ToInt64(standard,0);r.Logical=BitConverter.ToInt64(standard,8);}
+    else r.Error="Standard information: "+Marshal.GetLastWin32Error();
+    byte[] streams=null;
+    for(int capacity=4096;capacity<=1048576;capacity*=2) {
+     byte[] candidate=new byte[capacity];
+     if(GetFileInformationByHandleEx(file,7,candidate,capacity)) {streams=candidate;break;}
+     int error=Marshal.GetLastWin32Error();if(error!=122 && error!=234) {r.StreamError="Stream query: "+error;break;}
+    }
+    if(streams!=null) {
+     int p=0;
+     while(true) {
+      if(p>streams.Length-24) {r.StreamError="Stream bounds";break;}
+      uint next=BitConverter.ToUInt32(streams,p),length=BitConverter.ToUInt32(streams,p+4);
+      if(length%2!=0 || length>streams.Length-p-24) {r.StreamError="Stream name bounds";break;}
+      r.Streams.Add(new StreamRow {Name=Encoding.Unicode.GetString(streams,p+24,(int)length),Logical=BitConverter.ToInt64(streams,p+8),Allocated=BitConverter.ToInt64(streams,p+16)});
+      if(next==0) break;
+      if(next%8!=0 || next<24+length || next>streams.Length-p-24) {r.StreamError="Stream offset bounds";break;}p+=(int)next;
+     }
+    } else if(r.StreamError==null) r.StreamError="Stream buffer limit";
+    var path=new StringBuilder(32768);uint count=GetFinalPathNameByHandleW(file,path,32768,8);
+    if(count==0 || count>=32768) {r.Error="Path query: "+Marshal.GetLastWin32Error();return r;} r.Path=path.ToString();
+    // Query names only: no file data read or target traversal.
+    uint nameCapacity=32768;var name=new StringBuilder(32768);IntPtr find=FindFirstFileNameW(r.Path,0,ref nameCapacity,name);
+    if(find==new IntPtr(-1)) {r.LinkError="FindFirstFileName: "+Marshal.GetLastWin32Error();return r;}
+    try {
+     do {r.Names.Add(name.ToString());if(r.Names.Count>=4096){r.LinkError="Hard-link enumeration limit";break;}nameCapacity=32768;name.Clear();}
+     while(FindNextFileNameW(find,ref nameCapacity,name));
+     if(r.LinkError==null && Marshal.GetLastWin32Error()!=38) r.LinkError="FindNextFileName: "+Marshal.GetLastWin32Error();
+    } finally {FindClose(find);}
+   }
+  }
+  return r;
+ }
+ public static string Validate(MftApi a,RandomToolkits.DiskV9.MftRecord r,string[] paths) {
+  if(a.Error!=null || a.LinkError!=null || a.StreamError!=null) return a.Error??a.LinkError??a.StreamError;
+  if(a.ReturnedReference!=r.Reference || a.Logical!=r.Bytes || a.Links==0 || a.Links!=paths.Length) return "File identity, size or link count changed.";
+  var expected=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  foreach(string path in paths) {if(path.Length<3 || path[1]!=':') return "Invalid cached path.";expected.Add(path.Substring(2));}
+  if(expected.Count!=paths.Length || a.Names.Count!=paths.Length || !expected.SetEquals(a.Names)) return "Windows links do not match cached MFT paths.";
+  var streams=new Dictionary<string,long>(StringComparer.Ordinal);
+  if(!r.HasData || !r.UnnamedAllocationKnown) return "Unnamed allocation is unavailable.";
+  streams.Add("::$DATA",r.UnnamedAllocated);
+  if(r.NamedStreams!=null) foreach(var s in r.NamedStreams) {
+   string name=":"+s.Name+":$DATA";if(!s.Known || streams.ContainsKey(name)) return "Stream allocation is incomplete.";streams.Add(name,s.Allocated);
+  }
+  if(a.Streams.Count!=streams.Count) return "Windows stream list differs from assembled metadata.";
+  var seen=new HashSet<string>(StringComparer.Ordinal);long total=0;
+  foreach(var s in a.Streams) {long allocated;if(!seen.Add(s.Name) || !streams.TryGetValue(s.Name,out allocated) || s.Allocated!=allocated || s.Allocated<0) return "Windows stream allocation differs from MFT metadata.";if(s.Name=="::$DATA" && s.Logical!=r.Bytes) return "Unnamed stream size changed.";total=checked(total+s.Allocated);}
+  if(total!=r.Allocated) return "Stream allocation total differs.";
+  return null;
+ }
+ public static string Verify(string root,RandomToolkits.DiskV9.MftRecord record,string[] paths) {
+  if(record.Reparse) return "Reparse metadata fallback is disabled.";
+  MftApi first=Query(root,record.Reference);string issue=Validate(first,record,paths);if(issue!=null) return issue;
+  // Repeat independent metadata queries to detect changes during enumeration.
+  MftApi second=Query(root,record.Reference);return Validate(second,record,paths);
+ }
+}
 }

@@ -1,4 +1,4 @@
-# Disk Usage 0.4.2
+# Disk Usage 0.4.3
 
 Read-only drive and folder explorer for PowerShell 5.0+; tested on Windows PowerShell 5.1 and PowerShell 7. Open it from the unified Windows launcher: **Storage > Open disk usage explorer**.
 
@@ -47,3 +47,11 @@ Edit the C# in `MftScanner.cs`, then run `tests/Sync-DiskMft.ps1` to embed it in
 Validation on 2026-11-04: all six live allocation fixtures matched Windows APIs on PowerShell 5.1 and 7.6.5. A read-only C: scan completed in 38.6 seconds: 2,910,817 files, 1,719,663 directories, 756.7 GiB accounted allocation versus 774.8 GiB Windows used, zero parse errors. The remaining 18.1 GiB is not attributed: 40,536 files and 4 metadata directories were omitted, and 1,016 allocations remained unknown. These are machine-specific results, not a completeness or performance guarantee.
 
 Validation for 0.4.2 on 2026-11-05: parser and reconstruction tests passed on PowerShell 5.1 and 7.6.5; live allocation fixtures passed on 5.1. Targeted reads of the reported DLL/catalog records confirmed that their filename lists were complete despite differing header link counts. The full C: scan took 91.8 seconds (5,097,336 records), with zero parse errors, 4,966 FileUnsupported exclusions, 12 intentional FileSystemMetadata exclusions, and 35,541 IncludedLinkCountMismatch diagnostics for files now counted. Accounted allocation was 759.1 GiB against 774.5 GiB used (15.5 GiB difference). The 1,016 uncertain allocations remained: raw metadata access returned 'The request is not supported' on this volume. Successful raw list reading still needs validation on a volume that permits it; failures stay explicit and do not invent totals. Timing is machine/workload-dependent and this run was slower than the previous 38.6-second scan.
+
+## Windows metadata fallback (0.4.3)
+
+When an ordinary file has an unreadable attribute list and incomplete names/allocation, the scanner can verify it through Windows metadata APIs. It opens by file ID with FILE_READ_ATTRIBUTES, OPEN_REPARSE_POINT and OPEN_NO_RECALL; verifies the full record reference, cached hard-link paths, unnamed logical size, stream names and per-stream allocation; then repeats the checks. It accepts only metadata that agrees with the assembled MFT record. Missing paths, changed IDs, incomplete enumeration, access errors or allocation discrepancies remain exclusions/unknowns. Reparse records are deliberately ineligible for this fallback. No file contents are read, and it remains a live scan without snapshot guarantees.
+
+The results screen reports the number verified by this fallback. Failed attempts appear as ApiVerificationFailed alongside the original omission or uncertainty. NTFS system metadata is classified before requiring an unnamed DATA stream.
+
+Validation on 2026-11-05: resident, ordinary, compressed, sparse, named-stream and hard-link fixtures passed on PowerShell 5.1 and 7.6.5. Synthetic tests reject changed identities/paths, extra streams and allocation mismatches, preserve exclusions on API errors, and prevent reparse callbacks. A full C: scan took 45.6 seconds with zero parse errors: FileUnsupported fell from 4,966 to 171; uncertain allocations fell from 1,016 to 534. Three API attempts failed hard-link enumeration with Windows error 50 and remained incomplete. These machine-specific counts are not a guarantee that every file can be recovered.

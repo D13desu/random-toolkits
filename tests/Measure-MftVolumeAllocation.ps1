@@ -7,7 +7,7 @@ try {
     . (Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1') -NoMenu
     $reason=Get-DiskMftUnavailableReason $Drive;if ($reason) {throw $reason}
     Initialize-DiskScanner
-    $worker=[RandomToolkits.DiskV8.MftScanner]::Start([IO.Path]::GetFullPath($Drive))
+    $worker=[RandomToolkits.DiskV9.MftScanner]::Start([IO.Path]::GetFullPath($Drive))
     $last=0
     while (-not $worker.Done) {
         if ($timer.Elapsed.TotalSeconds -gt $TimeoutSeconds -or ($CancelPath -and [IO.File]::Exists($CancelPath))) { $worker.CancelRequested=$true }
@@ -23,7 +23,7 @@ try {
         Status='Complete';Cancelled=$scan.Cancelled;Seconds=[math]::Round($timer.Elapsed.TotalSeconds,1)
         Records=$scan.MftRecordsRead;Files=$scan.Files;Folders=$scan.Nodes.Count
         LogicalBytes=$root.Bytes;AccountedAllocation=$root.Allocated;WindowsUsed=$scan.VolumeUsed;Difference=($scan.VolumeUsed-$root.Allocated)
-        UnknownAllocations=$scan.MftUnknownAllocations;OmittedFiles=$scan.MftOmittedFiles;OmittedDirectories=$scan.MftOmittedDirectories;ParseErrors=$scan.MftRecordErrors
+        ApiVerified=$scan.MftApiVerified;UnknownAllocations=$scan.MftUnknownAllocations;OmittedFiles=$scan.MftOmittedFiles;OmittedDirectories=$scan.MftOmittedDirectories;ParseErrors=$scan.MftRecordErrors
         ContainerFiles=$scan.MftContainerFiles;ContainerLogical=$scan.MftContainerBytes;ContainerAllocated=$scan.MftContainerAllocated
         ReparseFiles=$scan.MftReparseFiles;ReparseDirectories=$scan.MftReparseDirectories;UnknownTags=$scan.MftUnknownTags
         CloudFiles=$scan.MftCloudFiles;CloudLogical=$scan.MftCloudBytes;Causes=$scan.IssueCounts
