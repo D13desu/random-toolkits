@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Toolkit v0.9.2 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.10.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.3.7 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools
@@ -15,13 +15,13 @@ Personal system administration, investigation, and troubleshooting tools.
 irm https://tools.d0xd.com/win | iex
 ```
 
-One entry point: **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**. Network contains overview, connectivity, DNS, AD/time, routing/proxy and firewall checks. Power includes laptop/battery detection, plans, NIC sleep settings, sleep blockers, disk headroom and restart indicators. Storage opens a read-only explorer of drives, folders and files sorted by size. M365 stays separate.
+One entry point: **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**, **8 Toolkit cleanup**, **9 Health dashboard**, **10 Startup apps and scheduled tasks**, **11 Services**, and **12 Windows repair centre**. Network contains overview, connectivity, DNS, AD/time, routing/proxy and firewall checks. Power includes laptop/battery detection, plans, NIC sleep settings, sleep blockers, disk headroom and restart indicators. Storage opens a read-only explorer of drives, folders and files sorted by size. M365 stays separate.
 
 Printing includes inventory, queues, ports/drivers, spooler status and printing events. Group Policy shows applied user/computer results and policy events. Confirmed fixes can restart/start the local spooler or request a scoped policy refresh. Event Logs offers log discovery and a paginated CLI viewer filtered by time, IDs, severity, provider and message text.
 
 The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
 
-**Storage → 2** opens the experimental C# Disk Helper **0.8.1** from the same wrapper. It requires administrator PowerShell 5.1+ and .NET Framework 4.5.1+. The pinned release ZIP is SHA-256 verified before extraction; its client also checks the executable hash and version. The temporary package is removed on exit. **Storage → 1** retains production Disk Usage 0.4.5.
+**Storage â†’ 2** opens the experimental C# Disk Helper **0.8.1** from the same wrapper. It requires administrator PowerShell 5.1+ and .NET Framework 4.5.1+. The pinned release ZIP is SHA-256 verified before extraction; its client also checks the executable hash and version. The temporary package is removed on exit. **Storage â†’ 1** retains production Disk Usage 0.4.5.
 
 Disk Usage 0.4.5 offers native directory scanning and an optional elevated NTFS MFT view with On disk allocation, logical sizes, cached navigation and explicit incomplete totals. See its documentation for allocation semantics and independent Windows API validation.
 
