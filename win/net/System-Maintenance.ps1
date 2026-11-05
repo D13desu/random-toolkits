@@ -23,28 +23,36 @@ function Invoke-PcServiceAction {
     Get-Service -Name $Name -ErrorAction Stop | Select-Object Name,DisplayName,Status | Format-Table | Out-Host
 }
 function Show-PcServiceDetails($Row) {
+    $state=@{}
     while($true){
-        $Row | Format-List * | Out-Host
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$true})
+        $reason=if(-not $availability.Available){$availability.Reason}else{''}
+        $menu=@(
+            New-PcMenuItem 'D' 'Details, account, path and dependencies' 'Check'
+            New-PcMenuItem '1' 'Start service' 'Change' 'Requires confirmation' $reason
+            New-PcMenuItem '2' 'Stop service' 'Change' 'Active dependents block stopping' $reason
+            New-PcMenuItem '3' 'Restart service' 'Change' 'Active dependents block restarting' $reason
+            New-PcMenuItem 'E' 'Related Service Control Manager events' 'Browse' 'Last 24 hours; message match'
+        )
+        $answer=Read-PcCategoryMenu ('Windows > Services > '+$Row.Name) $menu $state ($Row.DisplayName+' | '+$Row.State+' | '+$Row.StartMode)
+        if($answer -eq 'B'){return}
         try{
-            $service=Get-Service -Name $Row.Name -ErrorAction Stop | Where-Object Name -EQ $Row.Name
-            Write-Host ('Requires: '+($service.ServicesDependedOn.Name -join ', '))
-            Write-Host ('Dependents: '+($service.DependentServices.Name -join ', '))
-        }catch{Write-Warning $_.Exception.Message}
-        Write-Host '[1] Start  [2] Stop  [3] Restart (changes require administrator and confirmation)'
-        Write-Host '[E] Related Service Control Manager events (last 24h; message match)  [B/0] Back'
-        $answer=Read-Host 'Select'
-        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
-        try{
-            switch($answer.Trim()){
+            switch($answer){
+                'D'{
+                    $Row | Format-List * | Out-Host
+                    $service=Get-Service -Name $Row.Name -ErrorAction Stop | Where-Object Name -EQ $Row.Name
+                    Write-Host ('Requires: '+($service.ServicesDependedOn.Name -join ', '))
+                    Write-Host ('Dependents: '+($service.DependentServices.Name -join ', '))
+                }
                 '1'{Invoke-PcServiceAction $Row.Name Start}
                 '2'{Invoke-PcServiceAction $Row.Name Stop}
                 '3'{Invoke-PcServiceAction $Row.Name Restart}
                 'E'{Start-PcEventBrowser -DefaultLog System -Quick -InitialProvider 'Service Control Manager' -InitialText $Row.DisplayName}
-                default{Write-Warning 'Choose a listed option.'}
             }
             $updated=@(Get-PcServiceInventory | Where-Object Name -EQ $Row.Name)
-            if(-not $updated.Count){Write-Warning 'Service no longer exists.';return};$Row=$updated[0]
-        }catch{Write-Warning $_.Exception.Message}
+            if(-not $updated.Count){Write-Warning 'Service no longer exists.';Wait-PcMenuReturn;return};$Row=$updated[0]
+        }catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;continue}
+        if($answer -ne 'E'){Wait-PcMenuReturn}
     }
 }
 function Start-PcServices {
@@ -108,16 +116,24 @@ function Invoke-PcWindowsRepair {
     Write-Host ('SFC/CBS log: '+(Join-Path $env:WINDIR 'Logs\CBS\CBS.log'))
 }
 function Start-PcWindowsRepair {
+    $state=@{}
     while($true){
-        Write-Host "`nWINDOWS REPAIR CENTRE | Administrator required for checks and repairs" -ForegroundColor Cyan
-        Write-Host '[1] DISM CheckHealth - previously recorded corruption (quick)'
-        Write-Host '[2] DISM ScanHealth - scan component store, no repair'
-        Write-Host '[3] SFC verify-only - check protected system files, no repair'
-        Write-Host '[4] DISM RestoreHealth - REPAIR component store'
-        Write-Host '[5] SFC scannow - REPAIR protected system files'
-        Write-Host 'Suggested repair order: RestoreHealth, review result, then SFC scannow. Each repair is selected separately.'
-        Write-Host '[B/0] Back'
-        $answer=Read-Host 'Select'
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$true})
+        $reason=if(-not $availability.Available){$availability.Reason}else{''}
+        $definitions=@(
+            @('1','DISM CheckHealth','Check','Previously recorded corruption; quick','CheckHealth'),
+            @('2','DISM ScanHealth','Check','Scan component store; no repair','ScanHealth'),
+            @('3','SFC verify-only','Check','Check protected system files; no repair','VerifyFiles'),
+            @('4','DISM RestoreHealth','Change','Repair component store; confirmation required','RestoreHealth'),
+            @('5','SFC scannow','Change','Repair system files; confirmation required','RepairFiles')
+        )
+        $menu=@(foreach($definition in $definitions){
+            $blocked=$reason;$command=Get-PcRepairCommand $definition[4]
+            if(-not (Test-Path -LiteralPath $command.Path -PathType Leaf)){$blocked='Missing '+$command.Path}
+            if($definition[4] -notin @('VerifyFiles','RepairFiles') -and [Environment]::OSVersion.Version -lt [version]'6.2'){$blocked='Requires Windows 8 / Server 2012 or later'}
+            New-PcMenuItem $definition[0] $definition[1] $definition[2] $definition[3] $blocked
+        })
+        $answer=Read-PcCategoryMenu 'Windows > Repair centre' $menu $state 'Administrator required. Repair order: RestoreHealth, review result, then SFC scannow.'
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         $action=switch($answer.Trim()){'1'{'CheckHealth'} '2'{'ScanHealth'} '3'{'VerifyFiles'} '4'{'RestoreHealth'} '5'{'RepairFiles'}}
         if(-not $action){Write-Warning 'Choose a listed option.';continue}

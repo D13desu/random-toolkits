@@ -77,13 +77,14 @@ function Remove-ToolkitCleanupCandidate($Candidate,[string]$Scope) {
     }
 }
 function Start-ToolkitCleanup {
+    $state=@{}
     while($true){
-        Write-Host "`nTOOLKIT CLEANUP | current account only" -ForegroundColor Cyan
-        Write-Host ' [1] Temporary packages, diagnostic reports and test fixtures'
-        Write-Host ' [2] Download caches (IEEE and cached M365 scripts)'
-        Write-Host ' [3] Both     [B / 0] Back'
-        Write-Host 'Saved exports, M365 reports, registry undo files, installed modules and sign-in sessions are retained.'
-        $answer=Read-Host 'Select'
+        $menu=@(
+            New-PcMenuItem '1' 'Temporary packages, diagnostic reports and test fixtures' 'Change' 'Preview before confirmation'
+            New-PcMenuItem '2' 'Download caches' 'Change' 'IEEE and cached M365 scripts; preview first'
+            New-PcMenuItem '3' 'Temporary files and download caches' 'Change' 'Preview both'
+        )
+        $answer=Read-PcCategoryMenu 'Windows > Toolkit cleanup' $menu $state 'Current account only. User exports, reports, registry undo files and sign-in sessions are retained.'
         if($answer -in @('B','0') -or $null -eq $answer){return}
         $scope=switch($answer){'1'{'Temp'}'2'{'Cache'}'3'{'Both'}default{''}}
         if(-not $scope){continue}
@@ -99,6 +100,6 @@ function Start-ToolkitCleanup {
                 try{Remove-ToolkitCleanupCandidate $item $scope;Write-Host ('Removed: '+$item.Path)}
                 catch{Write-Warning ("Retained or partially removed: {0}: {1}" -f $item.Path,$_.Exception.Message)}
             }
-        }catch{Write-Warning $_.Exception.Message}
+        }catch{Write-Warning $_.Exception.Message}finally{Wait-PcMenuReturn}
     }
 }

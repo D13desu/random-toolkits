@@ -1,4 +1,5 @@
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1')
 . (Join-Path $PSScriptRoot '../win/net/Toolkit-Cleanup.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Fixture=Join-Path $env:TEMP ('cleanup-safety-test-'+[guid]::NewGuid().ToString('N'))

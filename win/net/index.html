@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.10.1
+# Random Toolkits | Windows Toolkit 0.11.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -98,20 +98,18 @@ function Invoke-PcRegistryTweak {
 
 function Start-PcRegistryCategory {
     param([ValidateSet('outlook','rdp')][string]$Id)
+    $state=@{}
     while ($true) {
-        if ($Id -eq 'outlook') {
-            Write-Host "`nOUTLOOK | Classic Outlook PST/OST limits | Current account"
-            Write-Host ' [1] Inspect current size overrides'
-            Write-Host ' [2] Set PST/OST size limit - CHANGES SYSTEM'
-            Write-Host ' [3] Reset size overrides to defaults - CHANGES SYSTEM'
-        } else {
-            Write-Host "`nREMOTE DESKTOP | RDP redirection warning | Machine-wide"
-            Write-Host ' [1] Inspect current warning override'
-            Write-Host ' [2] Restore older warning dialog (administrator) - CHANGES SYSTEM'
-            Write-Host ' [3] Reset warning override to Windows default (administrator) - CHANGES SYSTEM'
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=($Id -eq 'rdp')})
+        $reason=if(-not $availability.Available){$availability.Reason}else{''}
+        if($Id -eq 'outlook'){
+            $title='Windows > Registry > Outlook'
+            $menu=@(New-PcMenuItem '1' 'Inspect current size overrides' 'Check';New-PcMenuItem '2' 'Set PST/OST size limit' 'Change' 'Current account; classic Outlook' $reason;New-PcMenuItem '3' 'Reset size overrides' 'Change' 'Restore defaults' $reason)
+        }else{
+            $title='Windows > Registry > Remote Desktop'
+            $menu=@(New-PcMenuItem '1' 'Inspect warning override' 'Check';New-PcMenuItem '2' 'Restore older RDP warning dialog' 'Change' 'Machine-wide; administrator' $reason;New-PcMenuItem '3' 'Reset RDP warning override' 'Change' 'Windows default; administrator' $reason)
         }
-        Write-Host ' [B / 0] Back to registry tweaks'
-        $answer=Read-Host 'Select'
+        $answer=Read-PcCategoryMenu $title $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         try {
             switch ($answer.Trim()) {
@@ -128,16 +126,15 @@ function Start-PcRegistryCategory {
                 default { Write-Warning 'Choose a listed option.' }
             }
         } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
+        Wait-PcMenuReturn
     }
 }
 
 function Start-PcRegistryMenu {
+    $state=@{}
     while ($true) {
-        Write-Host "`nREGISTRY TWEAKS | PowerShell 5.0+"
-        Write-Host ' [1] Outlook - PST/OST file size limits'
-        Write-Host ' [2] Remote Desktop - RDP warning dialog'
-        Write-Host ' [B / 0] Back'
-        $answer=Read-Host 'Select'
+        $menu=@(New-PcMenuItem '1' 'Outlook' 'Menu' 'PST/OST file size limits';New-PcMenuItem '2' 'Remote Desktop' 'Menu' 'RDP warning dialog')
+        $answer=Read-PcCategoryMenu 'Windows > Registry tweaks' $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-PcRegistryCategory outlook }
@@ -437,36 +434,23 @@ function Get-PcEventLogChoices {
     )
 }
 function Start-PcEventLogMenu {
-    $keyboard=Test-PcEventKeyboard;$selected=0
+    $state=@{}
     while($true){
-        if($keyboard){Clear-Host}
-        Write-Host "`nWINDOWS TOOLKIT > EVENT LOGS" -ForegroundColor Cyan
         $choices=@(Get-PcEventLogChoices)
-        for($i=0;$i -lt $choices.Count;$i++){$marker=if($i -eq $selected){'>'}else{' '};$color=if($i -eq $selected){'Cyan'}else{'Gray'};Write-Host ('{0}[{1}] {2}' -f $marker,($i+1),$choices[$i].Name) -ForegroundColor $color}
-        Write-Host ' [C] Custom log / advanced filters   [L] List/search available logs'
-        Write-Host ' [B / 0] Back'
-        Write-Host 'Choose a log to immediately view its latest 200 events from the last 24 hours. F changes filters inside the browser.'
-        if($keyboard){Write-Host 'Up/Down: select | Enter: open log | Left/Esc: back'}
-        $answer=Read-PcEventChoice $keyboard;$number=0
-        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
-        switch($answer){
-            '@UP'{$selected=[math]::Max(0,$selected-1);continue}
-            '@DOWN'{$selected=[math]::Min($choices.Count-1,$selected+1);continue}
-            '@HOME'{$selected=0;continue}
-            '@END'{$selected=$choices.Count-1;continue}
-            '@ENTER'{$answer=[string]($selected+1)}
-        }
-        if($answer -in @('@UP','@DOWN','@HOME','@END')){continue}
+        $menu=@(for($i=0;$i -lt $choices.Count;$i++){New-PcMenuItem ([string]($i+1)) $choices[$i].Name 'Browse' $choices[$i].Log})
+        $menu+=New-PcMenuItem 'C' 'Custom log / advanced filters' 'Browse'
+        $menu+=New-PcMenuItem 'L' 'List/search available logs' 'Check'
+        $answer=Read-PcCategoryMenu 'Windows > Event Logs' $menu $state 'Presets show the latest 200 candidates from the last 24 hours. F changes filters inside the browser.'
+        if($answer -eq 'B'){return}
         try{
-            if($answer.Trim() -eq 'C'){Start-PcEventBrowser;continue}
-            if($answer.Trim() -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;if($keyboard){$null=Read-Host 'Enter to return'};continue}
-            if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $choices.Count){Write-Warning 'Choose a listed log.';continue}
-            $selected=$number-1;$log=$choices[$selected].Log
+            if($answer -eq 'C'){Start-PcEventBrowser;continue}
+            if($answer -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;Wait-PcMenuReturn;continue}
+            $log=$choices[([int]$answer)-1].Log
             $info=Get-WinEvent -ListLog $log -ErrorAction Stop
-            if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";if($keyboard){$null=Read-Host 'Enter to return'};continue}
+            if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";Wait-PcMenuReturn;continue}
             Start-PcEventBrowser -DefaultLog $log -Quick
-        }catch [OperationCanceledException] {continue}
-        catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message);if($keyboard){$null=Read-Host 'Enter to return'}}
+        }catch [OperationCanceledException]{continue}
+        catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message);Wait-PcMenuReturn}
     }
 }
 
@@ -1276,61 +1260,44 @@ function Get-NetworkItemAvailability {
 
 function Start-NetworkCategory {
     param([string]$Id)
-    $category = Get-NetworkCategories | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
-    if (-not $category) { throw "Unknown category: $Id" }
-    while ($true) {
-        $context = Get-AdContext
-        Write-Host "`n WINDOWS TOOLKIT > $($category.Name.ToUpperInvariant())" -ForegroundColor Cyan
-        if ($Id -eq 'ad') {
-            Write-Host " $($context.Computer) | $($context.Role) | $($context.Domain)"
-            if ($context.Role -eq 'Unknown') { Write-Warning $context.Detail }
-        }
-        $items = @(Get-NetworkMenuItems $category)
-        $section = ''
-        foreach ($item in $items) {
-            $heading = 'CHECKS'
-            $color = 'White'
-            if ($item.Kind -eq 'Repair') { $heading = 'REPAIRS - require confirmation'; $color = 'Yellow' }
-            if ($section -ne $heading) { Write-Host "`n $heading" -ForegroundColor $color; $section=$heading }
-            $entry = $item.Entry
-            $availability = Get-NetworkItemAvailability $item $context
-            $label = "PS $($entry.MinPS)+"
-            if ($entry.Admin) { $label += '; Admin' }
-            if ($item.Kind -eq 'Repair') { $label += '; CHANGES SYSTEM' }
-            if (-not $availability.Available) { $label += '; UNAVAILABLE'; $color='DarkGray' }
-            Write-Host " [$($item.Key)] $($entry.Name) [$label]" -ForegroundColor $color
-            if (-not $availability.Available) { Write-Host "     $($availability.Reason)" -ForegroundColor DarkGray }
-        }
-        Write-Host "`n [B / 0] Back"
-        $answer = Read-Host 'Select'
-        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
-        $item = $items | Where-Object { $_.Key -eq $answer.Trim() } | Select-Object -First 1
-        if (-not $item) { Write-Warning 'Unknown selection'; continue }
-        try {
-            $availability = Get-NetworkItemAvailability $item (Get-AdContext)
-            if (-not $availability.Available) { throw $availability.Reason }
+    $category=Get-NetworkCategories | Where-Object Id -EQ $Id | Select-Object -First 1
+    if(-not $category){throw "Unknown category: $Id"}
+    $state=@{}
+    while($true){
+        $context=Get-AdContext;$items=@(Get-NetworkMenuItems $category)
+        $menu=@(foreach($item in $items){
+            $availability=Get-NetworkItemAvailability $item $context
+            $reason=if(-not $availability.Available){$availability.Reason}else{''}
+            $kind=if($item.Kind -eq 'Repair'){'Change'}else{'Check'}
+            $detail="PowerShell $($item.Entry.MinPS)+"
+            if($item.Entry.Admin){$detail+=' | Administrator'}
+            if($kind -eq 'Change'){$detail+=' | Requires confirmation'}
+            New-PcMenuItem $item.Key $item.Entry.Name $kind $detail $reason
+        })
+        $description=if($Id -eq 'ad'){"$($context.Computer) | $($context.Role) | $($context.Domain)"}else{'Changes require confirmation.'}
+        $answer=Read-PcCategoryMenu ("Windows > "+$category.Name) $menu $state $description
+        if($answer -eq 'B'){return}
+        $item=$items | Where-Object Key -EQ $answer | Select-Object -First 1
+        try{
+            $availability=Get-NetworkItemAvailability $item (Get-AdContext)
+            if(-not $availability.Available){throw $availability.Reason}
             Invoke-InteractiveCheck $item | Format-List | Out-Host
-        } catch [OperationCanceledException] { continue } catch { Write-Warning $_.Exception.Message }
-        if ($item.Entry.Id -in @('disk','disk-helper','event-browser','discovery')) { continue }
-        $null = Read-Host 'Press Enter to return'
+        }catch [OperationCanceledException]{continue}catch{Write-Warning $_.Exception.Message}
+        if($item.Entry.Id -in @('disk','disk-helper','event-browser','discovery')){continue}
+        $null=Read-Host 'Press Enter to return'
     }
 }
 
 function Start-NetworkMenu {
-    while ($true) {
-        Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' WINDOWS TOOLKIT > NETWORK' -ForegroundColor Cyan
-        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
-        Write-Host '============================================' -ForegroundColor Cyan
-        foreach ($category in @(Get-NetworkCategories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { Write-Host " [$($category.Key)] $($category.Name)" }
-        Write-Host "`n [B / 0] Back"
-        Write-Host 'Checks and repairs are grouped by topic. Repairs ask before making changes.' -ForegroundColor DarkGray
-        $selection = Read-Host 'Select'
-        if ($null -eq $selection -or $selection.Trim() -in @('0','B')) { return }
-        # Retain the former AD shortcut for existing users.
-        if ($selection.Trim() -eq 'A') { Start-AdMenu; continue }
-        $category = Get-NetworkCategories | Where-Object { $_.Key -eq $selection.Trim() -and $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') } | Select-Object -First 1
-        if (-not $category) { Write-Warning 'Unknown selection'; continue }
+    $state=@{}
+    while($true){
+        $categories=@(Get-NetworkCategories | Where-Object {$_.Id -in @('overview','connectivity','dns','ad','routing','firewall')})
+        $menu=@($categories | ForEach-Object {New-PcMenuItem $_.Key $_.Name})
+        $menu+=New-PcMenuItem 'A' 'Active Directory shortcut'
+        $answer=Read-PcCategoryMenu 'Windows > Network' $menu $state
+        if($answer -eq 'B'){return}
+        if($answer -eq 'A'){Start-AdMenu;continue}
+        $category=$categories | Where-Object Key -EQ $answer | Select-Object -First 1
         Start-NetworkCategory $category.Id
     }
 }
@@ -1415,13 +1382,14 @@ function Remove-ToolkitCleanupCandidate($Candidate,[string]$Scope) {
     }
 }
 function Start-ToolkitCleanup {
+    $state=@{}
     while($true){
-        Write-Host "`nTOOLKIT CLEANUP | current account only" -ForegroundColor Cyan
-        Write-Host ' [1] Temporary packages, diagnostic reports and test fixtures'
-        Write-Host ' [2] Download caches (IEEE and cached M365 scripts)'
-        Write-Host ' [3] Both     [B / 0] Back'
-        Write-Host 'Saved exports, M365 reports, registry undo files, installed modules and sign-in sessions are retained.'
-        $answer=Read-Host 'Select'
+        $menu=@(
+            New-PcMenuItem '1' 'Temporary packages, diagnostic reports and test fixtures' 'Change' 'Preview before confirmation'
+            New-PcMenuItem '2' 'Download caches' 'Change' 'IEEE and cached M365 scripts; preview first'
+            New-PcMenuItem '3' 'Temporary files and download caches' 'Change' 'Preview both'
+        )
+        $answer=Read-PcCategoryMenu 'Windows > Toolkit cleanup' $menu $state 'Current account only. User exports, reports, registry undo files and sign-in sessions are retained.'
         if($answer -in @('B','0') -or $null -eq $answer){return}
         $scope=switch($answer){'1'{'Temp'}'2'{'Cache'}'3'{'Both'}default{''}}
         if(-not $scope){continue}
@@ -1437,7 +1405,7 @@ function Start-ToolkitCleanup {
                 try{Remove-ToolkitCleanupCandidate $item $scope;Write-Host ('Removed: '+$item.Path)}
                 catch{Write-Warning ("Retained or partially removed: {0}: {1}" -f $item.Path,$_.Exception.Message)}
             }
-        }catch{Write-Warning $_.Exception.Message}
+        }catch{Write-Warning $_.Exception.Message}finally{Wait-PcMenuReturn}
     }
 }
 # END TOOLKIT CLEANUP
@@ -1711,12 +1679,16 @@ function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind
     }
 }
 function Start-PcStartupTaskMenu {
+    $state=@{}
     while($true){
-        Write-Host "`nSTARTUP & SCHEDULED TASKS | READ ONLY" -ForegroundColor Cyan
-        Write-Host ' [1] Startup entries   [2] Scheduled tasks   [3] Task Scheduler event log'
-        Write-Host ' [4] Open Windows Startup Apps settings   [5] Open Task Scheduler'
-        Write-Host ' [B / 0] Back'
-        $answer=Read-Host 'Select'
+        $menu=@(
+            New-PcMenuItem '1' 'Startup entries' 'Browse'
+            New-PcMenuItem '2' 'Scheduled tasks' 'Browse'
+            New-PcMenuItem '3' 'Task Scheduler event log' 'Browse'
+            New-PcMenuItem '4' 'Open Windows Startup Apps settings' 'Open'
+            New-PcMenuItem '5' 'Open Task Scheduler' 'Open'
+        )
+        $answer=Read-PcCategoryMenu 'Windows > Startup and scheduled tasks' $menu $state 'Inventory is read-only; Windows management shortcuts open separately.'
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         try{
             switch($answer.Trim()){
@@ -1727,7 +1699,7 @@ function Start-PcStartupTaskMenu {
                 '5'{Start-Process -FilePath (Join-Path $env:WINDIR 'System32\mmc.exe') -ArgumentList ('"'+(Join-Path $env:WINDIR 'System32\taskschd.msc')+'"') -ErrorAction Stop}
                 default{Write-Warning 'Choose a listed option.'}
             }
-        }catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message}
+        }catch [OperationCanceledException]{}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
     }
 }
 # END STARTUP TASKS
@@ -1758,28 +1730,36 @@ function Invoke-PcServiceAction {
     Get-Service -Name $Name -ErrorAction Stop | Select-Object Name,DisplayName,Status | Format-Table | Out-Host
 }
 function Show-PcServiceDetails($Row) {
+    $state=@{}
     while($true){
-        $Row | Format-List * | Out-Host
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$true})
+        $reason=if(-not $availability.Available){$availability.Reason}else{''}
+        $menu=@(
+            New-PcMenuItem 'D' 'Details, account, path and dependencies' 'Check'
+            New-PcMenuItem '1' 'Start service' 'Change' 'Requires confirmation' $reason
+            New-PcMenuItem '2' 'Stop service' 'Change' 'Active dependents block stopping' $reason
+            New-PcMenuItem '3' 'Restart service' 'Change' 'Active dependents block restarting' $reason
+            New-PcMenuItem 'E' 'Related Service Control Manager events' 'Browse' 'Last 24 hours; message match'
+        )
+        $answer=Read-PcCategoryMenu ('Windows > Services > '+$Row.Name) $menu $state ($Row.DisplayName+' | '+$Row.State+' | '+$Row.StartMode)
+        if($answer -eq 'B'){return}
         try{
-            $service=Get-Service -Name $Row.Name -ErrorAction Stop | Where-Object Name -EQ $Row.Name
-            Write-Host ('Requires: '+($service.ServicesDependedOn.Name -join ', '))
-            Write-Host ('Dependents: '+($service.DependentServices.Name -join ', '))
-        }catch{Write-Warning $_.Exception.Message}
-        Write-Host '[1] Start  [2] Stop  [3] Restart (changes require administrator and confirmation)'
-        Write-Host '[E] Related Service Control Manager events (last 24h; message match)  [B/0] Back'
-        $answer=Read-Host 'Select'
-        if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
-        try{
-            switch($answer.Trim()){
+            switch($answer){
+                'D'{
+                    $Row | Format-List * | Out-Host
+                    $service=Get-Service -Name $Row.Name -ErrorAction Stop | Where-Object Name -EQ $Row.Name
+                    Write-Host ('Requires: '+($service.ServicesDependedOn.Name -join ', '))
+                    Write-Host ('Dependents: '+($service.DependentServices.Name -join ', '))
+                }
                 '1'{Invoke-PcServiceAction $Row.Name Start}
                 '2'{Invoke-PcServiceAction $Row.Name Stop}
                 '3'{Invoke-PcServiceAction $Row.Name Restart}
                 'E'{Start-PcEventBrowser -DefaultLog System -Quick -InitialProvider 'Service Control Manager' -InitialText $Row.DisplayName}
-                default{Write-Warning 'Choose a listed option.'}
             }
             $updated=@(Get-PcServiceInventory | Where-Object Name -EQ $Row.Name)
-            if(-not $updated.Count){Write-Warning 'Service no longer exists.';return};$Row=$updated[0]
-        }catch{Write-Warning $_.Exception.Message}
+            if(-not $updated.Count){Write-Warning 'Service no longer exists.';Wait-PcMenuReturn;return};$Row=$updated[0]
+        }catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;continue}
+        if($answer -ne 'E'){Wait-PcMenuReturn}
     }
 }
 function Start-PcServices {
@@ -1843,16 +1823,24 @@ function Invoke-PcWindowsRepair {
     Write-Host ('SFC/CBS log: '+(Join-Path $env:WINDIR 'Logs\CBS\CBS.log'))
 }
 function Start-PcWindowsRepair {
+    $state=@{}
     while($true){
-        Write-Host "`nWINDOWS REPAIR CENTRE | Administrator required for checks and repairs" -ForegroundColor Cyan
-        Write-Host '[1] DISM CheckHealth - previously recorded corruption (quick)'
-        Write-Host '[2] DISM ScanHealth - scan component store, no repair'
-        Write-Host '[3] SFC verify-only - check protected system files, no repair'
-        Write-Host '[4] DISM RestoreHealth - REPAIR component store'
-        Write-Host '[5] SFC scannow - REPAIR protected system files'
-        Write-Host 'Suggested repair order: RestoreHealth, review result, then SFC scannow. Each repair is selected separately.'
-        Write-Host '[B/0] Back'
-        $answer=Read-Host 'Select'
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$true})
+        $reason=if(-not $availability.Available){$availability.Reason}else{''}
+        $definitions=@(
+            @('1','DISM CheckHealth','Check','Previously recorded corruption; quick','CheckHealth'),
+            @('2','DISM ScanHealth','Check','Scan component store; no repair','ScanHealth'),
+            @('3','SFC verify-only','Check','Check protected system files; no repair','VerifyFiles'),
+            @('4','DISM RestoreHealth','Change','Repair component store; confirmation required','RestoreHealth'),
+            @('5','SFC scannow','Change','Repair system files; confirmation required','RepairFiles')
+        )
+        $menu=@(foreach($definition in $definitions){
+            $blocked=$reason;$command=Get-PcRepairCommand $definition[4]
+            if(-not (Test-Path -LiteralPath $command.Path -PathType Leaf)){$blocked='Missing '+$command.Path}
+            if($definition[4] -notin @('VerifyFiles','RepairFiles') -and [Environment]::OSVersion.Version -lt [version]'6.2'){$blocked='Requires Windows 8 / Server 2012 or later'}
+            New-PcMenuItem $definition[0] $definition[1] $definition[2] $definition[3] $blocked
+        })
+        $answer=Read-PcCategoryMenu 'Windows > Repair centre' $menu $state 'Administrator required. Repair order: RestoreHealth, review result, then SFC scannow.'
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         $action=switch($answer.Trim()){'1'{'CheckHealth'} '2'{'ScanHealth'} '3'{'VerifyFiles'} '4'{'RestoreHealth'} '5'{'RepairFiles'}}
         if(-not $action){Write-Warning 'Choose a listed option.';continue}
@@ -1885,7 +1873,7 @@ function Read-PcMenuInput([bool]$Keyboard) {
         $value=ConvertFrom-PcMenuKey $key
         if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};continue}
         if($value -eq 'Select' -and $digits.Length){return $digits}
-        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p')){return $value}
+        if($value -in @('Up','Down','Select','Back','Previous','Next','First','Last','f','r','b','n','p','a','c','l','e','d')){return $value}
     }
 }
 function Format-PcMenuText {
@@ -1902,7 +1890,8 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.10.1',
+        [string]$Version='0.11.0',
+        [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
@@ -1911,11 +1900,14 @@ function Show-PcMenu {
     )
     # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason.
     # Caller retains State and handles Select/Refresh/Back; no scriptblock is executed here.
-    $ids=@{}
+    $ids=@{};$keys=@{};$ordinal=0
     foreach($item in $Items){
         if([string]::IsNullOrWhiteSpace([string]$item.Id) -or [string]::IsNullOrWhiteSpace([string]$item.Label)){throw 'Menu items require Id and Label.'}
         if($ids.ContainsKey([string]$item.Id)){throw "Duplicate menu item Id: $($item.Id)"}
         $ids[[string]$item.Id]=$true
+        $ordinal++;$key=if($item.Key){[string]$item.Key}else{[string]$ordinal}
+        if($key -notmatch '^(?:[1-9][0-9]*|[ACLED])$' -or $keys.ContainsKey($key)){throw "Invalid or duplicate menu key: $key"}
+        $keys[$key]=[string]$item.Id
     }
     if(-not $State.ContainsKey('Filter')){$State.Filter=''}
     if(-not $State.ContainsKey('SelectedId')){$State.SelectedId=''}
@@ -1927,18 +1919,19 @@ function Show-PcMenu {
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
         $size=$PageSize;$width=100
         if($keyboard){
-            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-9)/2)));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-11)/2)));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             Clear-Host
         }
         $page=[int][math]::Floor($selected/[double]$size)
         Write-Host (Format-PcMenuText ("WINDOWS {0} | {1}" -f $Version,$Title) $width) -ForegroundColor Cyan
+        if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
         if(-not $rows.Count){Write-Host 'No matching items.'}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
-            $row=$rows[$i];$marker=if($i -eq $selected){'>'}else{' '}
+            $row=$rows[$i];$displayKey=($keys.Keys | Where-Object {$keys[$_] -eq [string]$row.Id} | Select-Object -First 1);$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
             $color=if($row.DisabledReason){'DarkGray'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,($i+1),$row.Label,$kind) $width) -ForegroundColor $color
+            Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color
             $detail=if($row.DisabledReason){'UNAVAILABLE: '+$row.DisabledReason}else{[string]$row.Detail}
             Write-Host (Format-PcMenuText ('    '+$detail) $width)
         }
@@ -1965,7 +1958,11 @@ function Show-PcMenu {
             }
             'R'{if($Refreshable){return [pscustomobject]@{Action='Refresh';Item=$null;State=$State}}else{$notice='Refresh is not available in this menu.'}}
             {$_ -in @('SELECT','')}{$open=$true}
-            default{$number=0;if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $rows.Count){$selected=$number-1;$open=$true}else{$notice='Choose a listed item or control.'}}
+            default{
+                $match=-1
+                if($keys.ContainsKey($choice)){for($j=0;$j -lt $rows.Count;$j++){if([string]$rows[$j].Id -eq $keys[$choice]){$match=$j;break}}}
+                if($match -ge 0){$selected=$match;$open=$true}else{$notice='Choose a listed item or control.'}
+            }
         }
         if($selected -ge 0 -and $selected -lt $rows.Count){
             $State.SelectedId=[string]$rows[$selected].Id
@@ -1981,29 +1978,40 @@ function Confirm-PcMenuChange {
     Write-Host $Description
     return ((Read-Host 'Apply this change? [y/N]') -match '^(?i:y|yes)$')
 }
+
+function New-PcMenuItem {
+    param([string]$Key,[string]$Label,[string]$Kind='Menu',[string]$Detail='', [string]$DisabledReason='')
+    [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
+}
+function Read-PcCategoryMenu {
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    $choice=Show-PcMenu -Title $Title -Items $Items -State $State -Description $Description
+    if($choice.Action -eq 'Back'){return 'B'}
+    return [string]$choice.Item.Id
+}
+function Wait-PcMenuReturn {
+    if(Test-PcMenuKeyboard){$null=Read-Host 'Enter to return'}
+}
 # END MENU ENGINE
 
 function Start-WindowsMenu {
+    $state=@{}
     while ($true) {
-        Write-Host "`n============================================" -ForegroundColor Cyan
-        Write-Host ' RANDOM TOOLKITS | WINDOWS 0.10.1' -ForegroundColor Cyan
-        Write-Host " PowerShell $($PSVersionTable.PSVersion) | DIAGNOSE AND REPAIR"
-        Write-Host '============================================' -ForegroundColor Cyan
-        Write-Host ' [9] Health dashboard - start here'
-        Write-Host ' [1] Network - connectivity, DNS, AD, routing, firewall'
-        Write-Host ' [2] Power and device health - battery, plans, NIC sleep'
-        Write-Host ' [3] Storage - drives and folder sizes'
-        Write-Host ' [4] Printing - printers, queues, spooler and events'
-        Write-Host ' [5] Group Policy - results, refresh and events'
-        Write-Host ' [6] Event Logs - filtered CLI viewer'
-        Write-Host ' [7] Registry tweaks - Outlook file limits and RDP warning'
-        Write-Host ' [8] Toolkit cleanup - temporary files and download caches'
-        Write-Host ' [10] Startup apps and scheduled tasks'
-        Write-Host ' [11] Services - inspect, start, stop and restart'
-        Write-Host ' [12] Windows repair centre - DISM and SFC'
-        Write-Host "`n [B / 0] Exit"
-        Write-Host 'Repair options ask before making changes. M365 remains a separate toolkit.' -ForegroundColor DarkGray
-        $answer = Read-Host 'Select'
+        $menu=@(
+            New-PcMenuItem '9' 'Health dashboard' 'Menu' 'Start here'
+            New-PcMenuItem '1' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
+            New-PcMenuItem '2' 'Power and device health'
+            New-PcMenuItem '3' 'Storage'
+            New-PcMenuItem '4' 'Printing'
+            New-PcMenuItem '5' 'Group Policy'
+            New-PcMenuItem '6' 'Event Logs'
+            New-PcMenuItem '7' 'Registry tweaks'
+            New-PcMenuItem '8' 'Toolkit cleanup'
+            New-PcMenuItem '10' 'Startup apps and scheduled tasks'
+            New-PcMenuItem '11' 'Services'
+            New-PcMenuItem '12' 'Windows repair centre'
+        )
+        $answer=Read-PcCategoryMenu 'Windows' $menu $state 'M365 remains separate. Back exits the toolkit.'
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-NetworkMenu }
