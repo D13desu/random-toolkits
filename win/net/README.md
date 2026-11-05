@@ -1,4 +1,6 @@
-# Windows Toolkit 0.6.6
+# Windows Toolkit 0.6.7
+
+Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
 Windows diagnosis and repair, grouped by troubleshooting area. Each submenu separates **CHECKS** from **REPAIRS**, which change system state only after explicit confirmation. No modules are installed and the toolkit does not elevate itself; open PowerShell as administrator to use repairs. Probes send network traffic to the selected host and local gateways. The disk explorer is downloaded on demand from a pinned Git commit and verified with SHA-256 before local execution.
 
@@ -32,7 +34,7 @@ The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **
 
 ## Storage
 
-**1** opens production Disk Usage 0.4.4. **2** opens experimental C# Disk Helper 0.7.0 in MFT mode. After scanning, **A** shows unique-file versus hard-link accounting and separate metadata observations; **E** separates informational diagnostics from exclusions and uncertainty. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
+**1** opens production Disk Usage 0.4.5. **2** opens experimental C# Disk Helper 0.7.1 in MFT mode. After scanning, **A** shows unique-file versus hard-link accounting and separate metadata observations; **E** separates informational diagnostics from exclusions and uncertainty. The experimental option requires administrator rights, PowerShell 5.1+, .NET Framework 4.5.1+ and the built-in archive/hash commands. Missing requirements are shown in the menu; there is no automatic elevation.
 
 The helper downloads from a pinned GitHub release, with the ZIP's SHA-256 checked before extraction. Its client verifies the executable hash and version handshake. It runs from an isolated temporary directory that is removed on exit. No separate `irm` command or permanent installation is required. The noninteractive action ID is `disk-helper`.
 
@@ -49,7 +51,7 @@ Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check
 
 ## Storage
 
-Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.4 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
+Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.5 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
 
 ## Printing
 
