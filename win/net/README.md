@@ -1,4 +1,4 @@
-# Windows Toolkit 0.9.2
+# Windows Toolkit 0.10.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -19,7 +19,7 @@ irm https://tools.d0xd.com/win | iex
 
 ## Menu layout
 
-The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**, **8 Cleanup**, **9 Health dashboard**, **10 Startup/tasks**, **11 Services**, and **12 Windows repair centre**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ Get-PcEventRecords -LogName System -Hours 48 -Ids 7031,7034 -Levels 2,3 -Limit 1
 
 Root option **7 Registry tweaks** has separate **1 Outlook** and **2 Remote Desktop** submenus. Each submenu inspects its own values, applies a tweak, or removes its override to use defaults. Each mutation requires `y`/`yes`, saves a unique `.reg` undo file under `%LOCALAPPDATA%\Random-Toolkits\registry-backups`, then reads back the values. If backup fails, nothing is changed. If a write fails partway through, the error names the undo file. Import it with Registry Editor under the same account (elevated for RDP) to restore the exact previous values, including deleting values that were originally absent. Resetting defaults is distinct from restoring that backup. No unrelated values are removed.
 
-- **Classic Outlook local PST/OST limit:** Office `16.0` current-user preferences, Unicode files only. Choose a whole number of GB (1–1000; default 100). Sets `MaxLargeFileSize` in MB and `WarnLargeFileSize` to 95% of that maximum. This threshold stops adding data; it does not produce an advance warning popup. Close Outlook first. The tool blocks changes when size values exist in the corresponding current-user policy key. Run as the intended Outlook user; elevation under another account targets that account. This does not increase Exchange/Microsoft 365 server mailbox quotas or configure new Outlook. Above 50 GB can reduce performance; archive or reduce cached mail where practical. Resetting after a file has grown beyond the default may prevent adding mail until its size is reduced.
+- **Classic Outlook local PST/OST limit:** Office `16.0` current-user preferences, Unicode files only. Choose a whole number of GB (1â€“1000; default 100). Sets `MaxLargeFileSize` in MB and `WarnLargeFileSize` to 95% of that maximum. This threshold stops adding data; it does not produce an advance warning popup. Close Outlook first. The tool blocks changes when size values exist in the corresponding current-user policy key. Run as the intended Outlook user; elevation under another account targets that account. This does not increase Exchange/Microsoft 365 server mailbox quotas or configure new Outlook. Above 50 GB can reduce performance; archive or reduce cached mail where practical. Resetting after a file has grown beyond the default may prevent adding mail until its size is reduced.
 - **Older RDP redirection warning:** administrator required. Sets `HKLM\Software\Policies\Microsoft\Windows NT\Terminal Services\Client\RedirectionWarningDialogVersion` to DWORD `1`. This machine-wide compatibility setting reduces the newer resource-consent protection for connections opened from RDP files; it does not turn off certificate validation or NLA. Use for trusted connections. Microsoft may remove support in a future update. Reset deletes the override; managed policy can reapply it. Start a new connection after changing it.
 
 Sources: [Microsoft Outlook size configuration](https://learn.microsoft.com/en-us/microsoft-365-apps/outlook/data-files/configure-size-limit-outlook-data-files), [Microsoft RDP warning documentation](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/remotepc/understanding-security-warnings), and the [requested LazyAdmin walkthrough](https://lazyadmin.nl/it/fix-remote-desktop-security-warning/).
@@ -234,7 +234,7 @@ Event browsing in 0.7.4 supports Up/Down in both the log picker and event list; 
 
 ## Windows health dashboard
 
-Menu **9: Health dashboard — start here** collects a read-only local snapshot, sorted by WARN, REVIEW, UNAVAILABLE, INFO and PASS. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership.
+Menu **9: Health dashboard â€” start here** collects a read-only local snapshot, sorted by WARN, REVIEW, UNAVAILABLE, INFO and PASS. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership.
 
 Up/Down selects a finding; Enter shows evidence and offers its related checks/repair menu. N/P pages; R refreshes; B/Esc returns. Repairs retain existing admin/role requirements and yes/no confirmation; collection never invokes repair functions. Missing permissions/providers become UNAVAILABLE, not a pass. Trigger-start services and historic failures are REVIEW items; Balanced is informational. Unaddressed virtual/filter interfaces are grouped to avoid false fault floods. PASS applies only to the stated check, not the entire PC.
 
@@ -253,3 +253,16 @@ The scheduled-task view shows state, last/next run, missed runs, unsigned hexade
 Up/Down and Enter navigate; N/P pages; F filters literal name/location text; C toggles all versus review/unavailable entries; R refreshes; B/Esc returns. Selecting an item displays its full metadata. There are no run/disable/delete actions in this browser. The management shortcuts open the standard Windows interfaces only when chosen.
 
 Tests on PowerShell 5.1 and 7 cover path ambiguity, missing files, network/user-context paths, scheduler informational codes, unsigned/signed results, per-task permission failures, filtering and navigation. A live read-only sample inspected 19 startup entries and 212 visible tasks in 2.45 seconds; counts and speed vary by PC. Maintain Startup-Tasks.ps1 and run tests/Sync-StartupTasks.ps1 to update the embedded launcher and Pages endpoints.
+
+
+## Services and Windows repair centre (0.10.0)
+
+Root **11 Services** lists local Win32 services with state, startup mode and executable command. Arrow keys select; Enter opens service account, description, dependencies and actions. F filters name/display name/path, R refreshes, N/P page, B/Esc returns. Start/stop/restart require administrator rights and yes/no confirmation. Stop/restart refuse active dependents and never use Force. The toolkit does not alter startup types. Starting a service can start its prerequisites; stopping services may interrupt applications or connectivity. Windows enforces service permissions and protected-service restrictions.
+
+The detail view opens the existing event browser on System / Service Control Manager, matching the service display name in rendered messages. This is a last-24-hours, capped-candidate search, not a comprehensive service history; localized messages or missing rendered text can omit matches. Filters remain available in the event viewer.
+
+Root **12 Windows repair centre** offers DISM CheckHealth (recorded corruption), ScanHealth (component-store scan), SFC /verifyonly, DISM RestoreHealth, and SFC /scannow. All require elevation. Only repairs ask for confirmation; checks do not repair but Windows may write diagnostic logs. Repair choices are separate: review DISM RestoreHealth results before selecting SFC scannow. DISM may obtain repair content from Windows Update or configured sources; custom source selection is not included in this version. The toolkit never automatically reboots or resets Windows Update components.
+
+Native output stays visible until Enter returns to the menu. Exit code, elapsed time and DISM/CBS log paths are shown. A zero exit code is not interpreted as proof of a healthy system, and 3010 is reported as restart required. Commands use explicit Windows system binary paths, including Sysnative for a 32-bit process on 64-bit Windows; health commands require Windows 8 / Server 2012 or later. Source: [Microsoft's Windows image repair guidance](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/repair-a-windows-image) and [System File Checker guidance](https://support.microsoft.com/en-us/windows/experience/backup-recovery/using-system-file-checker-in-windows).
+
+Maintain `System-Maintenance.ps1`, then run `tests/Sync-SystemMaintenance.ps1` to update the embedded launcher and Pages copies. `tests/Test-SystemMaintenance.ps1` mocks all service mutations and native repairs, checking confirmations, elevation, dependent-service protection, fixed arguments and navigation. No live repair or service mutation is performed by the tests.
