@@ -46,5 +46,21 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
     $old='foreach(var list in Result.CachedRows.Values) foreach(Row row in list) row.Partial=true;'
     if(([regex]::Matches($Source,[regex]::Escape($old))).Count -ne 2){throw 'Late partial-result adaptation anchors changed.'}
     $Source=$Source.Replace($old,'if(Result.DirectRows!=null) Result.DirectRows.Rows.ForcePartial=true;else '+$old)
+    $Source=Replace-One $Source 'new RandomToolkits.HelperExperiment.DirectRows(root):null' 'new RandomToolkits.HelperExperiment.DirectRows(root,ScanProfile.Current.UseCompactFolders):null'
+    $Source=Replace-One $Source 'if(s.Nodes.ContainsKey(path))' 'if(direct!=null && direct.CompactFolders?direct.Ids.ContainsKey(path):s.Nodes.ContainsKey(path))'
+    $Source=Replace-One $Source 'paths.Add(r.Reference,path); s.Nodes.Add(path,new Node {Path=path,Parent=parent,Allocated=r.Allocated,AllocationUnknown=!r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null});' 'paths.Add(r.Reference,path); if(direct==null || !direct.CompactFolders) s.Nodes.Add(path,new Node {Path=path,Parent=parent,Allocated=r.Allocated,AllocationUnknown=!r.AllocationKnown,ReparseTag=r.Reparse?Tag(r):null});'
+    $Source=Replace-One $Source 's.Nodes[parent].Children.Add(path);' 'if(direct==null || !direct.CompactFolders) s.Nodes[parent].Children.Add(path);'
+    $Source=Replace-One $Source 'else direct.AddFolder(path,parent);' 'else {direct.AddFolder(path,parent);if(direct.CompactFolders) direct.SetMetadata(path,r.Allocated,!r.AllocationKnown,r.Reparse?Tag(r):null);}'
+    if($ReleaseRecords){$Source=Replace-One $Source 'dirs.Clear(); pending.Clear(); ScanProfile.MarkCurrent("file paths and API verification");' 'dirs.Clear(); pending.Clear(); if(direct!=null && direct.CompactFolders) {ScanProfile.MarkCurrent("retiring directory records");for(int retire=0;retire<records.Length;retire++)if(records[retire]!=null && records[retire].Directory)records[retire]=null;System.GC.Collect(2,System.GCCollectionMode.Forced,true,true);} ScanProfile.MarkCurrent("file paths and API verification");'}
+    $old="long bytes=charged?0:r.Bytes; var node=s.Nodes[pair.Value]; node.Bytes=checked(node.Bytes+bytes);`n     long allocated=charged?0:r.Allocated;node.Allocated=checked(node.Allocated+allocated);"
+    $new='long bytes=charged?0:r.Bytes,allocated=charged?0:r.Allocated; Node node=null; if(direct!=null && direct.CompactFolders) direct.Charge(pair.Value,bytes,allocated,!charged,!charged && !r.AllocationKnown);else {node=s.Nodes[pair.Value];node.Bytes=checked(node.Bytes+bytes);node.Allocated=checked(node.Allocated+allocated);}'
+    $Source=Replace-One $Source $old $new
+    $Source=Replace-One $Source 'node.Files++;s.Files++;' 'if(node!=null) node.Files++;s.Files++;'
+    $Source=Replace-One $Source 'node.AllocationUnknown=true;s.MftUnknownAllocations++;' 'if(node!=null) node.AllocationUnknown=true;s.MftUnknownAllocations++;'
+    $Source=Replace-One $Source 'var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);' 'if(direct!=null && direct.CompactFolders) {if(cancelled) Issue(s,root,"Cancelled: only records read so far are included; unresolved paths are omitted.");direct.Aggregate(s);}else {var order=new System.Collections.Generic.List<Node>(s.Nodes.Values);'
+    $Source=Replace-One $Source 's.Finished=System.DateTime.Now; return s;' '} s.Finished=System.DateTime.Now; return s;'
+    $old='if(Result.DirectRows!=null) Result.DirectRows.Rows.ForcePartial=true;'
+    if(([regex]::Matches($Source,[regex]::Escape($old))).Count -ne 2){throw 'Compact folder partial anchors changed.'}
+    $Source=$Source.Replace($old,'if(Result.DirectRows!=null) {Result.DirectRows.Rows.ForcePartial=true;Result.DirectRows.Folders.ForcePartial=true;}')
     return $prefix+$Source+$suffix
 }

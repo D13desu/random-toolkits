@@ -1,4 +1,4 @@
-# Standalone disk helper experiment 0.4.0
+# Standalone disk helper experiment 0.5.0
 
 An opt-in C# executable with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
 
@@ -37,6 +37,8 @@ The build invokes the installed .NET Framework csc.exe, producing an AnyCPU exec
 
 Transform-Engine.ps1 applies experiment-only profiling hooks and storage adaptations to the extracted MFT block. Every replacement checks its expected occurrence count and fails the build if the maintained source changes unexpectedly. Production sources and launcher pins are untouched. Build with `-BaselineStorage -OutputDirectory out/baseline` to retain original filename storage, record lifetimes and row caching while keeping profiling hooks. `-LegacyRows -OutputDirectory out/legacy` keeps the 0.3.0 record-storage improvements but restores the intermediate row cache. Both comparison modes use the current final heap cleanup. The manifest records the storage mode and generated engine hash.
 
+`-LegacyFolders -OutputDirectory out/legacy-folders` retains direct rows but uses intermediate folder objects and child lists for comparison. The default build uses compact folder records.
+
 ## Protocol
 
 UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper emits a versioned hello, then exactly one response per request. Progress is polled, so unsolicited output cannot interleave with replies.
@@ -55,6 +57,16 @@ UTF-8 JSON lines over redirected stdin/stdout, no network listener. The helper e
 Requests are limited to 64 KiB. Only paths in the cached scan can be browsed. All MFT file rows stay in C# memory; native mode caches the current directory listing. No write/delete/repair command exists.
 
 ## Validation and measured limits
+
+### 0.5.0: compact folder records
+
+Folders now use fixed-size blocks containing parent IDs, child-row links, totals and flags. The worker retains only the root compatibility Node, avoiding a Node, child list and duplicate path-index entry for every other folder. Parents are created before children during path resolution; reverse folder IDs provide a validated aggregation order without sorting folder objects. Browsing reuses these records directly, removing folder-summary conversion. Parsed directory records are released after path resolution, followed by a measured blocking collection before file processing. Full directory paths remain retained for now.
+
+The shared MFT regression suite passes against the compact folder path on PowerShell 5.1 and 7. Its test adapter verifies that reconstruction retained only the root Node before materializing results for the assertions. An additional 4,206-folder fixture crosses block boundaries and compares every folder total, parent, row, sort order, reparse tag and uncertainty flag against legacy tree reconstruction; input records are reversed to exercise parent resolution. Existing 15,640-row cache tests and protocol suites also pass.
+
+An elevated C: memory run on the user's PC measured 4.59 GiB peak working set and 36.99 seconds to browsing, compared with the previous 0.4.0 samples of 5.47 GiB and 40.69 seconds. Completed browsing memory remained about 1.71 GiB; this step mostly removes temporary objects and aggregation/conversion work. Folder-index transfer takes about 2 milliseconds. An earlier compact-folder build without early directory retirement peaked at 5.28 GiB and finished in 34.85 seconds: the added collection trades about two seconds for lower peak memory. These are live-volume samples, not a controlled benchmark. Removing retained full directory paths is the next memory target.
+
+The final live comparison matched the hard-link fixture exactly and reported the same 2,949,730 files and diagnostic counts as the embedded engine: 366 unknown allocations, 5,612 API-verified records and zero parse errors. Whole-volume byte totals differed slightly with live filesystem activity. The helper was ready in 37.08 seconds. Final cancellation checks passed during collection (167 ms) and reconstruction (7.46 seconds), including partial flags on packed folder and file rows.
 
 ### 0.4.0: direct compact rows
 

@@ -17,14 +17,17 @@ namespace RandomToolkits.HelperExperiment {
   readonly Folder[] folders;
   readonly Entry[] entries;
   readonly PackedRows packed;
+  readonly PackedFolders packedFolders;
   public string Root {get;private set;}
   internal static readonly string[] Kinds={"DIR","FILE","LINK","RP","WCI"};
-  public int FolderCount {get{return folders.Length;}}
+  public int FolderCount {get{return packedFolders!=null?packedFolders.Count:folders.Length;}}
   public int RowCount {get{return packed!=null?packed.Count:entries.Length;}}
   internal CompactIndex(Scan scan,DirectRows direct) {
-   Root=scan.Root;ids=direct.Ids;paths=direct.Paths.ToArray();folders=new Folder[paths.Length];packed=direct.Rows;
+   Root=scan.Root;ids=direct.Ids;paths=direct.Paths.ToArray();packed=direct.Rows;
+   if(direct.CompactFolders){packedFolders=direct.Folders;return;}
+   folders=new Folder[paths.Length];
    for(int id=0;id<paths.Length;id++) {
-    Node node=scan.Nodes[paths[id]];var chain=direct.Chains[id];
+    Node node=scan.Nodes[paths[id]];var chain=direct.Folders.Get(id);
     folders[id]=new Folder {Parent=node.Parent==null?-1:ids[node.Parent],Start=chain.Head,Count=chain.Count,
      Logical=node.Bytes,Allocated=node.Allocated,Files=node.Files,Partial=node.Partial,Unknown=node.AllocationUnknown};
    }
@@ -51,10 +54,10 @@ namespace RandomToolkits.HelperExperiment {
    }
   }
   public bool Find(string path,out int id){return ids.TryGetValue(path,out id);}
-  public Folder GetFolder(int id){return folders[id];}
+  public Folder GetFolder(int id){if(packedFolders==null)return folders[id];var folder=packedFolders.Get(id);return new Folder {Parent=folder.Parent,Start=folder.Head,Count=folder.Count,Logical=folder.Logical,Allocated=folder.Allocated,Files=folder.Files,Partial=folder.Partial,Unknown=folder.Unknown};}
   public string GetPath(int id){return paths[id];}
   public int[] Sort(int id,string sort) {
-   Folder folder=folders[id];int[] order=new int[folder.Count];
+   Folder folder=GetFolder(id);int[] order=new int[folder.Count];
    int next=folder.Start;
    for(int i=0;i<order.Length;i++){order[i]=packed==null?folder.Start+i:next;if(packed!=null)next=packed.Next(next);}
    Array.Sort(order,delegate(int a,int b){

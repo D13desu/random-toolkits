@@ -18,8 +18,16 @@ namespace RandomToolkits.HelperExperiment {
   internal int Next(int index){return links[index>>Shift][index&Mask];}
   internal void Link(int index,int next){links[index>>Shift][index&Mask]=next;}
  }
+ internal sealed class PackedFolders {
+  internal struct Item {internal int Parent,Head,Tail,Count;internal long Logical,Allocated,Files;internal bool Unknown,Partial;}
+  const int Shift=12,Size=1<<Shift,Mask=Size-1;
+  readonly List<Item[]> blocks=new List<Item[]>();
+  internal int Count;internal bool ForcePartial;
+  internal void Add(Item item){if(Count==Int32.MaxValue)throw new InvalidOperationException("Too many folders.");if((Count&Mask)==0)blocks.Add(new Item[Size]);blocks[Count>>Shift][Count&Mask]=item;Count++;}
+  internal Item Get(int id){var item=blocks[id>>Shift][id&Mask];if(ForcePartial)item.Partial=true;return item;}
+  internal void Set(int id,Item item){blocks[id>>Shift][id&Mask]=item;}
+ }
  internal sealed class DirectRows {
-  internal struct Chain {internal int Head,Tail,Count;}
   struct Key : IEquatable<Key> {
    internal int Parent; internal string Name;
    public bool Equals(Key other){return Parent==other.Parent && StringComparer.OrdinalIgnoreCase.Equals(Name,other.Name);}
@@ -28,13 +36,16 @@ namespace RandomToolkits.HelperExperiment {
   }
   internal readonly Dictionary<string,int> Ids=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
   internal readonly List<string> Paths=new List<string>();
-  internal readonly List<Chain> Chains=new List<Chain>();
+  internal readonly PackedFolders Folders=new PackedFolders();
+  internal readonly bool CompactFolders;
+  List<string> folderTags=new List<string>();
   internal readonly PackedRows Rows=new PackedRows();
   HashSet<Key> occupied=new HashSet<Key>();
   readonly Dictionary<string,string> tags=new Dictionary<string,string>(StringComparer.Ordinal);
-  internal DirectRows(string root){AddFolder(root,null);}
+  internal DirectRows(string root):this(root,false){}
+  internal DirectRows(string root,bool compactFolders){CompactFolders=compactFolders;AddFolder(root,null);}
   internal void AddFolder(string path,string parent){
-   int id=Paths.Count;Ids.Add(path,id);Paths.Add(path);Chains.Add(new Chain {Head=-1,Tail=-1});
+   int id=Paths.Count,parentId=parent==null?-1:Ids[parent];Ids.Add(path,id);Paths.Add(path);Folders.Add(new PackedFolders.Item {Parent=parentId,Head=-1,Tail=-1});folderTags.Add(null);
    if(parent!=null) occupied.Add(new Key {Parent=Ids[parent],Name=Path.GetFileName(path)});
   }
   internal bool Occupy(string parent,string name){return occupied.Add(new Key {Parent=Ids[parent],Name=name});}
@@ -43,8 +54,20 @@ namespace RandomToolkits.HelperExperiment {
    if(code<0) throw new InvalidOperationException("Unknown compact row kind.");
    if(tag!=null){string shared;if(tags.TryGetValue(tag,out shared)) tag=shared;else tags.Add(tag,tag);}
    int index=Rows.Add(new CompactIndex.Entry {Name=name,Tag=tag,Kind=(byte)code,Logical=logical,Allocated=allocated,Flags=(byte)((partial?1:0)|(unknown?2:0))});
-   var chain=Chains[id];if(chain.Tail>=0) Rows.Link(chain.Tail,index);else chain.Head=index;
-   chain.Tail=index;chain.Count++;Chains[id]=chain;
+   var chain=Folders.Get(id);if(chain.Tail>=0) Rows.Link(chain.Tail,index);else chain.Head=index;
+   chain.Tail=index;chain.Count++;Folders.Set(id,chain);
+  }
+  internal void SetMetadata(string path,long allocated,bool unknown,string tag){int id=Ids[path];var folder=Folders.Get(id);folder.Allocated=allocated;folder.Unknown=unknown;Folders.Set(id,folder);folderTags[id]=tag;}
+  internal void Charge(string path,long logical,long allocated,bool file,bool unknown){int id=Ids[path];var folder=Folders.Get(id);folder.Logical=checked(folder.Logical+logical);folder.Allocated=checked(folder.Allocated+allocated);if(file)folder.Files++;folder.Unknown|=unknown;Folders.Set(id,folder);}
+  internal void Aggregate(Scan scan){
+   // Resolution creates parents before children. Reverse IDs are a topological order.
+   for(int id=Folders.Count-1;id>0;id--){var child=Folders.Get(id);if(child.Parent<0 || child.Parent>=id)throw new InvalidOperationException("Invalid compact parent order.");var parent=Folders.Get(child.Parent);
+    parent.Logical=checked(parent.Logical+child.Logical);parent.Allocated=checked(parent.Allocated+child.Allocated);parent.Files=checked(parent.Files+child.Files);parent.Unknown|=child.Unknown;Folders.Set(child.Parent,parent);
+   }
+   Folders.ForcePartial=scan.IssueCount>0;
+   for(int id=1;id<Folders.Count;id++){var folder=Folders.Get(id);Add(Paths[folder.Parent],Path.GetFileName(Paths[id]),"DIR",folder.Logical,folder.Allocated,folder.Unknown,folder.Partial,folderTags[id]);}
+   folderTags=null;
+   var totals=Folders.Get(0);var root=scan.Nodes[scan.Root];root.Bytes=totals.Logical;root.Allocated=totals.Allocated;root.Files=totals.Files;root.AllocationUnknown=totals.Unknown;root.Partial=totals.Partial;
   }
   internal void EndFiles(){occupied=null;}
  }
