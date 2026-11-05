@@ -1,4 +1,4 @@
-# Windows Toolkit 0.7.1
+# Windows Toolkit 0.7.2
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -211,3 +211,15 @@ D toggles MAC and TCP-detail views. M looks up a MAC manually; colon, hyphen, do
 The [IEEE public MA-L, MA-M and MA-S registries](https://standards.ieee.org/products-programs/regauth/) are downloaded over HTTPS and cached under `%LOCALAPPDATA%\Random-Toolkits\oui`. Matching prefers /36, then /28, then /24. No discovered IP or MAC is sent to IEEE. Cache refresh is attempted after 30 days, with at least 24 hours between attempts; a failed refresh retains the last valid data. With no data, discovery continues and reports lookup unavailable. The neighbor table is read using [Get-NetNeighbor](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netneighbor); unavailable neighbor support does not block scanning. Local/randomized MACs deliberately receive no IEEE vendor inference.
 
 Use `tests/Sync-NetworkDiscovery.ps1` after editing the maintained module. Tests cover synthetic prefixes, special MACs, ambiguous interfaces, missing/routed neighbors, cache downloads, offline fallback and retry throttling on PowerShell 5.1 and 7.
+
+## Toolkit cleanup
+
+Windows menu **8** previews recognized temporary packages, local diagnostic reports and test fixtures, download caches, or both. It lists each candidate path, size and eligibility before a yes/no deletion prompt. Only the current account's resolved TEMP directory and `%LOCALAPPDATA%\Random-Toolkits` are considered. This is not a general Windows Temp cleaner.
+
+Normal disk-launcher exits already remove their downloaded packages. Diagnostic JSON reports may contain local file paths and machine details. Network/M365 exports can contain sensitive data; being in TEMP does not make a file harmless. The OUI cache contains public IEEE assignments.
+
+Cleanup preserves user-chosen exports, M365 reports, registry undo files, installed modules and authentication sessions. It recognizes specific toolkit package/test naming patterns and toolkit diagnostic-report prefixes; it does not search arbitrary locations or remove the source repository/build output. The cache option removes the IEEE cache and known cached M365 script files, retaining the M365 reports subdirectory. Removing the IEEE cache requires a later download for vendor lookup.
+
+Items modified within ten minutes, helper packages while DiskHelper is running, inaccessible paths, and trees containing links/reparse points are skipped. Paths and contents are revalidated after confirmation. Deletion is nonrecursive, permanent and not a secure erase. A failure can leave partially removed contents and is reported. No existing reports/caches were removed while implementing this option; validation used isolated synthetic fixtures.
+
+Maintain `win/net/Toolkit-Cleanup.ps1`, then run `tests/Sync-ToolkitCleanup.ps1` to update its embedded launcher block and Pages copies. `tests/Test-ToolkitCleanup.ps1` verifies boundaries, links, preservation, changed contents, active/recent items and declined confirmation on PowerShell 5.1 and 7.
