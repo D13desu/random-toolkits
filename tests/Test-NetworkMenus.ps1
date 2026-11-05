@@ -47,3 +47,6 @@ function Invoke-InteractiveCheck { param($Item) }
 foreach ($answer in @('1','2','b')) { $script:Answers.Enqueue($answer) }
 Start-NetworkCategory storage
 Assert-True ($script:Answers.Count -eq 0) 'Both disk tools return directly to Storage without an extra pause'
+foreach ($answer in @('8','B','0')) { $script:Answers.Enqueue($answer) }
+Start-WindowsMenu
+Assert-True ($script:Answers.Count -eq 0) 'Cleanup is reachable and returns to the Windows menu without deleting'
