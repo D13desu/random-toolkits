@@ -591,8 +591,8 @@ function Get-PcQualityChecks {
 }
 
 function Start-PcDiskExplorer {
-    $revision='10efb47886b97a1619756f297d7d6bbf7d3b1295'
-    $expected='827A4432D7DF2DF66C2E048331268F5D806A38A601641C07FC88D2B9DE21E3F2'
+    $revision='eb3227bcdb8d6d8b91e8fc8b72aa6cc2d62e1b76'
+    $expected='2528D695914F46FF8D0B60510DC8C5CC47FAE5EC844658957815DE0EB0CD7507'
     $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
     try {
         Write-Host 'Downloading verified Disk Usage 0.4.6 from D13desu/random-toolkits...'
