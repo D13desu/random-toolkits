@@ -2069,7 +2069,7 @@ function Show-PcMenu {
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
-        [ValidateRange(1,100)][int]$PageSize=12,
+        [ValidateRange(1,100)][int]$PageSize=100,
         [switch]$Plain,
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,

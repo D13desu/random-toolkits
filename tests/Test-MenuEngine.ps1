@@ -36,6 +36,7 @@ Feed @('','yes');Assert (-not (Confirm-PcMenuChange 'Fixture')) 'Changes default
 Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters cannot inject terminal commands'
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
 Assert ((Get-PcMenuPageSize 29 1 12) -eq 10) 'A 29-row two-line browser uses ten items'
+Assert ((Get-PcMenuPageSize 49 1 100) -eq 20) 'Tall terminals are not artificially capped at twelve items'
 Assert ((Get-PcMenuPageSize 29 3 20) -eq 5) 'Expanded previews account for all detail lines'
 Assert ((Get-PcMenuPageSize 12 1 12) -eq 1) 'Very short terminals retain at least one item'
 $script:Output.Clear()

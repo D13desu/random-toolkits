@@ -338,7 +338,7 @@ Root, section and action menus now use compact numbered selection (number/shortc
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
-Scrollable browsers calculate page size from the current terminal height and the number of preview lines per item. Nine rows are reserved for headings, controls, wrapping and the selection prompt; a typical 29-row connection view therefore shows ten two-line entries, capped by the browser's configured maximum.
+Scrollable browsers calculate page size from the current terminal height and the number of preview lines per item. Nine rows are reserved for headings, controls, wrapping and the selection prompt; a typical 29-row connection view therefore shows ten two-line entries. The shared default maximum is 100, so terminal height normally determines the page size; individual browsers can still request a smaller cap.
 
 
 ### Compact hybrid menus (0.14.2)
