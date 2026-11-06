@@ -1,4 +1,4 @@
-# Windows Toolkit 0.14.3
+# Windows Toolkit 0.15.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -336,7 +336,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.14.3`; submenus retain `WINDOWS 0.14.3 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.15.0`; submenus retain `WINDOWS 0.15.0 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -353,3 +353,8 @@ Navigation and action menus accept both arrow selection plus Enter and existing 
 ### Visible numeric input (0.14.3)
 
 Interactive shared menus display `Selection: _` beneath their controls. Typed digits appear immediately, Backspace edits them, and Enter submits the number. Enter with no digits activates the highlighted row. Esc cancels and returns. Each new prompt starts with an empty numeric buffer. This retains unambiguous selection of 1 versus 10/11/12; unsupported consoles continue to use visible Read-Host input.
+
+
+### Toolkit build and browser refresh (0.15.0)
+
+The Windows Toolkit now ships the maintained registry module through the generated launcher, uses automated site builds for synchronized downloadable copies, applies semantic field colours across data-heavy browsers, scales result pages to the available terminal height with a maximum of 100 entries, and repaints only changed rows during same-page cursor movement.

@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.14.3
+# Random Toolkits | Windows Toolkit 0.15.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2035,7 +2035,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.14.3')
+    param([string]$Title,[string]$Version='0.15.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2102,7 +2102,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.3',
+        [string]$Version='0.15.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
