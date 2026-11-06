@@ -1,4 +1,4 @@
-# Windows Toolkit 0.15.0
+# Windows Toolkit 0.16.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -336,7 +336,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.15.0`; submenus retain `WINDOWS 0.15.0 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.16.0`; submenus retain `WINDOWS 0.16.0 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -358,3 +358,10 @@ Interactive shared menus display `Selection: _` beneath their controls. Typed di
 ### Toolkit build and browser refresh (0.15.0)
 
 The Windows Toolkit now ships the maintained registry module through the generated launcher, uses automated site builds for synchronized downloadable copies, applies semantic field colours across data-heavy browsers, scales result pages to the available terminal height with a maximum of 100 entries, and repaints only changed rows during same-page cursor movement.
+
+
+### Microsoft Sysinternals Live shortcuts (0.16.0)
+
+The main menu includes a Microsoft Sysinternals Live section for Process Explorer, Process Monitor, Autoruns, TCPView, RAMMap, WinObj, VMMap, DebugView, ZoomIt and Disk2vhd. Each entry launches the architecture-appropriate executable directly from Microsoft's `\\live.sysinternals.com\tools` WebDAV share; ARM64 tools use its `ARM64` folder. The toolkit does not download, cache, redistribute, auto-elevate or auto-accept the EULA for these binaries.
+
+The section can also open the complete tools share for command-line and specialist utilities. Sysmon, SDelete, PsExec and other service-changing, destructive or argument-sensitive programs are deliberately not one-click actions. Sysinternals Live requires internet and WebDAV access and may be blocked by corporate policy, proxy settings or the Windows WebClient service.
