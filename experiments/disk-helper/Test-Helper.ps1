@@ -8,6 +8,7 @@ try {
     $fixture=Join-Path $env:TEMP ('toolkit-helper-'+[guid]::NewGuid().ToString('N'))
     $null=[IO.Directory]::CreateDirectory((Join-Path $fixture 'nested'))
     [IO.File]::WriteAllBytes((Join-Path $fixture 'nested/large.bin'),[byte[]]::new(20000))
+    (Get-Item -LiteralPath (Join-Path $fixture 'nested')).LastWriteTime=[datetime]'2020-02-03T12:00:00'
     $unicodeName='caf'+[char]0xE9+'-'+[char]0x6F22+[char]0x5B57+'.bin'
     [IO.File]::WriteAllBytes((Join-Path $fixture $unicodeName),[byte[]]::new(123))
     for($i=0;$i -lt 45;$i++){[IO.File]::WriteAllBytes((Join-Path $fixture ('file-{0:D2}.bin' -f $i)),[byte[]]::new($i+1))}
@@ -24,6 +25,7 @@ try {
     Assert ($null -eq (Invoke-DiskHelper $session @{command='profile'}).scan) 'Native scans do not fabricate MFT phase measurements'
     $first=Invoke-DiskHelper $session @{command='list';limit=20}
     Assert ($first.total -eq 47 -and @($first.rows).Count -eq 20 -and $first.rows[0].Name -eq 'nested') 'Paged listing sorts largest entries first'
+    Assert ($first.rows[0].Modified -eq '2020-02-03') 'Paged listing includes the current modified date'
     $report.PageResponseBytes=$session.LastResponseBytes
     $second=Invoke-DiskHelper $session @{command='list';offset=20;limit=20}
     Assert ($first.rows[-1].Path -ne $second.rows[0].Path) 'Paging advances without duplicating the boundary row'
