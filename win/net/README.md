@@ -342,6 +342,8 @@ Data-heavy result browsers use a shared semantic palette: green for healthy/runn
 
 Scrollable browsers calculate page size from the current terminal height and the number of preview lines per item. Nine rows are reserved for headings, controls, wrapping and the selection prompt; a typical 29-row connection view therefore shows ten two-line entries. The shared default maximum is 100, so terminal height normally determines the page size; individual browsers can still request a smaller cap.
 
+Within a page, Up/Down/Home/End repaint only the previously selected and newly selected rows through console cursor positioning, avoiding a full-screen clear on every key. Page changes, filtering, refreshes, terminal resizes and variable-height expanded previews redraw the complete frame. Redirected output and hosts without cursor control retain the full-redraw fallback.
+
 
 ### Compact hybrid menus (0.14.2)
 

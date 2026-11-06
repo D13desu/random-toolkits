@@ -86,3 +86,17 @@ $script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]27,[ConsoleKey]::Escape,$fal
 Assert ((Read-PcMenuInput $true) -eq 'Back') 'Escape cancels pending numeric input'
 $script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]13,[ConsoleKey]::Enter,$false,$false,$false))
 Assert ((Read-PcMenuInput $true) -eq 'Select') 'Pending digits do not leak into subsequent prompts'
+
+$script:IncrementalAnswers=New-Object 'Collections.Generic.Queue[string]'
+foreach($answer in @('Down','Up','B')){$script:IncrementalAnswers.Enqueue($answer)}
+$script:IncrementalClears=0;$script:IncrementalMoves=0
+function Test-PcMenuKeyboard {$true}
+function Test-PcMenuCursorControl {$true}
+function Get-PcMenuCursorTop {0}
+function Set-PcMenuCursorPosition {param($Left,$Top) $script:IncrementalMoves++}
+function Clear-Host {$script:IncrementalClears++}
+function Read-PcMenuInput {param($Keyboard) if(-not $script:IncrementalAnswers.Count){throw 'Unexpected incremental input'};$script:IncrementalAnswers.Dequeue()}
+$incrementalState=@{}
+$incrementalResult=Show-PcMenu -Title Incremental -Items @([pscustomobject]@{Id='one';Label='One';Detail='First'},[pscustomobject]@{Id='two';Label='Two';Detail='Second'}) -State $incrementalState
+Assert ($incrementalResult.Action -eq 'Back' -and $incrementalState.SelectedId -eq 'one') 'Incremental navigation preserves selection behavior'
+Assert ($script:IncrementalClears -eq 1 -and $script:IncrementalMoves -gt 0) 'Same-page arrow navigation repaints rows without clearing the screen'
