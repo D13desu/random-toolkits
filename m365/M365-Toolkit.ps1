@@ -1,7 +1,131 @@
-﻿#requires -Version 7.4
-# M365 Toolkit 0.3.7 - Windows-first LIVE ONLY - read-only investigation
+#requires -Version 7.4
+# M365 Toolkit 0.4.0 - LIVE ONLY - read-only investigation
 $ErrorActionPreference = 'Stop'
 $script:OutDir = Join-Path $PSScriptRoot 'reports'
+# BEGIN M365 MENU ENGINE
+# Shared M365 menu input and incremental row rendering.
+$script:M365MenuRows=@()
+
+function Test-M365MenuKeyboard {
+ try{return $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected}catch{return $false}
+}
+function Test-M365MenuCursor {
+ try{return (Test-M365MenuKeyboard) -and [Console]::CursorTop -ge 0}catch{return $false}
+}
+function Read-M365MenuKey { return [Console]::ReadKey($true) }
+function Get-M365MenuCursorTop { return [Console]::CursorTop }
+function Set-M365MenuCursorPosition([int]$Left,[int]$Top) { [Console]::SetCursorPosition($Left,$Top) }
+function Reset-M365Menu {
+ $script:M365MenuRows=@()
+}
+function Format-M365MenuText([AllowNull()][string]$Text,[int]$Width=100) {
+ $clean=([string]$Text -replace '[\x00-\x1F\x7F]',' ')
+ $Width=[math]::Max(12,$Width)
+ if($clean.Length -le $Width){return $clean}
+ $length=$Width-3
+ if([char]::IsHighSurrogate($clean[$length-1])){$length--}
+ return $clean.Substring(0,$length)+'...'
+}
+function Get-M365MenuWidth {
+ try{return [math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{return 100}
+}
+function Write-M365MenuRow($Row,[bool]$Selected,[int]$Width) {
+ $marker=if($Selected){'>'}else{' '}
+ $color=if($Selected){'Cyan'}elseif($Row.Key -eq '0'){'DarkGray'}else{'White'}
+ Write-Host (Format-M365MenuText ('{0} [{1}] {2}' -f $marker,$Row.Key,$Row.Label) $Width).PadRight($Width) -ForegroundColor $color
+}
+function Write-M365MenuOptions([string]$Options) {
+ $width=Get-M365MenuWidth
+ foreach($line in ($Options -split "`n")){
+  if($line -match '^\[([^]]+)\]\s*(.*)$'){
+   $top=if(Test-M365MenuCursor){Get-M365MenuCursorTop}else{-1}
+   $row=[pscustomobject]@{Key=$Matches[1].Trim().ToUpperInvariant();Label=$Matches[2].Trim();Top=$top}
+   $script:M365MenuRows+=,$row
+   Write-M365MenuRow $row $false $width
+  } elseif([string]::IsNullOrWhiteSpace($line)){Write-Host ''}
+  else{Write-Host $line -ForegroundColor Cyan}
+ }
+}
+function Set-M365MenuRow($Row,[bool]$Selected,[int]$ReturnTop,[int]$Width) {
+ if($Row.Top -lt 0){return}
+ Set-M365MenuCursorPosition 0 ([int]$Row.Top)
+ Write-M365MenuRow $Row $Selected $Width
+ Set-M365MenuCursorPosition 0 $ReturnTop
+}
+function Write-M365MenuSelection([string]$Digits) {
+ Write-Host ("`rSelection: {0,-10}" -f ($Digits+'_')) -NoNewline -ForegroundColor Cyan
+}
+function Read-M365MenuChoice([string]$Prompt='Select') {
+ $rows=@($script:M365MenuRows)
+ try {
+  if(-not $rows.Count -or -not (Test-M365MenuKeyboard)){return (Read-Host $Prompt).Trim()}
+  $width=Get-M365MenuWidth;$selected=0;$digits=''
+  Write-Host 'Arrows + Enter or shortcut + Enter | Esc/Backspace: back' -ForegroundColor DarkGray
+  $promptTop=Get-M365MenuCursorTop
+  Write-M365MenuSelection $digits
+  Set-M365MenuRow $rows[$selected] $true $promptTop $width
+  while($true){
+   $key=Read-M365MenuKey
+   if($key.Key -eq 'PageDown'){return 'N'}
+   if($key.Key -eq 'PageUp'){return 'P'}
+   if($key.Key -eq 'UpArrow' -or $key.Key -eq 'DownArrow' -or $key.Key -eq 'Home' -or $key.Key -eq 'End'){
+    $old=$selected
+    switch($key.Key){
+     'UpArrow' {$selected=[math]::Max(0,$selected-1)}
+     'DownArrow' {$selected=[math]::Min($rows.Count-1,$selected+1)}
+     'Home' {$selected=0}
+     'End' {$selected=$rows.Count-1}
+    }
+    if($selected -ne $old){Set-M365MenuRow $rows[$old] $false $promptTop $width;Set-M365MenuRow $rows[$selected] $true $promptTop $width}
+    continue
+   }
+   if($key.Key -eq 'Escape' -or ($key.Key -eq 'Backspace' -and -not $digits)){return '0'}
+   if($key.Key -eq 'Backspace'){$digits=$digits.Substring(0,$digits.Length-1);Write-M365MenuSelection $digits;continue}
+   if($key.Key -eq 'Enter'){
+    if($digits){$match=$rows|Where-Object Key -EQ $digits|Select-Object -First 1;if($match){return $match.Key};$digits='';Write-M365MenuSelection $digits;continue}
+    return [string]$rows[$selected].Key
+   }
+   $char=[string]$key.KeyChar
+   if($char -match '^\d$'){$digits+=$char;Write-M365MenuSelection $digits;continue}
+   if($char -match '^[A-Za-z]$'){$match=$rows|Where-Object Key -EQ $char.ToUpperInvariant()|Select-Object -First 1;if($match){return $match.Key}}
+  }
+ } finally {Reset-M365Menu;Write-Host ''}
+}
+
+function Show-M365RecordMenu {
+ param(
+  [object[]]$Items,
+  [string]$Title,
+  [scriptblock]$Label,
+  [string]$Commands='[0] Back',
+  [scriptblock]$Header
+ )
+ $Items=@($Items);$page=0
+ while($true){
+  $height=30;try{$height=$Host.UI.RawUI.WindowSize.Height}catch{}
+  $size=[math]::Max(1,[math]::Min(100,$height-10))
+  $pages=[math]::Max(1,[math]::Ceiling($Items.Count/[double]$size))
+  if($page -ge $pages){$page=$pages-1}
+  Head $Title
+  if($Header){& $Header}
+  Write-Host ("Records: {0} | Page: {1}/{2}" -f $Items.Count,($page+1),$pages) -ForegroundColor DarkGray
+  $start=$page*$size;$end=[math]::Min($Items.Count,$start+$size)
+  for($i=$start;$i -lt $end;$i++){
+   $text=& $Label $Items[$i] $i
+   Write-M365MenuOptions ('[{0}] {1}' -f ($i+1),$text)
+  }
+  if($pages -gt 1){Write-M365MenuOptions "[N] Next page`n[P] Previous page"}
+  Write-M365MenuOptions $Commands
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant();$number=0
+  if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $Items.Count){
+   return [pscustomobject]@{Action='Select';Item=$Items[$number-1];Index=$number-1}
+  }
+  if($choice -eq 'N' -and $page+1 -lt $pages){$page++;continue}
+  if($choice -eq 'P' -and $page -gt 0){$page--;continue}
+  return [pscustomobject]@{Action=$choice;Item=$null;Index=-1}
+ }
+}
+# END M365 MENU ENGINE
 # Shared console theme: labels are muted, values bright; state colors are semantic.
 function Write-Field([string]$Label, $Value, [string]$Kind='Normal') {
  $display=if($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)){'—'}else{[string]$Value}
@@ -20,13 +144,8 @@ function Write-Section([string]$Title) {
  Write-Host ("  {0}" -f $Title.ToUpperInvariant()) -ForegroundColor Cyan
  Write-Host ('  ' + ('-' * [math]::Min(46,[math]::Max(12,$Title.Length+8)))) -ForegroundColor DarkGray
 }
-function Write-Menu([string]$Options) {
- foreach($line in ($Options -split "`n")){
-  if($line -match '^\[([^]]+)\](.*)$'){
-   Write-Host "[$($Matches[1])]" -ForegroundColor Cyan -NoNewline
-   Write-Host $Matches[2] -ForegroundColor White
-  } else {Write-Host $line -ForegroundColor Cyan}
- }
+function Write-Menu([string]$Options,[ConsoleColor]$ForegroundColor=[ConsoleColor]::White) {
+ Write-M365MenuOptions $Options
 }
 function Write-ColorTable([object[]]$Rows,[string[]]$Columns,[int[]]$Widths) {
  if(-not $Rows -or $Rows.Count -eq 0){Write-Host 'No records returned.' -ForegroundColor Yellow;return}
@@ -50,7 +169,7 @@ function Write-ColorTable([object[]]$Rows,[string[]]$Columns,[int[]]$Widths) {
  }
 }
 function Wait-Key { [void](Read-Host 'Press Enter to continue') }
-function Head([string]$title) { Clear-Host; Write-Host ('=' * 54) -ForegroundColor Cyan; Write-Host " M365 Toolkit 0.3.7 | $title" -ForegroundColor Cyan; Write-Host ('=' * 54) -ForegroundColor Cyan; Write-Host ' READ ONLY' -ForegroundColor Yellow; Write-Host '' }
+function Head([string]$title) { Reset-M365Menu; Clear-Host; Write-Host ('=' * 54) -ForegroundColor Cyan; Write-Host " M365 TOOLKIT 0.4.0 | $title" -ForegroundColor Cyan; Write-Host ('=' * 54) -ForegroundColor Cyan; Write-Host ' READ ONLY' -ForegroundColor Yellow; Write-Host '' }
 function Need([string]$module) {
  if (-not (Get-Module -ListAvailable -Name $module)) {
   throw "Missing $module. Run: Install-Module -Name $module -Scope CurrentUser"
@@ -189,9 +308,9 @@ function Show-MfaRegistration($registration) {
   Write-Host "Methods registered   : $(@($r.methodsRegistered) -join ', ')"
   Write-Host "Preferred method     : $(Value-OrUnknown $r.userPreferredMethodForSecondaryAuthentication)"
   Write-Host "System preferred MFA : $(Value-OrUnknown $r.isSystemPreferredAuthenticationMethodEnabled)"
-  Write-Host "`n[1] All returned properties`n[2] Original Graph JSON`n[3] Export original Graph JSON`n[0] Back"
+  Write-Menu "[1] All returned properties`n[2] Original Graph JSON`n[3] Export original Graph JSON`n[0] Back"
   while($true){
-   $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+   $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
    switch($choice){
     '1' {$r | Format-List * | Out-Host; Wait-Key}
     '2' {$registration.Raw | Out-Host; Wait-Key}
@@ -207,9 +326,34 @@ function Show-MfaRegistration($registration) {
  } else {Write-Host 'No registration data returned.'}
  Wait-Key
 }
-function Browse($items,[string]$title,[string]$kind) { $items=@($items); while ($true) { Head $title; Write-Host "Records: $($items.Count)"; for($i=0;$i -lt $items.Count;$i++) { $r=$items[$i]; if($kind -eq 'sign') { $status=if($r.Status.ErrorCode -eq 0){'SUCCESS'}else{'FAILURE'}; Write-Host "[$($i+1)] $($r.CreatedDateTime) " -ForegroundColor DarkGray -NoNewline
- Write-Host $status -ForegroundColor $(if($status -eq 'SUCCESS'){'Green'}else{'Red'}) -NoNewline
- Write-Menu " | $($r.UserPrincipalName)" -ForegroundColor White; Write-Host "    IP: " -ForegroundColor DarkGray -NoNewline; Write-Host $r.IpAddress -ForegroundColor Cyan -NoNewline; Write-Host " | App: $($r.AppDisplayName)" -ForegroundColor Gray; $ua=$r.UserAgent; if([string]::IsNullOrWhiteSpace([string]$ua)){$ua="Not provided"}; Write-Host "    User-Agent: $ua"; $mfa=Get-MfaSignInSummary $r; Write-Host "    MFA required: $($mfa.Requirement) | MFA step: $($mfa.MfaStepResult)"; Write-Host "    MFA methods: $($mfa.Methods) | Conditional Access: $($mfa.ConditionalAccess)" } elseif($kind -eq 'audit') { Write-Host "[$($i+1)] $($r.CreationDate) | $($r.Operations) | $($r.UserIds)"; Write-Host "    IP: $(try { ($r.AuditData | ConvertFrom-Json).ClientIP } catch { 'Not recorded' })" } else { Write-Host "[$($i+1)] $($r.Name) | Enabled: $($r.Enabled) | Priority: $($r.Priority)" } }; Write-Host "`n[A] All raw  [E] Export JSON  [0] Back"; if($kind -eq 'sign'){Write-Host '[P] Pivot from event IP to tenant search'}; $c=(Read-Host 'Select').Trim().ToUpperInvariant(); if($c -eq '0'){return}; if($c -eq 'E'){Save-Evidence $items $title;Wait-Key;continue}; if($c -eq 'A'){foreach($r in $items){Raw-Record $r;Wait-Key};continue}; if($c -eq 'P' -and $kind -eq 'sign'){ $n=0; if([int]::TryParse((Read-Host 'Event number'),[ref]$n) -and $n -ge 1 -and $n -le $items.Count){Investigate-IP $items[$n-1].IpAddress};continue }; $n=0; if([int]::TryParse($c,[ref]$n) -and $n -ge 1 -and $n -le $items.Count){Raw-Record $items[$n-1];Wait-Key} } }
+function Browse($items,[string]$title,[string]$kind) {
+ $items=@($items)
+ while($true){
+  $commands="[A] All raw`n[E] Export JSON`n[0] Back"
+  if($kind -eq 'sign'){$commands="[I] Investigate an event IP`n"+$commands}
+  $result=Show-M365RecordMenu $items $title {
+   param($r,$index)
+   if($kind -eq 'sign'){
+    $status=if($r.Status.ErrorCode -eq 0){'SUCCESS'}else{'FAILURE'}
+    return "$($r.CreatedDateTime) | $status | $($r.UserPrincipalName) | $($r.IpAddress) | $($r.AppDisplayName)"
+   }
+   if($kind -eq 'audit'){
+    $ip=try{($r.AuditData|ConvertFrom-Json).ClientIP}catch{'Not recorded'}
+    return "$($r.CreationDate) | $($r.Operations) | $($r.UserIds) | $ip"
+   }
+   return "$($r.Name) | Enabled: $($r.Enabled) | Priority: $($r.Priority)"
+  } $commands
+  if($result.Action -eq '0'){return}
+  if($result.Action -eq 'E'){Save-Evidence $items $title;Wait-Key;continue}
+  if($result.Action -eq 'A'){foreach($r in $items){Raw-Record $r;Wait-Key};continue}
+  if($result.Action -eq 'I' -and $kind -eq 'sign'){
+   $n=0
+   if([int]::TryParse((Read-Host 'Event number'),[ref]$n) -and $n -ge 1 -and $n -le $items.Count){Investigate-IP $items[$n-1].IpAddress}
+   continue
+  }
+  if($result.Action -eq 'Select'){Raw-Record $result.Item;Wait-Key}
+ }
+}
 $script:DefaultUPN = $null
 $script:SavedTargets = [System.Collections.Generic.List[string]]::new()
 function Add-Target([string]$upn) {
@@ -375,8 +519,8 @@ function User-Overview {
    Write-Host (" | {0} | {1}" -f $(if($sources){$sources -join ', '}else{'Not returned'}), $(if($states){$states -join ', '}else{'Not returned'})) -ForegroundColor DarkGray
   }
   if($inventory.SkuError){Write-Warning 'Product SKU names could not be resolved; identifiers are displayed.'}
-  Write-Host "`n[1] All returned user properties`n[2] Detailed licenses and service plans`n[3] Raw Graph JSON`n[4] Export raw Graph JSON`n[5] Investigate sign-ins`n[6] Detailed MFA registration`n[0] Back"
-  $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+  Write-Menu "[1] All returned user properties`n[2] Detailed licenses and service plans`n[3] Raw Graph JSON`n[4] Export raw Graph JSON`n[5] Investigate sign-ins`n[6] Detailed MFA registration`n[0] Back"
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   switch($choice){
    '1' {$user | Format-List * -Force | Out-Host; Wait-Key}
    '2' {Show-LicenseDetails $user $inventory}
@@ -424,7 +568,7 @@ function ConditionalAccess-Policies {
    else{Write-Host 'No Conditional Access policies returned.'}
    Write-Menu '[R] Refresh  [E] Export all policy JSON  [0] Back'
    Write-Host 'Select a policy number for its complete returned configuration.'
-   $choice=(Read-Host 'Select').Trim()
+   $choice=(Read-M365MenuChoice).Trim()
    $number=0
    if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $policies.Count){
     $policy=$policies[$number-1]
@@ -434,7 +578,7 @@ function ConditionalAccess-Policies {
      Write-Menu '[1] Full policy properties (JSON)'
      Write-Menu '[2] Export this policy'
      Write-Menu '[0] Back'
-     switch((Read-Host 'Select').Trim()){
+     switch((Read-M365MenuChoice).Trim()){
       '1' {$policy | ConvertTo-Json -Depth 100 | Out-Host;Wait-Key}
       '2' {Save-Evidence $policy 'conditional-access-policy';Wait-Key}
       '0' {break PolicyDetail}
@@ -465,39 +609,29 @@ function Tenant-Users {
  $policies=@();$caError=$null
  try {$policies=@(Get-GraphPaged 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies?$select=id,displayName,state&$top=100')}
  catch {$caError=$_.Exception.Message}
- $filter='';$page=0;$pageSize=20
+ $filter=''
  while($true){
   $matched=@($users | Where-Object {-not $filter -or $_.displayName -like "*$filter*" -or $_.userPrincipalName -like "*$filter*"})
-  $totalPages=[math]::Max(1,[math]::Ceiling($matched.Count / $pageSize))
-  if($page -ge $totalPages){$page=$totalPages-1}
-  $current=@($matched | Select-Object -Skip ($page*$pageSize) -First $pageSize)
-  Head 'Tenant user directory'
-  Write-Host "Users: $($users.Count) | Matches: $($matched.Count) | Page: $($page+1)/$totalPages"
-  Write-Host "Conditional Access policies: $($policies.Count) | Enabled: $(@($policies | Where-Object state -eq 'enabled').Count) | Report-only: $(@($policies | Where-Object state -eq 'enabledForReportingButNotEnforced').Count) | Disabled: $(@($policies | Where-Object state -eq 'disabled').Count)"
-  if($caError){Write-Warning "Policy inventory unavailable: $caError"}
-  if($mfaError){Write-Warning "MFA registration unavailable: $mfaError"}
-  Write-Host 'MFA = registration status (not enforcement). Conditional Access policies are available via [C].'
-  Write-Host ''
-  $rows=@(for($i=0;$i -lt $current.Count;$i++){
-   $u=$current[$i];$r=$registration[[string]$u.id]
-   $mfa=if($null -ne $r -and $null -ne $r.isMfaRegistered){if($r.isMfaRegistered){'Yes'}else{'No'}}else{'?'}
+  $result=Show-M365RecordMenu -Items $matched -Title 'Tenant user directory' -Label {
+   param($u,$index)
+   $r=$registration[[string]$u.id]
+   $mfa=if($null -ne $r -and $null -ne $r.isMfaRegistered){if($r.isMfaRegistered){'MFA: Yes'}else{'MFA: No'}}else{'MFA: ?'}
+   $enabled=if($u.accountEnabled){'Enabled'}else{'Disabled'}
    $last=if($u.signInActivity.lastSuccessfulSignInDateTime){try{([datetime]$u.signInActivity.lastSuccessfulSignInDateTime).ToString('yyyy-MM-dd')}catch{'Unknown'}}else{'-'}
-   [pscustomobject]@{No=$i+1;UPN=$u.userPrincipalName;Enabled=if($u.accountEnabled){'Yes'}else{'No'};MFA=$mfa;Lic=@($u.assignedLicenses).Count;LastSuccess=$last}
-  })
-  Write-ColorTable $rows @('No','UPN','Enabled','MFA','Lic','LastSuccess') @(3,34,8,7,4,12)
-  Write-Menu '[N] Next  [P] Previous  [F] Filter'
-  Write-Menu '[C] View tenant CA policies  [E] Export summary  [0] Back'
-  Write-Host 'Enter a row number to open its User overview.'
-  $choice=(Read-Host 'Select').Trim();$number=0
-  if([int]::TryParse($choice,[ref]$number) -and $number -ge 1 -and $number -le $current.Count){
-   $script:DefaultUPN=Add-Target ([string]$current[$number-1].userPrincipalName)
+   "$($u.userPrincipalName) | $enabled | $mfa | Lic: $(@($u.assignedLicenses).Count) | Last: $last"
+  } -Commands "[F] Filter`n[C] View tenant CA policies`n[E] Export summary`n[0] Back" -Header {
+   Write-Host "Users: $($users.Count) | Matches: $($matched.Count) | Filter: $filter"
+   Write-Host "Conditional Access policies: $($policies.Count) | Enabled: $(@($policies | Where-Object state -eq 'enabled').Count) | Report-only: $(@($policies | Where-Object state -eq 'enabledForReportingButNotEnforced').Count) | Disabled: $(@($policies | Where-Object state -eq 'disabled').Count)"
+   if($caError){Write-Warning "Policy inventory unavailable: $caError"}
+   if($mfaError){Write-Warning "MFA registration unavailable: $mfaError"}
+  }
+  if($result.Action -eq 'Select'){
+   $script:DefaultUPN=Add-Target ([string]$result.Item.userPrincipalName)
    User-Overview
    continue
   }
-  switch($choice.ToUpperInvariant()){
-   'N' {if($page+1 -lt $totalPages){$page++}}
-   'P' {if($page -gt 0){$page--}}
-   'F' {$filter=(Read-Host 'Name or UPN contains (blank = all)').Trim();$page=0}
+  switch($result.Action){
+   'F' {$filter=(Read-Host 'Name or UPN contains (blank = all)').Trim()}
    'C' {
     Head 'Tenant Conditional Access policies'
     if($caError){Write-Warning $caError}
@@ -565,7 +699,7 @@ function Show-ExchangeDetail($record,[string]$title,[string]$label) {
   Write-Menu '[3] Export evidence JSON'
   Write-Host ''
   Write-Menu '[0] Back'
-  $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   switch($choice){
    '1' {Head "$title - Properties"; $record | Format-List * -Force | Out-Host; Wait-Key}
    '2' {Head "$title - Evidence JSON"; Convert-ExchangeEvidence $record | ConvertTo-Json -Depth 10 | Out-Host; Wait-Key}
@@ -590,8 +724,8 @@ function Mailbox {
   Write-Field 'Forwarding address' $($mb.ForwardingAddress)
   Write-Field 'Forwarding SMTP' $($mb.ForwardingSmtpAddress)
   Write-Field 'Keep local copy' $($mb.DeliverToMailboxAndForward)
-  Write-Host "`n[1] All returned mailbox properties`n[2] Evidence JSON`n[3] Export evidence JSON`n[0] Back"
-  switch((Read-Host 'Select').Trim().ToUpperInvariant()) {
+  Write-Menu "[1] All returned mailbox properties`n[2] Evidence JSON`n[3] Export evidence JSON`n[0] Back"
+  switch((Read-M365MenuChoice).Trim().ToUpperInvariant()) {
    '1' {Head 'Mailbox raw properties'; $mb | Format-List * -Force | Out-Host; Wait-Key}
    '2' {Head 'Mailbox evidence JSON'; Convert-ExchangeEvidence $mb | ConvertTo-Json -Depth 10 | Out-Host; Wait-Key}
    '3' {Save-ExchangeEvidence @($mb) 'mailbox'; Wait-Key}
@@ -610,8 +744,8 @@ function Show-Rules($rules,[string]$upn) {
    if($r.RedirectTo){Write-Host "    RedirectTo: $($r.RedirectTo -join ', ')"}
    if($r.DeleteMessage){Write-Host '    Deletes messages: True'}
   }
-  Write-Host "`n[A] All rules and properties`n[E] Export all rule evidence`n[0] Back"
-  $c=(Read-Host 'Select').Trim().ToUpperInvariant()
+  Write-Menu "[A] All rules and properties`n[E] Export all rule evidence`n[0] Back"
+  $c=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   if($c -eq '0'){return}
   if($c -eq 'E'){Save-ExchangeEvidence $rules 'inbox-rules';Wait-Key;continue}
   if($c -eq 'A'){foreach($r in $rules){$r | Format-List * -Force | Out-Host;Wait-Key};continue}
@@ -631,8 +765,8 @@ function Rules {
   Write-Field 'Forwarding SMTP' $($mb.ForwardingSmtpAddress)
   Write-Field 'Keep local copy' $($mb.DeliverToMailboxAndForward)
   Write-Host "Inbox rules        : $($rules.Count) (including hidden)"
-  Write-Host "`n[1] Browse inbox rules`n[2] Full mailbox forwarding properties`n[3] Export mailbox forwarding and rules`n[0] Back"
-  switch((Read-Host 'Select').Trim().ToUpperInvariant()) {
+  Write-Menu "[1] Browse inbox rules`n[2] Full mailbox forwarding properties`n[3] Export mailbox forwarding and rules`n[0] Back"
+  switch((Read-M365MenuChoice).Trim().ToUpperInvariant()) {
    '1' {Show-Rules $rules $u}
    '2' {Head 'Mailbox forwarding properties'; $mb | Format-List Identity,ForwardingAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward | Out-Host;Wait-Key}
    '3' {
@@ -662,8 +796,8 @@ function Permissions {
   Write-Host "Full access entries: $($full.Count)"
   Write-Field 'Send As entries' $($sendAs.Count)
   Write-Field 'Send on Behalf' $($onBehalf.Count)
-  Write-Host "`n[1] Full access permissions`n[2] Send As permissions`n[3] Send on Behalf delegates`n[4] All raw returned properties`n[5] Export all permission evidence`n[0] Back"
-  switch((Read-Host 'Select').Trim().ToUpperInvariant()) {
+  Write-Menu "[1] Full access permissions`n[2] Send As permissions`n[3] Send on Behalf delegates`n[4] All raw returned properties`n[5] Export all permission evidence`n[0] Back"
+  switch((Read-M365MenuChoice).Trim().ToUpperInvariant()) {
    '1' {Head 'Full access'; $full | Select-Object Identity,User,AccessRights,Deny,IsInherited | Format-Table -AutoSize -Wrap | Out-Host;Wait-Key}
    '2' {Head 'Send As'; $sendAs | Select-Object Identity,Trustee,AccessRights,IsInherited | Format-Table -AutoSize -Wrap | Out-Host;Wait-Key}
    '3' {Head 'Send on Behalf'; $onBehalf | Format-List * | Out-Host;Wait-Key}
@@ -720,7 +854,7 @@ function Show-RiskDetections([string]$upn='') {
   Write-Menu '[2] Travel-related detections only'
   Write-Menu '[E] Export detections (JSON)'
   Write-Menu '[0] Back'
-  $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   if($choice -eq '0'){return}
   if($choice -eq 'E'){Save-Evidence $events 'risk-detections';Wait-Key;continue}
   if($choice -notin @('1','2')){continue}
@@ -768,7 +902,7 @@ function Show-RiskyUsers {
    foreach($field in @('userPrincipalName','userDisplayName','riskLevel','riskState','riskDetail','riskLastUpdatedDateTime','isDeleted','id')){Write-Field $field $u.$field}
    Write-Menu '[1] View this user risk detections'
    Write-Menu '[R] Raw record'
-   $c=(Read-Host 'Select').Trim().ToUpperInvariant()
+   $c=(Read-M365MenuChoice).Trim().ToUpperInvariant()
    if($c -eq '1'){Show-RiskDetections $u.userPrincipalName}
    if($c -eq 'R'){Raw-Record $u;Wait-Key}
   }
@@ -782,7 +916,7 @@ function Risk-Menu {
   Write-Menu '[3] Risk detections for a specific user'
   Write-Menu '[4] Travel / unusual location detections'
   Write-Menu '[0] Back'
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   if($c -eq '0'){return}
   try{switch($c){
    '1'{Show-RiskyUsers}
@@ -795,7 +929,7 @@ function Risk-Menu {
 
 function Signins { Graph-Ready; $u=Ask-UPN; Signins-ForUser $u }
 function Fetch-Audit([string]$ip,[datetime]$start,[datetime]$end) { EXO-Ready; $all=[System.Collections.Generic.List[object]]::new(); $session=[guid]::NewGuid().ToString(); do { $batch=@(Search-UnifiedAuditLog -StartDate $start -EndDate $end -IPAddresses $ip -SessionId $session -SessionCommand ReturnLargeSet -ResultSize 5000 -ErrorAction Stop); foreach($r in $batch){$all.Add($r)}; if($all.Count -ge 50000){Write-Warning 'Audit query reached the 50,000 record session cap; results may be incomplete.';break} } while($batch.Count -gt 0); return $all.ToArray() }
-function Investigate-IP([string]$ip='') { if(-not $ip){$ip=(Read-Host 'IP address').Trim()}; $parsed=$null; if(-not [System.Net.IPAddress]::TryParse($ip,[ref]$parsed)){throw 'Invalid IP address'}; $since=Date-Window; $start=[datetime]::Parse($since).ToUniversalTime(); $end=(Get-Date).ToUniversalTime(); $sign=@();$audit=@();$errors=[System.Collections.Generic.List[string]]::new(); try { Graph-Ready; Need 'Microsoft.Graph.Reports'; $sign=@(Get-MgAuditLogSignIn -Filter "ipAddress eq '$ip' and createdDateTime ge $since" -All -ErrorAction Stop) }catch{ $errors.Add("Graph sign-ins unavailable: $($_.Exception.Message)") }; try { $audit=@(Fetch-Audit $ip $start $end) }catch{ $errors.Add("Unified Audit Log unavailable: $($_.Exception.Message)") }; while($true){ Head 'Tenant-wide IP investigation'; Write-Field 'IP' $ip 'Info'; Write-Host "Sign-ins: $($sign.Count) | Audit events: $($audit.Count)"; Write-Host "Distinct sign-in users: $(@($sign | Select-Object -ExpandProperty UserPrincipalName -Unique).Count)"; foreach($e in $errors){Write-Warning $e}; Write-Host "`n[1] All sign-ins`n[2] Successful sign-ins`n[3] Failed sign-ins`n[4] Accounts observed`n[5] Unified Audit Log`n[6] Exchange audit activity`n[7] SharePoint/OneDrive audit activity`n[8] Administrative audit activity`n[R] All raw evidence`n[E] Export combined JSON`n[0] Back"; $c=(Read-Host 'Select').Trim().ToUpperInvariant(); switch($c){ '1'{Browse $sign 'IP sign-ins' 'sign'} '2'{Browse @($sign|Where-Object {$_.Status.ErrorCode -eq 0}) 'Successful sign-ins' 'sign'} '3'{Browse @($sign|Where-Object {$_.Status.ErrorCode -ne 0}) 'Failed sign-ins' 'sign'} '4'{Head 'Accounts observed';$sign|Group-Object UserPrincipalName|Select-Object Count,Name|Format-Table -AutoSize|Out-Host;Wait-Key} '5'{Browse $audit 'Unified audit results' 'audit'} '6'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"Exchange"'}) 'Exchange audit' 'audit'} '7'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"(SharePoint|OneDrive)"'}) 'Files audit' 'audit'} '8'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"(AzureActiveDirectory|MicrosoftEntra)"'}) 'Admin audit' 'audit'} 'R'{Raw-Record ([pscustomobject]@{Ip=$ip;SignIns=$sign;Audit=$audit;Errors=$errors.ToArray()});Wait-Key} 'E'{Save-Evidence ([pscustomobject]@{Ip=$ip;From=$since;To=$end;SignIns=$sign;Audit=$audit;Errors=$errors.ToArray()}) 'ip-investigation';Wait-Key} '0'{return} } } }
+function Investigate-IP([string]$ip='') { if(-not $ip){$ip=(Read-Host 'IP address').Trim()}; $parsed=$null; if(-not [System.Net.IPAddress]::TryParse($ip,[ref]$parsed)){throw 'Invalid IP address'}; $since=Date-Window; $start=[datetime]::Parse($since).ToUniversalTime(); $end=(Get-Date).ToUniversalTime(); $sign=@();$audit=@();$errors=[System.Collections.Generic.List[string]]::new(); try { Graph-Ready; Need 'Microsoft.Graph.Reports'; $sign=@(Get-MgAuditLogSignIn -Filter "ipAddress eq '$ip' and createdDateTime ge $since" -All -ErrorAction Stop) }catch{ $errors.Add("Graph sign-ins unavailable: $($_.Exception.Message)") }; try { $audit=@(Fetch-Audit $ip $start $end) }catch{ $errors.Add("Unified Audit Log unavailable: $($_.Exception.Message)") }; while($true){ Head 'Tenant-wide IP investigation'; Write-Field 'IP' $ip 'Info'; Write-Host "Sign-ins: $($sign.Count) | Audit events: $($audit.Count)"; Write-Host "Distinct sign-in users: $(@($sign | Select-Object -ExpandProperty UserPrincipalName -Unique).Count)"; foreach($e in $errors){Write-Warning $e}; Write-Menu "[1] All sign-ins`n[2] Successful sign-ins`n[3] Failed sign-ins`n[4] Accounts observed`n[5] Unified Audit Log`n[6] Exchange audit activity`n[7] SharePoint/OneDrive audit activity`n[8] Administrative audit activity`n[R] All raw evidence`n[E] Export combined JSON`n[0] Back"; $c=(Read-M365MenuChoice).Trim().ToUpperInvariant(); switch($c){ '1'{Browse $sign 'IP sign-ins' 'sign'} '2'{Browse @($sign|Where-Object {$_.Status.ErrorCode -eq 0}) 'Successful sign-ins' 'sign'} '3'{Browse @($sign|Where-Object {$_.Status.ErrorCode -ne 0}) 'Failed sign-ins' 'sign'} '4'{Head 'Accounts observed';$sign|Group-Object UserPrincipalName|Select-Object Count,Name|Format-Table -AutoSize|Out-Host;Wait-Key} '5'{Browse $audit 'Unified audit results' 'audit'} '6'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"Exchange"'}) 'Exchange audit' 'audit'} '7'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"(SharePoint|OneDrive)"'}) 'Files audit' 'audit'} '8'{Browse @($audit|Where-Object {$_.AuditData -match '"Workload"\s*:\s*"(AzureActiveDirectory|MicrosoftEntra)"'}) 'Admin audit' 'audit'} 'R'{Raw-Record ([pscustomobject]@{Ip=$ip;SignIns=$sign;Audit=$audit;Errors=$errors.ToArray()});Wait-Key} 'E'{Save-Evidence ([pscustomobject]@{Ip=$ip;From=$since;To=$end;SignIns=$sign;Audit=$audit;Errors=$errors.ToArray()}) 'ip-investigation';Wait-Key} '0'{return} } } }
 function Full-UserInvestigation {
  Graph-Ready
  $upn=Ask-UPN
@@ -864,8 +998,8 @@ function Full-UserInvestigation {
    Write-Host "`nINCOMPLETE DATA: $($result.Errors.Keys -join ', ')" -ForegroundColor Yellow
    Write-Menu '[8] Show collection errors'
   }
-  Write-Host "`n[1] Account, licenses and MFA`n[2] Sign-in investigation`n[3] Source IPs (tenant-wide pivot)`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Mailbox permissions`n[7] Export collected investigation`n[9] Refresh investigation`n[0] Back"
-  $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+  Write-Menu "[1] Account, licenses and MFA`n[2] Sign-in investigation`n[3] Source IPs (tenant-wide pivot)`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Mailbox permissions`n[7] Export collected investigation`n[9] Refresh investigation`n[0] Back"
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   switch($choice){
    '1' {User-Overview}
    '2' {Browse $result.SignIns 'Collected user sign-ins' 'sign'}
@@ -917,7 +1051,7 @@ function Connection-Menu {
   Write-Menu '[8] Switch saved investigation target'
   Write-Menu '[9] Remove saved investigation target'
   Write-Menu '[0] Back'
-  $choice=(Read-Host 'Select').Trim()
+  $choice=(Read-M365MenuChoice).Trim()
   try {
    switch($choice) {
     '1' { if($ctx){Write-Host 'Graph is already connected. Disconnect first to switch accounts.'; Wait-Key}else{Graph-Ready} }
@@ -999,7 +1133,7 @@ function Show-MailTrace($filter=$null) {
   if($rows.Count){$rows|Select-Object -First 60|Format-Table -AutoSize -Wrap|Out-Host}
   if($records.Count -gt 60){Write-Warning 'Showing first 60; export includes all retrieved records.'}
   Write-Menu "[D] Delivery events for selected message`n[R] Raw message details`n[E] Export JSON`n[C] Export CSV`n[0] Back"
-  $choice=(Read-Host 'Select').Trim().ToUpperInvariant()
+  $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   switch($choice){
    'D' {
     $n=0;$pick=(Read-Host 'Message number').Trim()
@@ -1027,7 +1161,7 @@ function Show-MailConfiguration {
  while($true){
   Head 'Mail flow configuration'
   Write-Menu "[1] Transport rules`n[2] Inbound connectors`n[3] Outbound connectors`n[4] Accepted domains`n[5] Remote domains`n[6] Transport configuration`n[7] Outbound spam policies (forwarding)`n[0] Back"
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   if($c -eq '0'){return}
   $items=switch($c){
    '1' {@(Get-TransportRule -ErrorAction Stop)}
@@ -1092,7 +1226,7 @@ function Show-Quarantine($filter=$null){
   }
   if($records.Count -gt 60){Write-Warning 'Showing first 60. Narrow the search to select later records.'}
   Write-Menu "[D] View message details`n[P] Preview (metadata/preview cmdlet)`n[X] Export selected EML`n[B] Batch export first 60 EML files (confirmation per message)`n[E] Export metadata JSON`n[C] Export metadata CSV`n[0] Back"
-  $c=(Read-Host 'Select').Trim().ToUpperInvariant()
+  $c=(Read-M365MenuChoice).Trim().ToUpperInvariant()
   if($c -eq '0'){return}
   if($c -eq 'E'){Save-Evidence $records 'quarantine';Wait-Key;continue}
   if($c -eq 'C'){Save-MailCsv $records 'quarantine';Wait-Key;continue}
@@ -1117,7 +1251,7 @@ function Show-SecurityPolicies {
  while($true){
   Head 'Security policies'
   Write-Menu "[1] Anti-spam policies`n[2] Anti-phishing policies`n[3] Anti-malware policies`n[4] Quarantine policies`n[0] Back"
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   if($c -eq '0'){return}
   $items=switch($c){
    '1' {@(Get-HostedContentFilterPolicy -ErrorAction Stop)}
@@ -1144,7 +1278,7 @@ function Investigate-Email {
   Write-Field 'Quarantine results' $quarantine.Count 'Warning'
   foreach($err in $errors){Write-Warning $err}
   Write-Menu "[1] Trace results`n[2] Quarantine results`n[3] Export combined JSON`n[0] Back"
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   switch($c){
    '1' {$traces|Select-Object Received,SenderAddress,RecipientAddress,Status,Subject|Format-Table -AutoSize -Wrap|Out-Host;Wait-Key}
    '2' {$quarantine|Select-Object ReceivedTime,SenderAddress,RecipientAddress,Type,Subject|Format-Table -AutoSize -Wrap|Out-Host;Wait-Key}
@@ -1157,7 +1291,7 @@ function Mail-FlowMenu {
  while($true){
   Head 'Mail flow'
   Write-Menu "[1] Search message trace`n[2] Transport rules, connectors and domains`n[3] Unified email investigation`n[0] Back"
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   try{switch($c){'1'{Show-MailTrace} '2'{Show-MailConfiguration} '3'{Investigate-Email} '0'{return}}}catch{Write-Host "Mail flow error: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key}
  }
 }
@@ -1165,9 +1299,9 @@ function Security-Menu {
  while($true){
   Head 'Security / Quarantine'
   Write-Menu "[1] Quarantine search, details and EML export`n[2] Security policies`n[3] Unified email investigation`n[0] Back"
-  $c=(Read-Host 'Select').Trim()
+  $c=(Read-M365MenuChoice).Trim()
   try{switch($c){'1'{Show-Quarantine} '2'{Show-SecurityPolicies} '3'{Investigate-Email} '0'{return}}}catch{Write-Host "Security error: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key}
  }
 }
 
-while($true){Head 'Main menu'; Show-ConnectionSummary; Write-Menu "[1] List all tenant users`n[2] User overview`n[3] Full user investigation`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Sign-in activity`n[7] Mailbox permissions`n[8] Conditional Access policies`n`n[M] Mail flow`n[Q] Security and quarantine`n[I] Tenant-wide IP investigation`n[R] Risky users / unusual travel`n[C] Connection management`n`n[0] Exit"; $choice=(Read-Host 'Select').Trim().ToUpperInvariant(); if($choice -eq '0'){break}; try { switch($choice){ '1'{Tenant-Users} '2'{User-Overview} '3'{Full-UserInvestigation} '4'{Mailbox} '5'{Rules} '6'{Signins} '7'{Permissions} '8'{ConditionalAccess-Policies} 'I'{Investigate-IP} 'R'{Risk-Menu} 'M'{Mail-FlowMenu} 'Q'{Security-Menu} 'C'{Connection-Menu} default{Write-Host 'Unknown option';Wait-Key} } }catch{Write-Host "Operation failed: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key} }
+while($true){Head 'Main menu'; Show-ConnectionSummary; Write-Menu "[1] List all tenant users`n[2] User overview`n[3] Full user investigation`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Sign-in activity`n[7] Mailbox permissions`n[8] Conditional Access policies`n`n[M] Mail flow`n[Q] Security and quarantine`n[I] Tenant-wide IP investigation`n[R] Risky users / unusual travel`n[C] Connection management`n`n[0] Exit"; $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant(); if($choice -eq '0'){break}; try { switch($choice){ '1'{Tenant-Users} '2'{User-Overview} '3'{Full-UserInvestigation} '4'{Mailbox} '5'{Rules} '6'{Signins} '7'{Permissions} '8'{ConditionalAccess-Policies} 'I'{Investigate-IP} 'R'{Risk-Menu} 'M'{Mail-FlowMenu} 'Q'{Security-Menu} 'C'{Connection-Menu} default{Write-Host 'Unknown option';Wait-Key} } }catch{Write-Host "Operation failed: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key} }

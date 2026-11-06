@@ -7,7 +7,7 @@ Personal system administration, investigation, and troubleshooting tools.
 | Tool | Location | Requirements |
 | --- | --- | --- |
 | Windows Toolkit v0.15.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
-| M365 Toolkit v0.3.7 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
+| M365 Toolkit v0.4.0 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools
 
@@ -37,7 +37,7 @@ In PowerShell 7.4+, once GitHub Pages and DNS are ready:
 irm https://tools.d0xd.com/m365/ | iex
 ```
 
-The launcher downloads the CI-built v0.3.7 toolkit from the same Pages deployment and verifies its generated SHA-256 checksum before execution. Missing modules are installed from PSGallery only after confirmation. On Windows, the toolkit and reports are stored under `%LOCALAPPDATA%/Random-Toolkits/m365/0.3.7/`. No administrator rights are required for installation. Review remote scripts before executing them.
+The launcher downloads the CI-built v0.4.0 toolkit from the same Pages deployment and verifies its generated SHA-256 checksum before execution. Missing modules are installed from PSGallery only after confirmation. On Windows, the toolkit and reports are stored under `%LOCALAPPDATA%/Random-Toolkits/m365/0.4.0/`. No administrator rights are required for installation. Review remote scripts before executing them.
 
 While the custom domain is being configured, use:
 
@@ -54,7 +54,7 @@ pwsh -NoProfile -File ./m365/M365-Toolkit.ps1
 
 On Windows, you can also run `m365/Start-M365-Toolkit.cmd` after installing dependencies. The dependency installer installs PowerShell modules for the current user. The toolkit authenticates interactively to Microsoft services.
 
-The imported v0.3.7 toolkit investigates Microsoft 365 data without changing tenant state. It can write local reports and export quarantined email; handle these outputs as sensitive data. Generated `reports/` directories are excluded from Git. Review the tool's README for permissions and limitations.
+The imported v0.4.0 toolkit investigates Microsoft 365 data without changing tenant state. It can write local reports and export quarantined email; handle these outputs as sensitive data. Generated `reports/` directories are excluded from Git. Review the tool's README for permissions and limitations.
 
 ## Layout and publication
 

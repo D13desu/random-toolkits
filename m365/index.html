@@ -6,17 +6,17 @@
         throw 'PowerShell 7.4+ is required. Open pwsh and run the launcher again.'
     }
 
-    $expectedHash = '4B1C60F4BF9CF87A5D5F8EE019E4133D0DDA8C5C47BD22040DC84AED7C92EF0D'
+    $expectedHash = 'E38A05E0F99F7A5C0639DAB760625315E6D82586A9D29AB85B39A4436215ED64'
     $uri = 'https://tools.d0xd.com/m365/M365-Toolkit.ps1'
     $dataRoot = [Environment]::GetFolderPath('LocalApplicationData')
     if (-not $dataRoot) { $dataRoot = Join-Path $HOME '.local/share' }
-    $directory = Join-Path $dataRoot 'Random-Toolkits/m365/0.3.7'
+    $directory = Join-Path $dataRoot 'Random-Toolkits/m365/0.4.0'
     $null = New-Item -ItemType Directory -Path $directory -Force
     $scriptPath = Join-Path $directory 'M365-Toolkit.ps1'
     $downloadPath = Join-Path $directory ('.download-' + [guid]::NewGuid().ToString('N') + '.ps1')
 
     try {
-        Write-Host 'Downloading M365 Toolkit v0.3.7 from D13desu/random-toolkits...'
+        Write-Host 'Downloading M365 Toolkit v0.4.0 from D13desu/random-toolkits...'
         Invoke-WebRequest -Uri $uri -OutFile $downloadPath -TimeoutSec 60
         if ((Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash -ne $expectedHash) {
             throw 'Toolkit checksum mismatch. The downloaded script will not be executed.'

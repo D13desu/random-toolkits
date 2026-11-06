@@ -3,6 +3,24 @@ $ErrorActionPreference='Stop'
 $source=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../m365/Launch-M365.ps1'))
 $endpoint=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../m365/index.html'))
 $toolkit=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../m365/M365-Toolkit.ps1'))
+$menuEngine=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../m365/Menu-Engine.ps1'))
+
+$menuTokens=$null
+$menuParseErrors=$null
+$null=[Management.Automation.Language.Parser]::ParseFile($menuEngine,[ref]$menuTokens,[ref]$menuParseErrors)
+if($menuParseErrors.Count){
+    throw "M365 menu engine has PowerShell parse errors:`n$($menuParseErrors -join "`n")"
+}
+
+$toolkitSource=[IO.File]::ReadAllText($toolkit)
+$menuStart='# BEGIN M365 MENU ENGINE'
+$menuEnd='# END M365 MENU ENGINE'
+$startIndex=$toolkitSource.IndexOf($menuStart)
+$endIndex=$toolkitSource.IndexOf($menuEnd)
+if($startIndex -lt 0 -or $endIndex -le $startIndex){throw 'M365 menu engine markers are missing.'}
+$menuSource=[IO.File]::ReadAllText($menuEngine).TrimEnd()
+$toolkitSource=$toolkitSource.Substring(0,$startIndex)+$menuStart+"`r`n"+$menuSource+"`r`n"+$toolkitSource.Substring($endIndex)
+[IO.File]::WriteAllText($toolkit,$toolkitSource,[Text.UTF8Encoding]::new($false))
 
 $toolkitTokens=$null
 $toolkitParseErrors=$null
