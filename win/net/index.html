@@ -2034,6 +2034,11 @@ function Format-PcMenuText {
     if([char]::IsHighSurrogate($clean[$length-1])){$length--}
     return $clean.Substring(0,$length)+'...'
 }
+function Get-PcMenuHeading {
+    param([string]$Title,[string]$Version='0.14.3')
+    if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
+    return "WINDOWS $Version | $Title"
+}
 function Get-PcMenuPageSize {
     param([int]$WindowHeight,[ValidateRange(1,3)][int]$DetailLines=1,[ValidateRange(1,100)][int]$Maximum=12)
     # Header, filter, page/status lines, controls and selection prompt use about six rows.
@@ -2069,7 +2074,7 @@ function Show-PcMenu {
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
-        [ValidateRange(1,100)][int]$PageSize=12,
+        [ValidateRange(1,100)][int]$PageSize=100,
         [switch]$Plain,
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,
@@ -2102,7 +2107,7 @@ function Show-PcMenu {
             Clear-Host
         }
         $page=[int][math]::Floor($selected/[double]$size)
-        Write-Host (Format-PcMenuText ("WINDOWS {0} | {1}" -f $Version,$Title) $width) -ForegroundColor Cyan
+        Write-Host (Format-PcMenuText (Get-PcMenuHeading $Title $Version) $width) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
         if(-not $rows.Count){Write-Host 'No matching items.'}
@@ -2182,7 +2187,7 @@ function Read-PcCategoryMenu {
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
-        Write-Host ("`nWINDOWS 0.14.3 | "+$Title) -ForegroundColor Cyan
+        Write-Host ("`n"+(Get-PcMenuHeading $Title)) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
