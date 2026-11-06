@@ -336,6 +336,8 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
+The root heading is `WINDOWS TOOLKIT 0.14.3`; submenus retain `WINDOWS 0.14.3 | ...` breadcrumbs so the current location remains visible.
+
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
 Scrollable browsers calculate page size from the current terminal height and the number of preview lines per item. Nine rows are reserved for headings, controls, wrapping and the selection prompt; a typical 29-row connection view therefore shows ten two-line entries. The shared default maximum is 100, so terminal height normally determines the page size; individual browsers can still request a smaller cap.
