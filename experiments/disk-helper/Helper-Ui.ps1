@@ -64,6 +64,14 @@ function Test-HelperElevated {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 function Get-HelperVolumeInfo([string]$Root) { return [IO.DriveInfo]::new($Root) }
+function Get-HelperAvailableBytes([string]$Path) {
+    try {
+        $root=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Path))
+        $drive=Get-HelperVolumeInfo $root
+        if($drive.IsReady){return [long]$drive.AvailableFreeSpace}
+    } catch {}
+    return $null
+}
 function Get-HelperScanEngine {
     param([string]$Path,[ValidateSet('auto','mft','native')][string]$Requested='auto')
     if($Requested -ne 'auto'){return $Requested}

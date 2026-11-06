@@ -69,7 +69,9 @@ try {
         if($view -ne $lastView){$selected=0;$lastView=$view}
         if($keyboard){Clear-Host}
         Write-Host ("`nDISK USAGE {0} | {1} | {2}" -f $session.Hello.version,$scanEngine.ToUpperInvariant(),$page.path) -ForegroundColor Cyan
-        Write-Host ('On disk: {0} | Logical: {1} | Files: {2:N0} | Scan: {3:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$page.files,$summary.seconds)
+        $available=Get-HelperAvailableBytes $page.path
+        $availableText=if($null -eq $available){'Unavailable'}else{Format-HelperBytes $available}
+        Write-Host ('On disk: {0} | Logical: {1} | Available: {2} | Files: {3:N0} | Scan: {4:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$availableText,$page.files,$summary.seconds)
         if($scanEngine -eq 'native'){Write-Host 'Native scan: logical sizes only; physical allocation is not measured.'}
         Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
         if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
@@ -78,12 +80,14 @@ try {
             Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
         }
         $rows=@($page.rows)
+        Write-Host '     ON DISK       | LOGICAL      | MODIFIED   | TYPE NAME' -ForegroundColor DarkGray
         for($i=0;$i -lt $rows.Count;$i++){
             $row=$rows[$i];$allocation=if($scanEngine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
             if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
             $marker=if($i -eq $selected){'>'}else{' '}
             $color=if($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-4} {5}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$row.Kind,$row.Name) -ForegroundColor $color
+            $modified=if($row.Modified){[string]$row.Modified}else{'-'}
+            Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-10} | {5,-4} {6}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$modified,$row.Kind,$row.Name) -ForegroundColor $color
         }
         Write-Host ('Page {0}/{1} | Sort: {2}' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
         if($keyboard){

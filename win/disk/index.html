@@ -128,7 +128,7 @@ namespace RandomToolkits.DiskV10 {
   internal Node Top;
  }
  public class Issue { public string Path, Reason, Category; }
- public class Row { public string Name, Path, Kind, ReparseTag; public long Bytes, Allocated; public bool Partial, AllocationUnknown; }
+ public class Row { public string Name, Path, Kind, ReparseTag, Modified; public long Bytes, Allocated; public bool Partial, AllocationUnknown; }
  public class Scan {
   public Dictionary<string,int> IssueCounts = new Dictionary<string,int>();
   public long MftOmittedFiles, MftOmittedDirectories, MftRecordErrors, MftRecordsRead;

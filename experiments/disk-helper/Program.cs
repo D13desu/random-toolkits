@@ -9,7 +9,7 @@ using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal static class Program {
-  const string Version="1.0.0";
+  const string Version="1.1.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -84,6 +84,13 @@ namespace RandomToolkits.HelperExperiment {
    return new {type="accepted",engine=engine,path=path};
   }
   static void RequireReady() {Finish();if(completedSummary==null) throw new InvalidOperationException("Wait for scan completion before browsing.");}
+  static Row[] AddModifiedDates(Row[] rows) {
+   foreach(Row row in rows) {
+    try {DateTime modified=File.GetLastWriteTime(row.Path);row.Modified=modified.Year>1601?modified.ToString("yyyy-MM-dd"):null;}
+    catch {row.Modified=null;}
+   }
+   return rows;
+  }
   static object Memory(Dictionary<string,object> request) {
    RequireReady();long managedBefore=GC.GetTotalMemory(false),workingBefore=Process.GetCurrentProcess().WorkingSet64;
    bool collect=Text(request,"collect","false").Equals("true",StringComparison.OrdinalIgnoreCase);
@@ -108,7 +115,7 @@ namespace RandomToolkits.HelperExperiment {
     offset=Math.Min(offset,folder.Count);int compactCount=Math.Min(limit,folder.Count-offset);
     return new {type="listing",path=compact.GetPath(id),parent=folder.Parent<0?null:compact.GetPath(folder.Parent),sort=sort,offset=offset,total=folder.Count,
      logical=folder.Logical,allocated=(long?)folder.Allocated,partial=folder.Partial,allocationUnknown=folder.Unknown,files=folder.Files,
-     rows=compact.Page(id,cachedOrder,offset,compactCount)};
+     rows=AddModifiedDates(compact.Page(id,cachedOrder,offset,compactCount))};
    }
    Node node;if(!scan.Nodes.TryGetValue(path,out node)) throw new ArgumentException("Path is outside the cached scan.");
    if(cachedRows==null || cachedPath!=path || cachedSort!=sort) {
@@ -119,7 +126,7 @@ namespace RandomToolkits.HelperExperiment {
     });cachedPath=path;cachedSort=sort;
    }
    if(offset>cachedRows.Length) offset=cachedRows.Length;int count=Math.Min(limit,cachedRows.Length-offset);
-   Row[] rows=new Row[count];Array.Copy(cachedRows,offset,rows,0,count);
+   Row[] rows=new Row[count];Array.Copy(cachedRows,offset,rows,0,count);AddModifiedDates(rows);
    return new {type="listing",path=path,parent=node.Parent,sort=sort,offset=offset,total=cachedRows.Length,
     logical=node.Bytes,allocated=mode=="mft"?(long?)node.Allocated:null,partial=node.Partial,
     allocationUnknown=node.AllocationUnknown,files=node.Files,rows=rows};
@@ -142,7 +149,7 @@ namespace RandomToolkits.HelperExperiment {
   static void Send(object value) {Console.WriteLine(Json.Serialize(value));Console.Out.Flush();}
   public static int Main() {
    Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
-   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.4",processId=Process.GetCurrentProcess().Id,
+   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.5",processId=Process.GetCurrentProcess().Id,
     architecture=Environment.Is64BitProcess?"x64":"x86"});
    try {
     string line;while((line=Console.ReadLine())!=null) {

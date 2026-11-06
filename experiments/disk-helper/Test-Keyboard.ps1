@@ -15,4 +15,6 @@ $script:Launch=$null
 $failed=$false
 try {Open-HelperDirectory (Join-Path $fixture 'missing')}catch{$failed=$true}
 if(-not $failed -or $script:Launch){throw 'Missing directory launched'}
+function Get-HelperVolumeInfo {param($Root)[pscustomobject]@{IsReady=$true;AvailableFreeSpace=25GB}}
+if((Get-HelperAvailableBytes $fixture) -ne 25GB){throw 'Available bytes were not read from the containing volume'}
 'PASS: Arrow/navigation keys, Ctrl+Enter, quoted Explorer directory argument and missing-path rejection.'
