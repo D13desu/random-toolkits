@@ -139,6 +139,18 @@ function Show-PcHealthFinding($Finding) {
         if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn};return}
     }
 }
+function New-PcHealthMenuItem($Row,[string]$Identity) {
+    $statusColor=switch([string]$Row.Status){'PASS'{'Green'}'WARN'{'Yellow'}'REVIEW'{'Yellow'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
+    [pscustomobject]@{
+        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);Detail=$Row.Detail;Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Title);Color='White'}
+        )
+        DetailParts=@([pscustomobject]@{Text=([string]$Row.Detail);Color='Gray'})
+    }
+}
 function Start-PcHealthDashboard {
     $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
@@ -149,7 +161,7 @@ function Start-PcHealthDashboard {
             $base=$identity;$suffix=1
             while($identities.ContainsKey($identity)){$suffix++;$identity=$base+'|'+$suffix}
             $identities[$identity]=$true
-            [pscustomobject]@{Id=$identity;Label=($row.Status+' | '+$row.Title);Detail=$row.Detail;Data=$row}
+            New-PcHealthMenuItem $row $identity
         })
         $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
         switch($choice.Action){

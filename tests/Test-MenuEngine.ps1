@@ -35,6 +35,9 @@ Assert $blocked 'Duplicate IDs are rejected'
 Feed @('','yes');Assert (-not (Confirm-PcMenuChange 'Fixture')) 'Changes default to No';Assert (Confirm-PcMenuChange 'Fixture') 'Explicit yes confirms'
 Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters cannot inject terminal commands'
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
+$script:Output.Clear()
+Write-PcMenuSegments @([pscustomobject]@{Text='binary.exe';Color='Cyan'},[pscustomobject]@{Text=' C:\long\path';Color='Gray'}) '> [1] ' 18 'White'
+Assert ((($script:Output -join '').Length -eq 18) -and (($script:Output -join '') -match '\.\.\.$')) 'Segmented coloured rows remain bounded'
 foreach($pair in @(@('UpArrow','Up'),@('DownArrow','Down'),@('Enter','Select'),@('Escape','Back'),@('Backspace','Back'),@('PageUp','Previous'),@('PageDown','Next'),@('Home','First'),@('End','Last'))){
  $key=[ConsoleKeyInfo]::new([char]0,[ConsoleKey]$pair[0],$false,$false,$false)
  Assert ((ConvertFrom-PcMenuKey $key) -eq $pair[1]) "Key maps: $($pair[0])"

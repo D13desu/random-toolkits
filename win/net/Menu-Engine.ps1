@@ -39,6 +39,24 @@ function Format-PcMenuText {
     if([char]::IsHighSurrogate($clean[$length-1])){$length--}
     return $clean.Substring(0,$length)+'...'
 }
+function Write-PcMenuSegments {
+    param([object[]]$Segments,[string]$Prefix='',[int]$Width=100,[string]$FallbackColor='Gray')
+    $cleanPrefix=($Prefix -replace '[\x00-\x1F\x7F]',' ')
+    $cleanSegments=@(foreach($segment in $Segments){
+        [pscustomobject]@{Text=([string]$segment.Text -replace '[\x00-\x1F\x7F]',' ');Color=$(if($segment.Color){[string]$segment.Color}else{$FallbackColor})}
+    })
+    $bounded=Format-PcMenuText ($cleanPrefix+(($cleanSegments | ForEach-Object Text) -join '')) $Width
+    $prefixLength=[math]::Min($cleanPrefix.Length,$bounded.Length)
+    if($prefixLength){Write-Host $bounded.Substring(0,$prefixLength) -NoNewline -ForegroundColor $FallbackColor}
+    $offset=$prefixLength
+    foreach($segment in $cleanSegments){
+        if($offset -ge $bounded.Length){break}
+        $count=[math]::Min($segment.Text.Length,$bounded.Length-$offset)
+        if($count){Write-Host $bounded.Substring($offset,$count) -NoNewline -ForegroundColor $segment.Color;$offset+=$count}
+    }
+    if($offset -lt $bounded.Length){Write-Host $bounded.Substring($offset) -NoNewline -ForegroundColor $FallbackColor}
+    Write-Host ''
+}
 function Show-PcMenu {
     [CmdletBinding()]
     param(
@@ -55,7 +73,8 @@ function Show-PcMenu {
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
     )
-    # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason.
+    # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason,
+    # LabelParts and DetailParts arrays containing Text/Color objects.
     # Caller retains State and handles Select/Refresh/Back; no scriptblock is executed here.
     $ids=@{};$keys=@{};$displayKeys=@{};$ordinal=0
     foreach($item in $Items){
@@ -89,12 +108,20 @@ function Show-PcMenu {
             $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
             $color=if($row.DisabledReason){'DarkGray'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color
+            if($row.LabelParts -and -not $row.DisabledReason){
+                $labelParts=@($row.LabelParts)
+                if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
+                Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$displayKey) $width $color
+            }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color}
             $detail=@($row.Detail | Select-Object -First $DetailLines)
             if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
             if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
             if(-not $detail.Count){$detail=@('')}
-            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width) -ForegroundColor $color}
+            for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
+                if($detailIndex -eq 0 -and $row.DetailParts -and -not $row.DisabledReason -and -not ($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail)){
+                    Write-PcMenuSegments @($row.DetailParts) '    ' $width $color
+                }else{Write-Host (Format-PcMenuText ('    '+$detail[$detailIndex]) $width) -ForegroundColor $color}
+            }
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
