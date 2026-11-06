@@ -43,14 +43,49 @@ function Get-PcNetworkConnections {
     }
     [pscustomobject]@{CollectedAt=(Get-Date);Rows=@($rows.ToArray() | Sort-Object Protocol,@{Expression={if($_.State -eq 'Listen'){0}else{1}}},LocalPort,LocalAddress,RemoteEndpoint,ProcessId);Issues=@($issues.ToArray())}
 }
+function New-PcNetworkConnectionMenuItem {
+    param($Row)
+    $path=if($Row.ExecutablePath){$Row.ExecutablePath}else{'Executable path unavailable'}
+    $stateColor=switch([string]$Row.State){'Established'{'Green'}'Listen'{'Yellow'}'Bound'{'Cyan'}'TimeWait'{'DarkGray'}default{'Gray'}}
+    $remoteAddress=if($Row.Protocol -eq 'UDP'){'*'}else{[string]$Row.RemoteAddress}
+    $remotePort=if($null -ne $Row.RemotePort){[string]$Row.RemotePort}else{''}
+    $localAddress=if(([string]$Row.LocalAddress).Contains(':')){'['+[string]$Row.LocalAddress+']'}else{[string]$Row.LocalAddress}
+    if($Row.Protocol -ne 'UDP' -and $remoteAddress.Contains(':')){$remoteAddress='['+$remoteAddress+']'}
+    $labelParts=@(
+        [pscustomobject]@{Text=([string]$Row.Protocol);Color='Cyan'}
+        [pscustomobject]@{Text=' ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.State);Color=$stateColor}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=$localAddress;Color='White'}
+        [pscustomobject]@{Text=':';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.LocalPort);Color='Yellow'}
+        [pscustomobject]@{Text=' -> ';Color='DarkGray'}
+        [pscustomobject]@{Text=$remoteAddress;Color='Gray'}
+    )
+    if($remotePort){$labelParts+=@([pscustomobject]@{Text=':';Color='DarkGray'},[pscustomobject]@{Text=$remotePort;Color='Yellow'})}
+    $detailParts=@(
+        [pscustomobject]@{Text='PID ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.ProcessId);Color='Magenta'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.ProcessName);Color='Cyan'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=$path;Color='Gray'}
+    )
+    [pscustomobject]@{
+        Id=$Row.Id
+        Label=('{0} {1} | {2} -> {3}' -f $Row.Protocol,$Row.State,$Row.LocalEndpoint,$Row.RemoteEndpoint)
+        Detail=('PID {0} | {1} | {2}' -f $Row.ProcessId,$Row.ProcessName,$path)
+        LabelParts=$labelParts
+        DetailParts=$detailParts
+        SearchText=($Row.ProcessId.ToString()+' '+$Row.ProcessName+' '+$Row.ExecutablePath)
+        Data=$Row
+    }
+}
 function Start-PcNetworkConnections {
     $snapshot=Get-PcNetworkConnections;$state=@{};$protocol='TCP';$tcpState='All'
     while($true){
         $rows=@($snapshot.Rows | Where-Object {($protocol -eq 'Both' -or $_.Protocol -eq $protocol) -and ($tcpState -eq 'All' -or ($_.Protocol -eq 'TCP' -and $_.State -eq $tcpState))})
-        $menu=@(foreach($row in $rows){
-            $path=if($row.ExecutablePath){$row.ExecutablePath}else{'Executable path unavailable'}
-            [pscustomobject]@{Id=$row.Id;Label=('{0} {1} | {2} -> {3}' -f $row.Protocol,$row.State,$row.LocalEndpoint,$row.RemoteEndpoint);Detail=('PID {0} | {1} | {2}' -f $row.ProcessId,$row.ProcessName,$path);SearchText=($row.ProcessId.ToString()+' '+$row.ProcessName+' '+$row.ExecutablePath);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-PcNetworkConnectionMenuItem $row})
         $description=('{0:HH:mm:ss} snapshot | {1} / {2} | {3} entries | Collection issues: {4} (C)' -f $snapshot.CollectedAt,$protocol,$tcpState,$rows.Count,$snapshot.Issues.Count)
         $choice=Show-PcMenu -Title 'Windows > Network > Connections' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{T='TCP/UDP/both';L='TCP listeners';E='Established TCP';A='All states';C='Collection notes'}
         switch($choice.Action){

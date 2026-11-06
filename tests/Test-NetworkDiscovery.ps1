@@ -25,6 +25,9 @@ $embedded=($source -split '# BEGIN NETWORK DISCOVERY',2)[1] -split '# END NETWOR
 $module=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Discovery.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded module matches maintained source'
 Assert ('discovery' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -eq connectivity)).Entry.Id) 'Discovery reachable under connectivity'
+$discoveryColorItem=New-NetworkDiscoveryMenuItem ([pscustomobject]@{Address='127.0.0.1';OpenTCP='443';Ping='Success';LatencyMs=1;ClosedTCP='';NoResponseTCP='';ErrorTCP='';MAC='001122334455';Vendor='Fixture';MacStatus='Observed'}) -ProbeView
+Assert (($discoveryColorItem.LabelParts | Where-Object Text -EQ 443).Color -eq 'Yellow') 'Discovery open ports use port colour'
+Assert (($discoveryColorItem.DetailParts | Where-Object Text -EQ Success).Color -eq 'Green') 'Successful discovery probe uses healthy colour'
 $script:ExportPath=Join-Path $env:TEMP ('discovery-test-'+[guid]::NewGuid().ToString('N')+'.csv')
 function Get-DiscoveryOuiDatabase {[pscustomobject]@{Entries=@{};RetrievedUtc='';Status='Test offline'}}
 function Invoke-NetworkDiscovery {

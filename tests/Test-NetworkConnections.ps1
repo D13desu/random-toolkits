@@ -28,6 +28,11 @@ Assert (($snapshot.Rows | Where-Object ProcessId -EQ 42 | Select-Object -First 1
 Assert (($snapshot.Rows | Where-Object ProcessId -EQ 43).ProcessName -eq 'PID reused / exited') 'Reused PID is not attributed to a newer process'
 Assert (($snapshot.Rows | Where-Object ProcessId -EQ 0).ProcessName -eq 'Unattributed') 'PID zero is not labelled as an owning process'
 Assert (@($snapshot.Rows | Where-Object {$_.Protocol -eq 'UDP' -and ($_.State -ne 'Bound' -or $_.RemoteEndpoint -ne '*')}).Count -eq 0) 'UDP does not invent TCP state or remote peer'
+$colored=New-PcNetworkConnectionMenuItem ($snapshot.Rows | Where-Object ProcessId -EQ 42 | Select-Object -First 1)
+Assert (($colored.LabelParts | Where-Object {$_.Text -eq '443'}).Color -eq 'Yellow') 'Connection ports use the port colour'
+Assert (($colored.DetailParts | Where-Object {$_.Text -eq 'fixture.exe'}).Color -eq 'Cyan') 'Process binary uses the binary colour'
+Assert (($colored.DetailParts | Where-Object {$_.Text -eq 'C:\fixture.exe'}).Color -eq 'Gray') 'Executable path uses the path colour'
+Assert (($colored.DetailParts | Where-Object {$_.Text -eq '42'}).Color -eq 'Magenta') 'PID uses the process identifier colour'
 $script:UdpFails=$true;$partial=Get-PcNetworkConnections
 Assert ($partial.Rows.Count -eq 4 -and $partial.Issues.Count -eq 1) 'UDP failure preserves TCP rows and reports incomplete collection'
 $script:UdpFails=$false

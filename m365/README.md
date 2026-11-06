@@ -26,6 +26,10 @@ irm https://tools.d0xd.com/m365/ | iex
 
 Run `Start-M365-Toolkit.cmd` on Windows, or `pwsh -File ./M365-Toolkit.ps1` on PowerShell 7.4+.
 
+## Build and publication
+
+Maintain `Launch-M365.ps1` and `M365-Toolkit.ps1` as the web launcher and toolkit sources. Run `../tests/Sync-M365.ps1` after local edits, or `../tests/Sync-Site.ps1` to assemble every published endpoint. The build parses both scripts, injects the toolkit's SHA-256 into the launcher, and copies the launcher byte-for-byte to `m365/index.html`. GitHub Actions performs that build before deploying `main`; the launcher downloads the matching toolkit from the same Pages artifact and refuses to execute it if verification fails.
+
 ## v0.3.7 Identity Protection
 
 Main menu R: risky users, risk detections and travel-related risk findings. Uses Microsoft Graph v1.0 Identity Protection endpoints and requests IdentityRiskyUser.Read.All and IdentityRiskEvent.Read.All delegated scopes. Requires appropriate Microsoft Entra ID Protection licensing and roles. No automatic geographical distance/speed calculation: travel results are Microsoft-generated detections. Tenant state is not changed. Risk findings are not proof of compromise.

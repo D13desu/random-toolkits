@@ -33,6 +33,9 @@ Assert ($script:Calls[-1] -eq 'VerifyFiles') 'Verification launches without repa
 Assert (((Get-PcRepairCommand VerifyFiles).Arguments -join ' ') -eq '/verifyonly') 'Verification cannot repair files'
 Assert (((Get-PcRepairCommand RestoreHealth).Arguments -join ' ') -eq '/Online /Cleanup-Image /RestoreHealth /NoRestart') 'DISM repair uses fixed arguments and suppresses restart'
 function Get-PcServiceInventory {[pscustomobject]@{Name='Fixture';DisplayName='Fixture';PathName='C:\fixture.exe';State='Running';StartMode='Auto'}}
+$serviceColorItem=New-PcServiceMenuItem (Get-PcServiceInventory)
+Assert (($serviceColorItem.LabelParts | Where-Object Text -EQ Running).Color -eq 'Green') 'Running service uses healthy colour'
+Assert (($serviceColorItem.DetailParts | Select-Object -First 1).Color -eq 'Gray') 'Service binary path uses metadata colour'
 function Test-PcMenuKeyboard {$false}
 function Show-PcServiceDetails {param($Row) Assert ($Row.Name -eq 'Fixture') 'Selection opens correct service'}
 foreach($answer in @('F','fixture','Down','Select','R','B')){$script:Answers.Enqueue($answer)}

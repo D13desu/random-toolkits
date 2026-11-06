@@ -57,15 +57,34 @@ function Get-PcScheduledTaskEntries {
         }
     }finally{Write-Progress -Activity 'Inspecting scheduled tasks (read-only)' -Completed}
 }
+function New-PcStartupTaskMenuItem($Row,[ValidateSet('Startup','Task')][string]$Kind) {
+    $statusColor=switch([string]$Row.Status){'OK'{'Green'}'FOUND'{'Green'}'REVIEW'{'Yellow'}'MISSING'{'Red'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
+    $detail=if($Kind -eq 'Startup'){@('Command: '+$Row.Command; 'Source: '+$Row.Location+' | Path: '+$Row.PathStatus)}else{@($Row.Location+' | '+$Row.State;'Result: '+$Row.Result+' | '+$Row.ResultMeaning)}
+    $firstDetailParts=if($Kind -eq 'Startup'){@(
+        [pscustomobject]@{Text='Command: ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.Command);Color='Gray'}
+    )}else{@(
+        [pscustomobject]@{Text=([string]$Row.Location);Color='Gray'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.State);Color=$(if($Row.State -eq 'Running'){'Green'}elseif($Row.State -eq 'Disabled'){'DarkGray'}else{'Cyan'})}
+    )}
+    [pscustomobject]@{
+        Id=($Row.Location+'|'+$Row.Name+'|'+$Row.User+'|'+$Row.Command)
+        Label=($Row.Status+' | '+$Row.Name);Detail=$detail;SearchText=($Row.Command+' '+$Row.Executable);Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Name);Color='Cyan'}
+        )
+        DetailParts=$firstDetailParts
+    }
+}
 function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind) {
     $state=@{};$reviewOnly=$false;$reload=$true;$all=@()
     while($true){
         if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false}
         $rows=@($all | Where-Object {-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
-        $menu=@(foreach($row in $rows){
-            $detail=if($Kind -eq 'Startup'){@('Command: '+$row.Command; 'Source: '+$row.Location+' | Path: '+$row.PathStatus)}else{@($row.Location+' | '+$row.State;'Result: '+$row.Result+' | '+$row.ResultMeaning)}
-            [pscustomobject]@{Id=($row.Location+'|'+$row.Name+'|'+$row.User+'|'+$row.Command);Label=($row.Status+' | '+$row.Name);Detail=$detail;SearchText=($row.Command+' '+$row.Executable);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-PcStartupTaskMenuItem $row $Kind})
         $description=if($Kind -eq 'Startup'){'Read-only; inventory may omit packaged apps and enabled/approved state.'}else{'Read-only; visible tasks only. Nonzero results need review, not proof of failure.'}
         $choice=Show-PcMenu -Title ('Windows > Startup/tasks > '+$Kind) -Items $menu -State $state -Filterable -Refreshable -DetailLines 2 -Description $description -Commands @{C=('Review only: '+$reviewOnly+' / toggle')}
         switch($choice.Action){

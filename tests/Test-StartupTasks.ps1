@@ -26,6 +26,9 @@ function Get-ScheduledTaskInfo {
 $rows=@(Get-PcScheduledTaskEntries)
 Assert ($rows.Count -eq 3 -and ($rows | Where-Object Name -eq Denied).Status -eq 'UNAVAILABLE') 'Per-task access failure preserves other tasks'
 Assert (($rows | Where-Object Name -eq COM).Paths -match 'UNVERIFIED') 'COM actions are not labelled missing executables'
+$taskColorItem=New-PcStartupTaskMenuItem ($rows | Where-Object Name -eq OK) Task
+Assert (($taskColorItem.LabelParts | Where-Object Text -EQ OK).Color -eq 'Green') 'Successful task status uses healthy colour'
+Assert (($taskColorItem.LabelParts | Where-Object Text -EQ OK).Color -contains 'Cyan') 'Task name uses identifier colour'
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
 foreach($answer in @('Down','Select','','F','Fixture','C','R','B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt $Prompt"};$script:Answers.Dequeue()}

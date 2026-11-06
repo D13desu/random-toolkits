@@ -89,6 +89,8 @@ Sources: [Microsoft Outlook size configuration](https://learn.microsoft.com/en-u
 
 `Invoke-PcRegistryTweak outlook -SizeGB 100 -WhatIf` previews a change after dot-sourcing with `-NoMenu`. Both apply and reset support `-WhatIf`. `tests/Test-RegistryTweaks.ps1` tests cancellation, preview, values, backup contents, defaults, elevation, policy gating and backup failure with mocked writes. Live registry changes are not exercised.
 
+Maintain `Registry-Tweaks.ps1`, then run `tests/Sync-RegistryTweaks.ps1` to update its embedded launcher block and both Pages endpoints. The launcher retains the generated embedded copy so `irm ... | iex` remains a single, offline-after-download entry point.
+
 ## Checks
 
 | Check | Behavior / limitations |
@@ -157,7 +159,7 @@ Add checks to `Get-NetworkChecks`, supplying minimum PS version, required comman
 
 AD entries live in `Get-AdChecks` and also declare allowed machine roles. Both the menu and noninteractive dispatcher enforce requirements; secure-channel testing additionally rechecks the role immediately before invoking the cmdlet. AD check IDs are `ad-context`, `ad-discovery`, `ad-dns`, `ad-secure`, `ad-time`, and `ad-shares`.
 
-`win/net/Network-Toolkit.ps1` remains the source to preserve local script paths. Copy it byte-for-byte to both `win/index.html` and `win/net/index.html` after edits. GitHub Pages serves these raw scripts through directory indexes, including redirects from `/win` and `/win/net`. The Windows launcher does not rely on `$PSScriptRoot`; only the disk tool requires an additional HTTPS download. Update its pinned commit and SHA-256 together when releasing disk changes.
+`win/net/Network-Toolkit.ps1` remains the assembled launcher source. After editing any maintained module, run `tests/Sync-WindowsToolkit.ps1` for a local build; it synchronizes every embedded Windows module and copies the assembled launchers byte-for-byte to `win/index.html` and `win/net/index.html`. GitHub Actions runs the same build for pushes and pull requests, then deploys the freshly generated site artifact from `main`. Configure the repository's Pages source as **GitHub Actions**. GitHub Pages serves the generated raw scripts through directory indexes, including redirects from `/win` and `/win/net`. The Windows launcher does not rely on `$PSScriptRoot`; only the disk tool requires an additional HTTPS download. Update its pinned commit and SHA-256 together when releasing disk changes.
 
 Run the regression checks in both shells:
 
@@ -321,6 +323,8 @@ Graduation validation on the maintainer's PC: packaged-launcher/hash checks, nat
 
 Open **Network > Connectivity and adapters > Network connections** (item 5). This is a read-only, numeric endpoint snapshot similar to `ss -antp`: protocol, TCP state, local/remote IPv4 or bracketed IPv6 endpoint, PID, process name and executable path. Default view is all TCP states. L selects TCP listeners; E selects established TCP; A shows all states in the current protocol; T cycles TCP, UDP and both. F searches visible endpoint/process/path text literally, R recollects, Enter opens cached full details, and Esc/Backspace/B returns. C shows collection errors and limitations. Existing DHCP renewal follows the new check at item 6.
 
+Connection rows use field-level colours for faster scanning: yellow ports, cyan binary names, magenta PIDs, gray executable paths, white/gray addresses, and state-specific green/yellow/cyan/gray. Red remains reserved for actual failures rather than ordinary socket metadata.
+
 No DNS lookups, outbound probes, process termination or firewall changes are performed. UDP records are bound local sockets; their remote peer is shown as `*`, not invented connection state. A listener is not proof of reachability through the firewall. Process metadata is gathered once per snapshot; paths can be unavailable without elevation or for protected/exited processes. PID 0 is unattributed. If the current process started after the socket, attribution is withheld as possible PID reuse. Collection is not atomic, so all remaining PID mappings are best effort. Partial TCP/UDP/process collection failures remain visible under C rather than being presented as a complete empty list.
 
 The Windows NetTCPIP cmdlets must be available; missing TCP support is marked unavailable in the menu. UDP collection failure preserves TCP results. PowerShell 5.1 and 7 fixtures cover IPv6 formatting, duplicate endpoint tuples, stale process IDs, unavailable metadata, partial collection and keyboard/filter/refresh navigation. Live loopback tests verified listening/established TCP and bound UDP with the correct owning PID on both shells.
@@ -331,6 +335,8 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 ### Navigation adjustment (0.14.1)
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
+
+Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
 
 ### Compact hybrid menus (0.14.2)

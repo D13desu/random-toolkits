@@ -28,6 +28,9 @@ if($KeyboardMode){
 }
 Start-PcEventBrowser -DefaultLog Application -Quick
 Assert ($script:Answers.Count -eq 0) 'Preview paging and detail return preserve browser navigation'
+$eventColorItem=New-PcEventMenuItem ([pscustomobject]@{Time='now';Level='Error';Id=42;Provider='Fixture';Log='Application';RecordId=99;Message='Failure'})
+Assert (($eventColorItem.LabelParts | Where-Object Text -EQ Error).Color -eq 'Red') 'Event errors use failure colour'
+Assert (($eventColorItem.LabelParts | Where-Object Text -EQ 42).Color -eq 'Magenta') 'Event IDs use numeric identifier colour'
 Assert (($script:Output -join '|') -match 'Body 1 Second line 1') 'List renders message bodies'
 Assert ($script:Output -contains "Body 6`r`nSecond line 6") 'Detail retains complete original multiline message'
 Assert ($script:Output -contains '<Event><RecordID>6</RecordID></Event>' -and $script:Queries -eq 1) 'XML comes from the same cached event, without a second log query'

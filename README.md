@@ -37,7 +37,7 @@ In PowerShell 7.4+, once GitHub Pages and DNS are ready:
 irm https://tools.d0xd.com/m365/ | iex
 ```
 
-The launcher downloads v0.3.7 from a pinned Git commit and verifies its SHA-256 checksum before execution. Missing modules are installed from PSGallery only after confirmation. On Windows, the toolkit and reports are stored under `%LOCALAPPDATA%/Random-Toolkits/m365/0.3.7/`. No administrator rights are required for installation. Review remote scripts before executing them.
+The launcher downloads the CI-built v0.3.7 toolkit from the same Pages deployment and verifies its generated SHA-256 checksum before execution. Missing modules are installed from PSGallery only after confirmation. On Windows, the toolkit and reports are stored under `%LOCALAPPDATA%/Random-Toolkits/m365/0.3.7/`. No administrator rights are required for installation. Review remote scripts before executing them.
 
 While the custom domain is being configured, use:
 
@@ -60,8 +60,6 @@ The imported v0.3.7 toolkit investigates Microsoft 365 data without changing ten
 
 Windows tools live under `win/<tool>/`. The cross-platform M365 toolkit lives under `m365/`.
 
-GitHub Pages publishes `main` from the repository root, with `CNAME` specifying `tools.d0xd.com`. `.nojekyll` preserves static files without Jekyll processing. The `m365/index.html` file deliberately contains raw PowerShell, not HTML: Pages serves this directory index to `Invoke-RestMethod`. The extensionless `/m365` URL redirects to `/m365/`; the documented command uses the trailing slash directly.
+GitHub Actions runs `tests/Sync-Site.ps1` to assemble the self-contained Windows and M365 endpoints, then deploys the generated repository-root artifact from `main`; configure the Pages source as **GitHub Actions**. `CNAME` specifies `tools.d0xd.com`, and `.nojekyll` preserves static files without Jekyll processing. The `m365/index.html` file deliberately contains raw PowerShell, not HTML: Pages serves this directory index to `Invoke-RestMethod`. The extensionless `/m365` URL redirects to `/m365/`; the documented command uses the trailing slash directly.
 
-Maintain `m365/Launch-M365.ps1` as the launcher source and copy it byte-for-byte to `m365/index.html` after edits. When upgrading the toolkit, update the pinned commit, version directory, and checksum together. The launcher runs the downloaded script as a local file so `$PSScriptRoot` and report paths work correctly.
-
-The launcher's pinned download still uses `win/m365/M365-Toolkit.ps1` because that is the file's location in the historical release commit.
+Maintain `m365/Launch-M365.ps1` and `m365/M365-Toolkit.ps1` as the launcher and toolkit sources. Run `tests/Sync-M365.ps1` for an M365-only local build or `tests/Sync-Site.ps1` for the complete site; CI runs the complete build before deployment, injects the toolkit's SHA-256 into the launcher, and publishes `m365/index.html` byte-for-byte from it. The launcher downloads the toolkit from the same Pages artifact, verifies it, and runs it as a local file so `$PSScriptRoot` and report paths work correctly. Update the version directory together with toolkit version changes.

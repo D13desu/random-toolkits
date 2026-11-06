@@ -46,6 +46,8 @@ function Start-PcEventBrowser {param($DefaultLog,[switch]$Quick) $script:Routes.
 Open-PcHealthTarget 'log:Application'
 Assert ($script:Routes[0] -eq 'log:Application') 'Event findings open the matching log'
 function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@{CollectedAt=(Get-Date);Rows=@((New-PcHealthFinding INFO 'First' 'Details' storage),(New-PcHealthFinding REVIEW 'Second' 'Details' power))}}
+$healthColorItem=New-PcHealthMenuItem (New-PcHealthFinding REVIEW 'Colour fixture' 'Details' power) fixture
+Assert (($healthColorItem.LabelParts | Where-Object Text -EQ REVIEW).Color -eq 'Yellow') 'Health review status uses warning colour'
 function Test-PcMenuKeyboard {$false}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
 foreach($answer in @('Down','Select','1','R','C','B')){$script:Answers.Enqueue($answer)}
