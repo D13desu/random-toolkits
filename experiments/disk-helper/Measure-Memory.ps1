@@ -25,6 +25,8 @@ try {
     }
     $report.ReadySeconds=$state.readySeconds
     $report.CleanupMilliseconds=$state.cleanupMilliseconds
+    $report.PreCompactCleanupMilliseconds=$state.preCompactCleanupMilliseconds
+    $report.FinalCleanupMilliseconds=$state.finalCleanupMilliseconds
     $report.CompactMilliseconds=$state.compactMilliseconds
     $before=Invoke-DiskHelper $session @{command='list';limit=20}
     $report.Memory=Invoke-DiskHelper $session @{command='memory';collect=$true}

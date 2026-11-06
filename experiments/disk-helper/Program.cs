@@ -14,7 +14,7 @@ namespace RandomToolkits.HelperExperiment {
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
   static List<Issue> issues;static Dictionary<string,int> causes;static int issueCount;
-  static double cleanupMilliseconds,compactMilliseconds;
+  static double cleanupMilliseconds,preCompactCleanupMilliseconds,finalCleanupMilliseconds,compactMilliseconds;
   static ScanProfile profile;
   static Stopwatch elapsed; static string mode, cachedPath, cachedSort; static Row[] cachedRows;
   static bool Running {get {return (native!=null && !native.Done) || (mft!=null && !mft.Done);}}
@@ -34,14 +34,21 @@ namespace RandomToolkits.HelperExperiment {
    scan=mft!=null?mft.Result:native.Result;
    object summary=Summary();issues=scan.Issues;causes=scan.IssueCounts;issueCount=scan.IssueCount;
    if(mode=="mft") {
-    profile.Mark("cache cleanup");
-    var timer=Stopwatch.StartNew();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
-    profile.Mark("cache compaction");timer.Restart();compact=scan.DirectRows==null?new CompactIndex(scan):new CompactIndex(scan,scan.DirectRows);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
+    var timer=Stopwatch.StartNew();
+    // Legacy rows build a replacement cache and benefit from reclaiming the
+    // reconstruction graph first. The default direct cache is handed off
+    // without copying, so collecting here only repeats the final collection.
+    if(scan.DirectRows==null) {
+     profile.Mark("pre-compaction cleanup");
+     GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();preCompactCleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
+    }
+    profile.Mark("cache handoff");timer.Restart();compact=scan.DirectRows==null?new CompactIndex(scan):new CompactIndex(scan,scan.DirectRows);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
     scan=null;mft=null;
     timer.Restart();
     // Reclaim gaps left by the discarded reconstruction tree and large indexes.
     System.Runtime.GCSettings.LargeObjectHeapCompactionMode=System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-    GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
+    GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect();finalCleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
+    cleanupMilliseconds=preCompactCleanupMilliseconds+finalCleanupMilliseconds;
     profile.Mark("ready");
    }
    completedSummary=summary;
@@ -59,6 +66,7 @@ namespace RandomToolkits.HelperExperiment {
    Finish();
    if(completedSummary!=null) return new {type="status",state="ready",summary=completedSummary,workingSet=Process.GetCurrentProcess().WorkingSet64,
     managedBytes=GC.GetTotalMemory(false),cleanupMilliseconds=cleanupMilliseconds,compactMilliseconds=compactMilliseconds,
+    preCompactCleanupMilliseconds=preCompactCleanupMilliseconds,finalCleanupMilliseconds=finalCleanupMilliseconds,
     readySeconds=elapsed.Elapsed.TotalSeconds+(cleanupMilliseconds+compactMilliseconds)/1000};
    if(native==null && mft==null) return new {type="status",state="idle"};
    return new {type="status",state="scanning",phase=profile!=null?profile.Phase:"native scan",files=mft!=null?mft.FilesSeen:native.FilesSeen,
@@ -79,7 +87,7 @@ namespace RandomToolkits.HelperExperiment {
     var drive=new DriveInfo(path);if(drive.DriveType==DriveType.Network || drive.DriveFormat!="NTFS") throw new ArgumentException("MFT requires a local NTFS volume.");
    }
    mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;
-   cleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
+   cleanupMilliseconds=0;preCompactCleanupMilliseconds=0;finalCleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
    profile=null;if(engine=="mft") {mft=MftScanner.Start(path);profile=mft.Profile;}else native=Scanner.Start(path);
    return new {type="accepted",engine=engine,path=path};
   }

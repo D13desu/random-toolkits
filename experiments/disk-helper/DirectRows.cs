@@ -57,10 +57,11 @@ namespace RandomToolkits.HelperExperiment {
    if(parent!=null) occupied.Add(new Key {Parent=parentId,Name=name});
   }
   internal bool Occupy(string parent,string name){return occupied.Add(new Key {Parent=IdForPath(parent),Name=name});}
+  internal bool Occupy(int parent,string name){return occupied.Add(new Key {Parent=parent,Name=name});}
   internal void Add(string parent,string name,string kind,long logical,long allocated,bool unknown,bool partial,string tag){
    Add(IdForPath(parent),name,kind,logical,allocated,unknown,partial,tag);
   }
-  void Add(int id,string name,string kind,long logical,long allocated,bool unknown,bool partial,string tag){
+  internal void Add(int id,string name,string kind,long logical,long allocated,bool unknown,bool partial,string tag){
    int code=Array.IndexOf(CompactIndex.Kinds,kind);
    if(code<0) throw new InvalidOperationException("Unknown compact row kind.");
    if(tag!=null){string shared;if(tags.TryGetValue(tag,out shared)) tag=shared;else tags.Add(tag,tag);}
@@ -70,6 +71,7 @@ namespace RandomToolkits.HelperExperiment {
   }
   internal void SetMetadata(string path,long allocated,bool unknown,string tag){int id=IdForPath(path);var folder=Folders.Get(id);folder.Allocated=allocated;folder.Unknown=unknown;Folders.Set(id,folder);folderTags[id]=tag;}
   internal void Charge(string path,long logical,long allocated,bool file,bool unknown){int id=IdForPath(path);var folder=Folders.Get(id);folder.Logical=checked(folder.Logical+logical);folder.Allocated=checked(folder.Allocated+allocated);if(file)folder.Files++;folder.Unknown|=unknown;Folders.Set(id,folder);}
+  internal void Charge(int id,long logical,long allocated,bool file,bool unknown){var folder=Folders.Get(id);folder.Logical=checked(folder.Logical+logical);folder.Allocated=checked(folder.Allocated+allocated);if(file)folder.Files++;folder.Unknown|=unknown;Folders.Set(id,folder);}
   internal void Aggregate(Scan scan){
    // Resolution creates parents before children. Reverse IDs are a topological order.
    for(int id=Folders.Count-1;id>0;id--){var child=Folders.Get(id);if(child.Parent<0 || child.Parent>=id)throw new InvalidOperationException("Invalid compact parent order.");var parent=Folders.Get(child.Parent);
