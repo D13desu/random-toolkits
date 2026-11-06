@@ -39,6 +39,13 @@ function Format-PcMenuText {
     if([char]::IsHighSurrogate($clean[$length-1])){$length--}
     return $clean.Substring(0,$length)+'...'
 }
+function Get-PcMenuPageSize {
+    param([int]$WindowHeight,[ValidateRange(1,3)][int]$DetailLines=1,[ValidateRange(1,100)][int]$Maximum=12)
+    # Header, filter, page/status lines, controls and selection prompt use about six rows.
+    # Keep three additional rows for wrapping and terminal variance without wasting a third of the viewport.
+    $reservedRows=9
+    return [int][math]::Max(1,[math]::Min($Maximum,[math]::Floor(($WindowHeight-$reservedRows)/[double]($DetailLines+1))))
+}
 function Write-PcMenuSegments {
     param([object[]]$Segments,[string]$Prefix='',[int]$Width=100,[string]$FallbackColor='Gray')
     $cleanPrefix=($Prefix -replace '[\x00-\x1F\x7F]',' ')
@@ -96,7 +103,7 @@ function Show-PcMenu {
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
         $size=$PageSize;$width=100
         if($keyboard){
-            try{$size=[math]::Max(1,[math]::Min($PageSize,[math]::Floor(($Host.UI.RawUI.WindowSize.Height-13)/($DetailLines+1))));$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $DetailLines $PageSize;$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             Clear-Host
         }
         $page=[int][math]::Floor($selected/[double]$size)
