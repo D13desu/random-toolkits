@@ -1,9 +1,24 @@
 // Embedded into Disk-Usage.ps1 by tests/Sync-DiskMft.ps1. No runtime download.
 // Read-only file-record queries plus bounded raw reads of ATTRIBUTE_LIST metadata.
 namespace RandomToolkits.DiskV10 {
- public class MftStream { public string Name; public long Allocated; public bool Known; }
+ public class MftStream { public string Name; public long Allocated; public bool Known, Resident; }
  public class MftName { public ulong Parent; public string Name; }
  public class MftRun { public long Cluster, Count; }
+ public class MftAttributeAllocation {
+  public long AttributeList,IndexAllocation,Bitmap,Other,Unknown;
+  readonly System.Collections.Generic.Dictionary<uint,long> byType=new System.Collections.Generic.Dictionary<uint,long>();
+  readonly System.Collections.Generic.Dictionary<uint,long> counts=new System.Collections.Generic.Dictionary<uint,long>();
+  public void Add(uint type,long allocated,bool known) {
+   long count;counts.TryGetValue(type,out count);counts[type]=count+1;
+   if(!known) {Unknown++;return;}
+   long current;byType.TryGetValue(type,out current);byType[type]=checked(current+allocated);
+   if(type==0x20) AttributeList=checked(AttributeList+allocated);
+   else if(type==0xa0) IndexAllocation=checked(IndexAllocation+allocated);
+   else if(type==0xb0) Bitmap=checked(Bitmap+allocated);
+   else Other=checked(Other+allocated);
+  }
+  public object Snapshot(){var rows=new System.Collections.Generic.List<object>();foreach(var pair in byType){long count;counts.TryGetValue(pair.Key,out count);rows.Add(new {type="0x"+pair.Key.ToString("X"),allocated=pair.Value,count=count});}return new {attributeList=AttributeList,indexAllocation=IndexAllocation,bitmap=Bitmap,other=Other,unknown=Unknown,totalKnown=checked(AttributeList+IndexAllocation+Bitmap+Other),types=rows.ToArray()};}
+ }
  public class MftRecord {
   public ulong Reference; public bool Directory, Reparse, Unsupported, HasData;
   public bool HasAttributeList, HasStandardInformation;
@@ -15,7 +30,7 @@ namespace RandomToolkits.DiskV10 {
   public bool ApiVerified;
   public string ApiIssue;
   public string ExtensionIssue;
-  public long UnnamedAllocated, Allocated;
+  public long UnnamedAllocated, Allocated, ResidentAllocated;
   public bool UnnamedAllocationKnown=true, AllocationKnown, AllocationListKnown;
   public string AllocationIssue;
   public string AttributeListIssue;
@@ -38,7 +53,7 @@ namespace RandomToolkits.DiskV10 {
   [System.Runtime.InteropServices.DllImport("kernel32.dll",SetLastError=true)]
   static extern bool ReadFile(Microsoft.Win32.SafeHandles.SafeFileHandle handle,System.IntPtr buffer,int count,out int read,System.IntPtr overlapped);
   const ulong IndexMask=0x0000ffffffffffffUL;
-  public Scan Result=new Scan(); public volatile bool Done, CancelRequested;
+  public Scan Result=new Scan(); public readonly MftAttributeAllocation AttributeAllocation=new MftAttributeAllocation(); public volatile bool Done, CancelRequested;
   public string Error; public long FilesSeen, BytesSeen, RecordsSeen; public int DirectoriesSeen;
   public Row[] Snapshot() { return new Row[0]; }
   static ushort U16(byte[] b,int p) { return System.BitConverter.ToUInt16(b,p); }
@@ -46,7 +61,8 @@ namespace RandomToolkits.DiskV10 {
   static ulong U64(byte[] b,int p) { return System.BitConverter.ToUInt64(b,p); }
   static void Need(bool valid) { if(!valid) throw new System.IO.InvalidDataException("Invalid or unsupported NTFS record bounds."); }
   // The FSCTL returns a filesystem-managed record. It does not require raw-sector USA fixups.
-  public static MftRecord Parse(byte[] b,ulong index) {
+  public static MftRecord Parse(byte[] b,ulong index) {return Parse(b,index,null);}
+  public static MftRecord Parse(byte[] b,ulong index,MftAttributeAllocation attributeAllocation) {
    Need(b!=null && b.Length>=48 && U32(b,0)==0x454c4946);
    if((U16(b,22)&1)==0) return null;
    int used=checked((int)U32(b,24)), p=U16(b,20);
@@ -113,9 +129,17 @@ namespace RandomToolkits.DiskV10 {
        r.UnnamedAllocated=allocation;r.UnnamedAllocationKnown=known;
       } else {
        if(r.NamedStreams==null) r.NamedStreams=new System.Collections.Generic.List<MftStream>();
-       r.NamedStreams.Add(new MftStream {Name=streamName,Allocated=allocation,Known=known});
+       r.NamedStreams.Add(new MftStream {Name=streamName,Allocated=allocation,Known=known,Resident=!nonresident});
       }
+      if(!nonresident) r.ResidentAllocated=checked(r.ResidentAllocated+allocation);
      }
+    }
+    if(type!=0x80 && nonresident && U64(b,p+16)==0 && attributeAllocation!=null) {
+     ushort flags=U16(b,p+12);bool packed=(flags&0x8001)!=0,known=true;long allocation=0;
+     if((flags&0xff)!=0 && (flags&0xff)!=1) known=false;
+     else if(packed && (length<72 || U16(b,p+32)<72)) known=false;
+     else {allocation=System.BitConverter.ToInt64(b,p+(packed?64:40));if(allocation<0){known=false;allocation=0;}}
+     attributeAllocation.Add(type,allocation,known);
     }
     p+=length;
    }
@@ -228,7 +252,7 @@ namespace RandomToolkits.DiskV10 {
     if(r==null || r.BaseReference!=0 || bases.ContainsKey(r.Reference)) continue;
     if(!r.HasAttributeList) {result.Add(r);continue;}
     // Clone only records being assembled; repeated builds must not append names twice.
-    var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,NameAttributeCount=r.NameAttributeCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes,UnnamedAllocated=r.UnnamedAllocated,UnnamedAllocationKnown=r.UnnamedAllocationKnown,AllocationListKnown=r.AllocationListKnown,ExpectedStreams=r.ExpectedStreams};
+    var copy=new MftRecord {Reference=r.Reference,Directory=r.Directory,Reparse=r.Reparse,Unsupported=r.Unsupported,HasData=r.HasData,HasAttributeList=true,HasStandardInformation=r.HasStandardInformation,LinkCount=r.LinkCount,NameAttributeCount=r.NameAttributeCount,ReparseTag=r.ReparseTag,Bytes=r.Bytes,UnnamedAllocated=r.UnnamedAllocated,UnnamedAllocationKnown=r.UnnamedAllocationKnown,ResidentAllocated=r.ResidentAllocated,AllocationListKnown=r.AllocationListKnown,ExpectedStreams=r.ExpectedStreams};
     copy.AttributeListIssue=r.AttributeListIssue;copy.ExtensionIssue=r.ExtensionIssue;copy.ExtensionReferences=r.ExtensionReferences;copy.ExpectedNameCount=r.ExpectedNameCount;copy.ExpectedNames=r.ExpectedNames;
     if(r.AllocationListKnown && r.ExtensionReferences!=null) foreach(ulong reference in r.ExtensionReferences) {
      MftRecord extra;if(!extensions.TryGetValue(reference,out extra) || extra.BaseReference!=r.Reference) copy.ExtensionIssue="Attribute list references a missing, reused or differently owned extension.";
@@ -258,6 +282,7 @@ namespace RandomToolkits.DiskV10 {
      else {owner.HasData=true;owner.Bytes=extra.Bytes;owner.UnnamedAllocated=extra.UnnamedAllocated;owner.UnnamedAllocationKnown=extra.UnnamedAllocationKnown;}
     }
     if(extra.NamedStreams!=null) {if(owner.NamedStreams==null) owner.NamedStreams=new System.Collections.Generic.List<MftStream>();owner.NamedStreams.AddRange(extra.NamedStreams);}
+    owner.ResidentAllocated=checked(owner.ResidentAllocated+extra.ResidentAllocated);
    }
    foreach(MftRecord r in bases.Values) {
     if(!r.HasAttributeList) continue;
@@ -503,14 +528,14 @@ namespace RandomToolkits.DiskV10 {
      Need(returned>=12 && (U64(output,0)&IndexMask)==5);int rootSize=checked((int)U32(output,8));
      Need(rootSize>=48 && rootSize<=recordSize && rootSize<=returned-12);
      byte[] rootRecord=new byte[rootSize];System.Buffer.BlockCopy(output,12,rootRecord,0,rootSize);
-     MftRecord rootEntry=Parse(rootRecord,5);Need(rootEntry!=null && rootEntry.Directory);records.Add(rootEntry);
+     MftRecord rootEntry=Parse(rootRecord,5,AttributeAllocation);Need(rootEntry!=null && rootEntry.Directory);records.Add(rootEntry);
      while(!CancelRequested) {
       byte[] input=System.BitConverter.GetBytes(next);
       if(!DeviceIoControl(handle,0x90068,input,input.Length,output,output.Length,out returned,System.IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
       Need(returned>=12);ulong actual=U64(output,0)&IndexMask;int size=checked((int)U32(output,8));
       Need(actual<=next && size>=48 && size<=recordSize && size<=returned-12);
       byte[] record=new byte[size];System.Buffer.BlockCopy(output,12,record,0,size);
-      try {MftRecord r=Parse(record,actual);if(r!=null && actual!=5) {LoadAttributeList(handle,r,volume);records.Add(r);if(r.BaseReference==0) {if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}}
+      try {MftRecord r=Parse(record,actual,AttributeAllocation);if(r!=null && actual!=5) {LoadAttributeList(handle,r,volume);records.Add(r);if(r.BaseReference==0) {if(r.Directory) DirectoriesSeen++;else {System.Threading.Interlocked.Increment(ref FilesSeen);System.Threading.Interlocked.Add(ref BytesSeen,r.Bytes);}}}}
       catch(System.IO.InvalidDataException ex) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": "+ex.Message);}
       catch(System.OverflowException) {errorCount++;if(errors.Count<100) errors.Add("MFT #"+actual+": oversized record field.");}
       System.Threading.Interlocked.Increment(ref RecordsSeen);

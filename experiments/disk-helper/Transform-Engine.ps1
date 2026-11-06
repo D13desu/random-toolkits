@@ -9,7 +9,7 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
         if(([regex]::Matches($Text,[regex]::Escape($Old))).Count -ne 1){throw "Engine adaptation anchor changed: $Old"}
         return $Text.Replace($Old,$New)
     }
-    $Source=Replace-One $Source 'public Scan Result=new Scan(); public volatile bool Done, CancelRequested;' 'public ScanProfile Profile=new ScanProfile(); public Scan Result=new Scan(); public volatile bool Done, CancelRequested;'
+    $Source=Replace-One $Source 'public Scan Result=new Scan(); public readonly MftAttributeAllocation AttributeAllocation=new MftAttributeAllocation(); public volatile bool Done, CancelRequested;' 'public ScanProfile Profile=new ScanProfile(); public Scan Result=new Scan(); public readonly MftAttributeAllocation AttributeAllocation=new MftAttributeAllocation(); public volatile bool Done, CancelRequested;'
     $Source=Replace-One $Source 'string root=Result.Root; System.DateTime started=System.DateTime.Now;' 'ScanProfile.Current=Profile; Profile.Mark("record collection"); string root=Result.Root; System.DateTime started=System.DateTime.Now;'
     $Source=Replace-One $Source 'if(!CancelRequested) CompleteExtensions(handle,records,volume,recordSize);' 'Profile.Mark("extension completion"); Profile.CountRecords(records); if(!CancelRequested) CompleteExtensions(handle,records,volume,recordSize);'
     $Source=Replace-One $Source 'records=Assemble(records);' 'ScanProfile.MarkCurrent("extension assembly"); records=Assemble(records); ScanProfile.MarkCurrent("directory paths");'
@@ -25,7 +25,23 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
         $Source=Replace-One $Source 'Result=Build(root,records.ToArray(),CancelRequested,' 'Result=Build(root,ScanProfile.TakeRecords(records),CancelRequested,'
         $Source=Replace-One $Source 'ScanProfile.MarkCurrent("file paths and API verification");' 'dirs.Clear(); pending.Clear(); ScanProfile.MarkCurrent("file paths and API verification");'
         $old="foreach(MftRecord r in records) {`n    if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;"
-        $new="for(int recordIndex=0;recordIndex<records.Length;recordIndex++) {`n    MftRecord r=records[recordIndex];records[recordIndex]=null;`n    if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;"
+        $new=@'
+for(int recordIndex=0;recordIndex<records.Length;recordIndex++) {
+    MftRecord r=records[recordIndex];records[recordIndex]=null;
+    if(r==null || r.Directory || (r.Reference&IndexMask)<16) continue;
+    if(direct!=null && direct.Lazy!=null && r.Names.Count==1 && !r.Unsupported && r.AllocationKnown) {
+     MftName single=r.Names[0];int parentId;
+     if(paths.TryGetId(single.Parent,out parentId) && direct.Occupy(parentId,single.Name)) {
+      direct.Charge(parentId,r.Bytes,r.Allocated,true,false);s.Files++;
+      if(r.Reparse && (r.ReparseTag&0xffff0fffU)==0x9000001aU) {s.MftCloudFiles++;s.MftCloudBytes=checked(s.MftCloudBytes+r.Bytes);}
+      if(IsContainer(r)) {s.MftContainerFiles++;s.MftContainerBytes=checked(s.MftContainerBytes+r.Bytes);s.MftContainerAllocated=checked(s.MftContainerAllocated+r.Allocated);}
+      if(r.Reparse) {s.MftReparseFiles++;if(r.ReparseTag==0) s.MftUnknownTags++;}
+      if(r.LinkCountMismatch) Issue(s,Describe(r),"Included using verified attribute-list filenames; header link count differs (names="+r.NameAttributeCount+", header="+r.LinkCount+").","IncludedLinkCountMismatch");
+      direct.Add(parentId,single.Name,IsContainer(r)?"WCI":(r.Reparse?"RP":"FILE"),r.Bytes,r.Allocated,false,false,r.Reparse?Tag(r):null);
+      s.Accounting.IncludePath(r.Bytes,false,r.ResidentAllocated);continue;
+     }
+    }
+'@
         $Source=Replace-One $Source $old $new
     }
     $prefix=Replace-One $prefix 'public Dictionary<string,List<Row>> CachedRows;' 'internal RandomToolkits.HelperExperiment.DirectRows DirectRows; public Dictionary<string,List<Row>> CachedRows;'
@@ -73,6 +89,6 @@ function ConvertTo-HelperEngine([string]$Source,[switch]$CompactNames,[switch]$R
     $Source=Replace-One $Source 'if(s.IssueCount>0) foreach(Node n in s.Nodes.Values) n.Partial=true;' 'if(RandomToolkits.HelperExperiment.ScanAccounting.HasIncompleteTotals(s)) foreach(Node n in s.Nodes.Values) n.Partial=true;'
     $Source=Replace-One $Source 'blocked[start.Reference]=failure;s.MftOmittedDirectories++;' 'blocked[start.Reference]=failure;s.MftOmittedDirectories++;if(failure.Category=="DirectorySystemMetadata")s.Accounting.Metadata(start,false);'
     $Source=Replace-One $Source 'if(names.Count==0 && linkFailure!=null && metadataOnly) {s.MftOmittedFiles++;' 'if(names.Count==0 && linkFailure!=null && metadataOnly) {s.Accounting.Metadata(r,false);s.MftOmittedFiles++;'
-    $Source=Replace-One $Source 'charged=true;' 's.Accounting.IncludePath(r.Bytes,charged);charged=true;'
+    $Source=Replace-One $Source 'charged=true;' 's.Accounting.IncludePath(r.Bytes,charged,charged?0:r.ResidentAllocated);charged=true;'
     return $prefix+$Source+$suffix
 }

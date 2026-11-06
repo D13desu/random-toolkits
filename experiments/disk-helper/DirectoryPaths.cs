@@ -73,6 +73,7 @@ namespace RandomToolkits.HelperExperiment {
   internal bool ContainsKey(ulong reference){return ids!=null?ids.ContainsKey(reference):paths.ContainsKey(reference);}
   internal string this[ulong reference] {get{return ids!=null?direct.PathForId(ids[reference]):paths[reference];}set{if(ids!=null)ids[reference]=direct.IdForPath(value);else paths[reference]=value;}}
   internal void Add(ulong reference,string path){if(ids!=null)ids.Add(reference,direct.IdForPath(path));else paths.Add(reference,path);}
+  internal bool TryGetId(ulong reference,out int id){if(ids!=null)return ids.TryGetValue(reference,out id);id=-1;return false;}
   internal bool TryGetValue(ulong reference,out string path){if(ids==null)return paths.TryGetValue(reference,out path);int id;if(!ids.TryGetValue(reference,out id)){path=null;return false;}path=direct.PathForId(id);return true;}
  }
 }

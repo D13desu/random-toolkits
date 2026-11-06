@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.17.0
+# Random Toolkits | Windows Toolkit 0.18.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -591,11 +591,11 @@ function Get-PcQualityChecks {
 }
 
 function Start-PcDiskExplorer {
-    $revision='10efb47886b97a1619756f297d7d6bbf7d3b1295'
-    $expected='827A4432D7DF2DF66C2E048331268F5D806A38A601641C07FC88D2B9DE21E3F2'
+    $revision='eb3227bcdb8d6d8b91e8fc8b72aa6cc2d62e1b76'
+    $expected='2528D695914F46FF8D0B60510DC8C5CC47FAE5EC844658957815DE0EB0CD7507'
     $download=Join-Path ([IO.Path]::GetTempPath()) ('toolkit-disk-'+[guid]::NewGuid().ToString('N')+'.ps1')
     try {
-        Write-Host 'Downloading verified Disk Usage 0.4.5 from D13desu/random-toolkits...'
+        Write-Host 'Downloading verified Disk Usage 0.4.6 from D13desu/random-toolkits...'
         Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/D13desu/random-toolkits/$revision/win/disk/Disk-Usage.ps1" -OutFile $download -TimeoutSec 60 -ErrorAction Stop
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $expected) { throw 'Disk explorer checksum mismatch. Script not executed.' }
         & $download
@@ -609,9 +609,9 @@ function Get-PcDiskHelperRuntimeReason {
 
 function Get-PcDiskHelperPackage {
     [pscustomobject]@{
-        Version='1.1.0'
-        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-v1.1.0/DiskHelper-1.1.0.zip'
-        Sha256='2307FD3AC703178FE50452AB2097750DBE867EC82AC6E6F0066DA6C1865BECBB'
+        Version='1.2.0'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-v1.2.0/DiskHelper-1.2.0.zip'
+        Sha256='B64BDBE6C187C549536EBF0EE9F8DBF172D22196B9934DB3267DB89AE617E747'
     }
 }
 
@@ -1358,8 +1358,8 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='sleep';Id='sleep';Name='Sleep states and AC/battery timeouts';MinPS='5.0';Commands=@('powercfg.exe');Admin=$false;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/a'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_SLEEP'); Invoke-AdNative 'powercfg.exe' @('/query','SCHEME_CURRENT','SUB_VIDEO')}}
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
-        [pscustomobject]@{Key='disk';Id='disk';Name='Compatibility disk scanner 0.4.5 (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
-        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Disk Usage 1.1.0 (automatic MFT/native)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$false;Action={param($t,$p) Start-PcDiskHelper}}
+        [pscustomobject]@{Key='disk';Id='disk';Name='Compatibility disk scanner 0.4.6 (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Disk Usage 1.2.0 (automatic MFT/native)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$false;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -2115,7 +2115,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.17.0')
+    param([string]$Title,[string]$Version='0.18.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2182,7 +2182,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.17.0',
+        [string]$Version='0.18.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,

@@ -5,16 +5,32 @@ using System.IO;
 using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
+using System.Runtime.InteropServices;
 using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
+ internal sealed class VolumeSpaceSnapshot {internal long Used,Reserved,VolumeStorageReserve,Total,Available;}
+ internal static class VolumeSpace {
+  [StructLayout(LayoutKind.Sequential)] struct DiskSpaceInformation {
+   internal ulong ActualTotal,ActualAvailable,ActualPoolUnavailable,CallerTotal,CallerAvailable,CallerPoolUnavailable;
+   internal ulong Used,TotalReserved,VolumeStorageReserve,AvailableCommitted,PoolAvailable;
+   internal uint SectorsPerAllocationUnit,BytesPerSector;
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern int GetDiskSpaceInformationW(string rootPath,out DiskSpaceInformation information);
+  static long Bytes(ulong units,ulong unitBytes){ulong value=checked(units*unitBytes);if(value>Int64.MaxValue)throw new OverflowException();return (long)value;}
+  internal static VolumeSpaceSnapshot Query(string root){
+   try {DiskSpaceInformation value;int result=GetDiskSpaceInformationW(root,out value);if(result!=0)return null;ulong unit=checked((ulong)value.SectorsPerAllocationUnit*value.BytesPerSector);if(unit==0)return null;
+    return new VolumeSpaceSnapshot {Used=Bytes(value.Used,unit),Reserved=Bytes(value.TotalReserved,unit),VolumeStorageReserve=Bytes(value.VolumeStorageReserve,unit),Total=Bytes(value.ActualTotal,unit),Available=Bytes(value.ActualAvailable,unit)};
+   } catch(EntryPointNotFoundException){return null;} catch(OverflowException){return null;}
+  }
+ }
  internal static class Program {
-  const string Version="1.1.0";
+  const string Version="1.2.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
   static List<Issue> issues;static Dictionary<string,int> causes;static int issueCount;
-  static double cleanupMilliseconds,compactMilliseconds;
+  static double cleanupMilliseconds,preCompactCleanupMilliseconds,finalCleanupMilliseconds,compactMilliseconds;
   static ScanProfile profile;
   static Stopwatch elapsed; static string mode, cachedPath, cachedSort; static Row[] cachedRows;
   static bool Running {get {return (native!=null && !native.Done) || (mft!=null && !mft.Done);}}
@@ -34,31 +50,53 @@ namespace RandomToolkits.HelperExperiment {
    scan=mft!=null?mft.Result:native.Result;
    object summary=Summary();issues=scan.Issues;causes=scan.IssueCounts;issueCount=scan.IssueCount;
    if(mode=="mft") {
-    profile.Mark("cache cleanup");
-    var timer=Stopwatch.StartNew();GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
-    profile.Mark("cache compaction");timer.Restart();compact=scan.DirectRows==null?new CompactIndex(scan):new CompactIndex(scan,scan.DirectRows);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
+    var timer=Stopwatch.StartNew();
+    // Legacy rows build a replacement cache and benefit from reclaiming the
+    // reconstruction graph first. The default direct cache is handed off
+    // without copying, so collecting here only repeats the final collection.
+    if(scan.DirectRows==null) {
+     profile.Mark("pre-compaction cleanup");
+     GC.Collect();GC.WaitForPendingFinalizers();GC.Collect();preCompactCleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
+    }
+    profile.Mark("cache handoff");timer.Restart();compact=scan.DirectRows==null?new CompactIndex(scan):new CompactIndex(scan,scan.DirectRows);compactMilliseconds=timer.Elapsed.TotalMilliseconds;
     scan=null;mft=null;
     timer.Restart();
     // Reclaim gaps left by the discarded reconstruction tree and large indexes.
     System.Runtime.GCSettings.LargeObjectHeapCompactionMode=System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-    GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect();cleanupMilliseconds+=timer.Elapsed.TotalMilliseconds;
+    GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect();finalCleanupMilliseconds=timer.Elapsed.TotalMilliseconds;
+    cleanupMilliseconds=preCompactCleanupMilliseconds+finalCleanupMilliseconds;
     profile.Mark("ready");
    }
    completedSummary=summary;
   }
   static object Summary() {
    Node root=scan.Nodes[scan.Root];bool allocated=mode=="mft";
+   object accounting=allocated && scan.Accounting!=null?scan.Accounting.Snapshot(scan):null;
+   object nonData=allocated && mft!=null?mft.AttributeAllocation.Snapshot():null;
+   object reconciliation=null;
+   if(allocated && scan.Accounting!=null && mft!=null) {
+    VolumeSpaceSnapshot volume=VolumeSpace.Query(scan.Root);
+    long includedPhysical=checked(root.Allocated-scan.Accounting.IncludedResidentAllocation);
+    long metadataDataPhysical=checked(scan.Accounting.KnownMetadataDataAllocation-scan.Accounting.MetadataResidentAllocation);
+    long knownPhysical=checked(includedPhysical+metadataDataPhysical+mft.AttributeAllocation.AttributeList+mft.AttributeAllocation.IndexAllocation+mft.AttributeAllocation.Bitmap+mft.AttributeAllocation.Other);
+    if(volume!=null) reconciliation=new {includedAllocation=root.Allocated,includedResidentOverlap=scan.Accounting.IncludedResidentAllocation,
+     includedPhysical= includedPhysical,metadataDataPhysical=metadataDataPhysical,nonDataPhysical=checked(mft.AttributeAllocation.AttributeList+mft.AttributeAllocation.IndexAllocation+mft.AttributeAllocation.Bitmap+mft.AttributeAllocation.Other),
+     knownPhysical=knownPhysical,windowsUsed=volume.Used,reserved=volume.Reserved,volumeStorageReserve=volume.VolumeStorageReserve,
+     windowsUnavailable=checked(volume.Used+volume.Reserved),reconciled=checked(knownPhysical+volume.Reserved),residual=checked(volume.Used-knownPhysical)};
+   }
    return new {root=scan.Root,engine=scan.Engine,files=scan.Files,folders=scan.DirectRows!=null?scan.DirectRows.FolderCount:scan.Nodes.Count,
     logical=root.Bytes,allocated=allocated?(long?)root.Allocated:null,allocationUnknown=allocated && root.AllocationUnknown,
     partial=root.Partial,cancelled=scan.Cancelled,diagnostics=scan.IssueCount,causes=scan.IssueCounts,
     omittedFiles=scan.MftOmittedFiles,omittedDirectories=scan.MftOmittedDirectories,parseErrors=scan.MftRecordErrors,
     unknownAllocations=scan.MftUnknownAllocations,apiVerified=scan.MftApiVerified,records=scan.MftRecordsRead,
-    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds,accounting=allocated && scan.Accounting!=null?scan.Accounting.Snapshot(scan):null};
+    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds,accounting=accounting,
+    nonDataAllocation=nonData,reconciliation=reconciliation};
   }
   static object Status() {
    Finish();
    if(completedSummary!=null) return new {type="status",state="ready",summary=completedSummary,workingSet=Process.GetCurrentProcess().WorkingSet64,
     managedBytes=GC.GetTotalMemory(false),cleanupMilliseconds=cleanupMilliseconds,compactMilliseconds=compactMilliseconds,
+    preCompactCleanupMilliseconds=preCompactCleanupMilliseconds,finalCleanupMilliseconds=finalCleanupMilliseconds,
     readySeconds=elapsed.Elapsed.TotalSeconds+(cleanupMilliseconds+compactMilliseconds)/1000};
    if(native==null && mft==null) return new {type="status",state="idle"};
    return new {type="status",state="scanning",phase=profile!=null?profile.Phase:"native scan",files=mft!=null?mft.FilesSeen:native.FilesSeen,
@@ -79,7 +117,7 @@ namespace RandomToolkits.HelperExperiment {
     var drive=new DriveInfo(path);if(drive.DriveType==DriveType.Network || drive.DriveFormat!="NTFS") throw new ArgumentException("MFT requires a local NTFS volume.");
    }
    mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;
-   cleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
+   cleanupMilliseconds=0;preCompactCleanupMilliseconds=0;finalCleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
    profile=null;if(engine=="mft") {mft=MftScanner.Start(path);profile=mft.Profile;}else native=Scanner.Start(path);
    return new {type="accepted",engine=engine,path=path};
   }
@@ -149,7 +187,7 @@ namespace RandomToolkits.HelperExperiment {
   static void Send(object value) {Console.WriteLine(Json.Serialize(value));Console.Out.Flush();}
   public static int Main() {
    Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
-   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.5",processId=Process.GetCurrentProcess().Id,
+   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.6",processId=Process.GetCurrentProcess().Id,
     architecture=Environment.Is64BitProcess?"x64":"x86"});
    try {
     string line;while((line=Console.ReadLine())!=null) {
