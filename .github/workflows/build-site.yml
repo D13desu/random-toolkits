@@ -30,6 +30,10 @@ jobs:
         shell: pwsh
         run: ./tests/Test-M365MenuEngine.ps1
 
+      - name: Test Sysinternals Live launchers
+        shell: pwsh
+        run: ./tests/Test-SysinternalsLauncher.ps1
+
       - name: Upload generated site
         uses: actions/upload-pages-artifact@v3
         with:

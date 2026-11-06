@@ -8,6 +8,7 @@ $syncScripts=@(
     'Sync-HealthDashboard.ps1'
     'Sync-StartupTasks.ps1'
     'Sync-SystemMaintenance.ps1'
+    'Sync-SysinternalsLauncher.ps1'
     'Sync-MenuEngine.ps1'
     'Sync-RegistryTweaks.ps1'
 )
