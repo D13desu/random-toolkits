@@ -26,6 +26,10 @@ jobs:
           LOCALAPPDATA: ${{ runner.temp }}
         run: ./tests/Test-RegistryTweaks.ps1
 
+      - name: Test M365 menu engine
+        shell: pwsh
+        run: ./tests/Test-M365MenuEngine.ps1
+
       - name: Upload generated site
         uses: actions/upload-pages-artifact@v3
         with:

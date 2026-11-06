@@ -1,4 +1,4 @@
-# M365 Toolkit v0.3.7
+# M365 Toolkit v0.4.0
 
 Read-only Microsoft 365 investigation toolkit, based on the supplied v0.3.4.
 
@@ -28,7 +28,13 @@ Run `Start-M365-Toolkit.cmd` on Windows, or `pwsh -File ./M365-Toolkit.ps1` on P
 
 ## Build and publication
 
-Maintain `Launch-M365.ps1` and `M365-Toolkit.ps1` as the web launcher and toolkit sources. Run `../tests/Sync-M365.ps1` after local edits, or `../tests/Sync-Site.ps1` to assemble every published endpoint. The build parses both scripts, injects the toolkit's SHA-256 into the launcher, and copies the launcher byte-for-byte to `m365/index.html`. GitHub Actions performs that build before deploying `main`; the launcher downloads the matching toolkit from the same Pages artifact and refuses to execute it if verification fails.
+Maintain `Launch-M365.ps1`, `M365-Toolkit.ps1`, and `Menu-Engine.ps1` as the web launcher, toolkit, and interactive-menu sources. Run `../tests/Sync-M365.ps1` after local edits, or `../tests/Sync-Site.ps1` to assemble every published endpoint. The build parses the menu engine and generated toolkit, injects the toolkit's SHA-256 into the launcher, and copies the launcher byte-for-byte to `m365/index.html`. GitHub Actions performs that build before deploying `main`; the launcher downloads the matching toolkit from the same Pages artifact and refuses to execute it if verification fails.
+
+## v0.4.0 Interactive menus
+
+Navigation menus now support arrow keys plus Enter, number or letter shortcuts, visible multi-digit input, Esc/Backspace to return, semantic highlighting, and incremental repainting of only the changed rows. Plain `Read-Host` selection remains available when raw console input or cursor positioning is unavailable. Authentication, UPN, date, filter, export, and confirmation prompts remain explicit data-entry fields.
+
+Maintain `Menu-Engine.ps1`; `../tests/Sync-M365.ps1` embeds it into the downloadable toolkit before calculating the launcher checksum.
 
 ## v0.3.7 Identity Protection
 
