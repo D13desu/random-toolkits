@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 Initialize-DiskScanner
 function Assert($ok,$message) { if (-not $ok) { throw "FAIL: $message" }; Write-Output "PASS: $message" }
 function Put($b,$offset,$value) { $bytes=[BitConverter]::GetBytes($value); [Array]::Copy($bytes,0,$b,$offset,$bytes.Length) }
-function Record([int]$id,[string]$name,[uint64]$parent,[long]$size=0,[switch]$Directory,[switch]$Resident,[int]$Flags=0,[switch]$AttributeList,[int]$NameSpace=1,[switch]$StandardInfo,[uint32]$FileAttributes=0,[uint32]$ReparseTag=0,[uint64]$BaseReference=0,[uint16]$Links=1,[switch]$NoName,[switch]$NoData,[long]$Allocated=4096,[string]$StreamName,[long]$StreamAllocated=8192,[string]$ExpectNamedStream,[switch]$NonresidentList) {
+function Record([int]$id,[string]$name,[uint64]$parent,[long]$size=0,[switch]$Directory,[switch]$Resident,[int]$Flags=0,[switch]$AttributeList,[int]$NameSpace=1,[switch]$StandardInfo,[uint32]$FileAttributes=0,[uint32]$ReparseTag=0,[uint64]$BaseReference=0,[uint16]$Links=1,[switch]$NoName,[switch]$NoData,[long]$Allocated=4096,[string]$StreamName,[long]$StreamAllocated=8192,[string]$ExpectNamedStream,[switch]$NonresidentList,[uint32]$MetadataType=0,[long]$MetadataAllocated=0) {
     $b=[byte[]]::new(1024)
     Put $b 0 ([uint32]0x454c4946); Put $b 16 ([uint16]1); Put $b 20 ([uint16]56); Put $b 22 ([uint16](1+2*[int]$Directory.IsPresent))
     Put $b 18 $Links; Put $b 32 $BaseReference
@@ -44,6 +44,7 @@ function Record([int]$id,[string]$name,[uint64]$parent,[long]$size=0,[switch]$Di
         }
     }
     if ($ReparseTag -ne 0) { Put $b $p ([uint32]0xc0); Put $b ($p+4) ([uint32]32); Put $b ($p+16) ([uint32]8); Put $b ($p+20) ([uint16]24); Put $b ($p+24) $ReparseTag; $p+=32 }
+    if ($MetadataType -ne 0) {Put $b $p $MetadataType;Put $b ($p+4) ([uint32]64);$b[$p+8]=1;Put $b ($p+32) ([uint16]64);Put $b ($p+40) $MetadataAllocated;$p+=64}
     Put $b $p ([uint32]::MaxValue); Put $b 24 ([uint32]($p+4))
     return ,$b
 }
@@ -150,7 +151,11 @@ $summary=[RandomToolkits.DiskV10.MftScanner]::Build('Z:\',$many.ToArray(),$false
 Assert ($summary.IssueCount -eq 21 -and $summary.MftOmittedFiles -eq 21 -and $summary.Issues.Count -eq 5 -and $summary.IssueCounts.Count -eq 2) 'Repeated failures retain representative examples from each cause and exact unique-file omission count'
 $sum=0; foreach ($count in $summary.IssueCounts.Values) { $sum+=$count }
 Assert ($sum -eq $summary.IssueCount) 'Cause counts reconcile to total diagnostics'
-Assert ($small.AllocationKnown -and $small.Allocated -eq 24 -and $sparse.Allocated -eq 4096 -and $compressed.Allocated -eq 4096) 'Resident data counts its padded MFT slot; sparse/compressed data use TotalAllocated'
+Assert ($small.AllocationKnown -and $small.Allocated -eq 24 -and $small.ResidentAllocated -eq 24 -and $sparse.Allocated -eq 4096 -and $sparse.ResidentAllocated -eq 0 -and $compressed.Allocated -eq 4096) 'Resident data counts its padded MFT slot; sparse/compressed data use TotalAllocated'
+$attributeStats=[RandomToolkits.DiskV10.MftAttributeAllocation]::new()
+$null=[RandomToolkits.DiskV10.MftScanner]::Parse((Record 79 'indexed' $rootRef -Directory -MetadataType 0xA0 -MetadataAllocated 12288),79,$attributeStats)
+$attributeSnapshot=$attributeStats.Snapshot()
+Assert ($attributeSnapshot.indexAllocation -eq 12288 -and $attributeSnapshot.totalKnown -eq 12288 -and $attributeSnapshot.unknown -eq 0) 'Non-DATA allocation census records directory index clusters without changing folder totals'
 Assert ($scan.Nodes['Z:\'].Allocated -eq 8216) 'Hard-linked resident file allocation is charged exactly once'
 $ads=[RandomToolkits.DiskV10.MftScanner]::Parse((Record 80 'streams.bin' $rootRef 20 -StreamName 'extra'),80)
 Assert ($ads.AllocationKnown -and $ads.Allocated -eq 12288) 'Named DATA streams contribute to allocation independently of logical unnamed size'

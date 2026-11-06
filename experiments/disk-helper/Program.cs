@@ -5,9 +5,25 @@ using System.IO;
 using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
+using System.Runtime.InteropServices;
 using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
+ internal sealed class VolumeSpaceSnapshot {internal long Used,Reserved,VolumeStorageReserve,Total,Available;}
+ internal static class VolumeSpace {
+  [StructLayout(LayoutKind.Sequential)] struct DiskSpaceInformation {
+   internal ulong ActualTotal,ActualAvailable,ActualPoolUnavailable,CallerTotal,CallerAvailable,CallerPoolUnavailable;
+   internal ulong Used,TotalReserved,VolumeStorageReserve,AvailableCommitted,PoolAvailable;
+   internal uint SectorsPerAllocationUnit,BytesPerSector;
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern int GetDiskSpaceInformationW(string rootPath,out DiskSpaceInformation information);
+  static long Bytes(ulong units,ulong unitBytes){ulong value=checked(units*unitBytes);if(value>Int64.MaxValue)throw new OverflowException();return (long)value;}
+  internal static VolumeSpaceSnapshot Query(string root){
+   try {DiskSpaceInformation value;int result=GetDiskSpaceInformationW(root,out value);if(result!=0)return null;ulong unit=checked((ulong)value.SectorsPerAllocationUnit*value.BytesPerSector);if(unit==0)return null;
+    return new VolumeSpaceSnapshot {Used=Bytes(value.Used,unit),Reserved=Bytes(value.TotalReserved,unit),VolumeStorageReserve=Bytes(value.VolumeStorageReserve,unit),Total=Bytes(value.ActualTotal,unit),Available=Bytes(value.ActualAvailable,unit)};
+   } catch(EntryPointNotFoundException){return null;} catch(OverflowException){return null;}
+  }
+ }
  internal static class Program {
   const string Version="1.1.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
@@ -55,12 +71,26 @@ namespace RandomToolkits.HelperExperiment {
   }
   static object Summary() {
    Node root=scan.Nodes[scan.Root];bool allocated=mode=="mft";
+   object accounting=allocated && scan.Accounting!=null?scan.Accounting.Snapshot(scan):null;
+   object nonData=allocated && mft!=null?mft.AttributeAllocation.Snapshot():null;
+   object reconciliation=null;
+   if(allocated && scan.Accounting!=null && mft!=null) {
+    VolumeSpaceSnapshot volume=VolumeSpace.Query(scan.Root);
+    long includedPhysical=checked(root.Allocated-scan.Accounting.IncludedResidentAllocation);
+    long metadataDataPhysical=checked(scan.Accounting.KnownMetadataDataAllocation-scan.Accounting.MetadataResidentAllocation);
+    long knownPhysical=checked(includedPhysical+metadataDataPhysical+mft.AttributeAllocation.AttributeList+mft.AttributeAllocation.IndexAllocation+mft.AttributeAllocation.Bitmap+mft.AttributeAllocation.Other);
+    if(volume!=null) reconciliation=new {includedAllocation=root.Allocated,includedResidentOverlap=scan.Accounting.IncludedResidentAllocation,
+     includedPhysical= includedPhysical,metadataDataPhysical=metadataDataPhysical,nonDataPhysical=checked(mft.AttributeAllocation.AttributeList+mft.AttributeAllocation.IndexAllocation+mft.AttributeAllocation.Bitmap+mft.AttributeAllocation.Other),
+     knownPhysical=knownPhysical,windowsUsed=volume.Used,reserved=volume.Reserved,volumeStorageReserve=volume.VolumeStorageReserve,
+     windowsUnavailable=checked(volume.Used+volume.Reserved),reconciled=checked(knownPhysical+volume.Reserved),residual=checked(volume.Used-knownPhysical)};
+   }
    return new {root=scan.Root,engine=scan.Engine,files=scan.Files,folders=scan.DirectRows!=null?scan.DirectRows.FolderCount:scan.Nodes.Count,
     logical=root.Bytes,allocated=allocated?(long?)root.Allocated:null,allocationUnknown=allocated && root.AllocationUnknown,
     partial=root.Partial,cancelled=scan.Cancelled,diagnostics=scan.IssueCount,causes=scan.IssueCounts,
     omittedFiles=scan.MftOmittedFiles,omittedDirectories=scan.MftOmittedDirectories,parseErrors=scan.MftRecordErrors,
     unknownAllocations=scan.MftUnknownAllocations,apiVerified=scan.MftApiVerified,records=scan.MftRecordsRead,
-    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds,accounting=allocated && scan.Accounting!=null?scan.Accounting.Snapshot(scan):null};
+    volumeUsed=scan.VolumeUsed,seconds=elapsed.Elapsed.TotalSeconds,accounting=accounting,
+    nonDataAllocation=nonData,reconciliation=reconciliation};
   }
   static object Status() {
    Finish();

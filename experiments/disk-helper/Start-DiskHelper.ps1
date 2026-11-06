@@ -21,10 +21,15 @@ function Show-HelperAccounting($Summary) {
     Write-Host ('Included-file information: {0:N0} | Metadata exclusion diagnostics: {1:N0} | Other problems/uncertainties: {2:N0}' -f $a.informationalDiagnostics,$a.metadataExclusionDiagnostics,$a.problemDiagnostics)
     Write-Host ('Observed core NTFS records (<16): {0:N0} | Known DATA allocation: {1:N0} bytes ({2}) | Unknown/incomplete: {3:N0}' -f $a.coreMetadataRecords,$a.coreKnownDataAllocation,(Format-HelperBytes $a.coreKnownDataAllocation),$a.coreUnknownAllocations)
     Write-Host ('Excluded metadata tree: {0:N0} files, {1:N0} directories | Known DATA allocation: {2:N0} bytes ({3}) | Unknown/incomplete: {4:N0}' -f $a.excludedMetadataFiles,$a.excludedMetadataDirectories,$a.excludedKnownDataAllocation,(Format-HelperBytes $a.excludedKnownDataAllocation),$a.excludedUnknownAllocations)
-    Write-Host 'Metadata figures are separate, non-additive observations: resident-file slots can overlap $MFT allocation. Non-DATA metadata is not fully measured; unknown values are lower bounds.' -ForegroundColor Yellow
+    $r=$Summary.reconciliation;$n=$Summary.nonDataAllocation
+    if($r){
+        Write-Host ('Resident DATA overlap inside $MFT: {0} | Metadata DATA outside resident slots: {1}' -f (Format-HelperBytes $r.includedResidentOverlap),(Format-HelperBytes $r.metadataDataPhysical))
+        Write-Host ('Non-DATA NTFS allocation: {0} | Directory indexes: {1} | Reparse/other streams: {2}' -f (Format-HelperBytes $r.nonDataPhysical),(Format-HelperBytes $n.indexAllocation),(Format-HelperBytes $n.other))
+        Write-Host ('Windows used clusters: {0} | Reserved: {1} (volume storage reserve: {2})' -f (Format-HelperBytes $r.windowsUsed),(Format-HelperBytes $r.reserved),(Format-HelperBytes $r.volumeStorageReserve))
+        Write-Host ('Reconciled unavailable space: {0} | Live residual: {1} ({2:N0} bytes)' -f (Format-HelperBytes $r.reconciled),(Format-HelperBytes $r.residual),$r.residual) -ForegroundColor $(if([math]::Abs($r.residual) -le 1MB){'Green'}else{'Yellow'})
+        Write-Host 'Folder rows remain attributable allocation. NTFS metadata and Windows reservations are volume-wide and are not assigned to folders.'
+    }else{Write-Host 'Extended volume reconciliation is unavailable on this Windows version.' -ForegroundColor Yellow}
     Write-Host '$BadClus allocation is unmeasured until its cluster mappings are validated; its header size is not counted as used space.'
-    Write-Host ('Volume-wide unreconciled allocation: {0} ({1:N0} bytes)' -f (Format-HelperBytes ($Summary.volumeUsed-$Summary.allocated)),($Summary.volumeUsed-$Summary.allocated))
-    Write-Host 'This is volume-used minus included-file allocation, not a missing-file total or measured NTFS overhead. Metadata observations above are not additive; live scans and other tools may use different accounting rules.'
     $a.metadataSamples | Select-Object group,record,sequence,name,directory,knownDataAllocation,allocationUnknown | Format-Table -AutoSize | Out-Host
 }
 :drives while ($true) {
@@ -76,7 +81,10 @@ try {
         Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
         if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
         if($scanEngine -eq 'mft'){
-            if($current -eq $summary.root){Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
+            if($current -eq $summary.root){
+                if($summary.reconciliation){Write-Host ('Volume unavailable: {0} | Reconciled: {1} | Live residual: {2} (see Reports)' -f (Format-HelperBytes $summary.reconciliation.windowsUnavailable),(Format-HelperBytes $summary.reconciliation.reconciled),(Format-HelperBytes $summary.reconciliation.residual))}
+                else{Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
+            }
             Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
         }
         $rows=@($page.rows)
