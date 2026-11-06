@@ -1,4 +1,4 @@
-# Windows Toolkit 0.17.0
+# Windows Toolkit 0.18.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -34,7 +34,7 @@ The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **
 
 ## Storage
 
-**1** opens **Disk Usage 1.1.0**, the preferred C# helper, in automatic mode: elevated fixed local NTFS drive roots use MFT; folders, other filesystems and unelevated sessions use native enumeration. Native scans show logical sizes, not physical allocation. The browser shows each visible entry's current modified date and the containing volume's space available to the current user. **2** retains **Disk Usage 0.4.5** as the compatibility scanner. F1 opens helper accounting, diagnostics and timing reports; legacy A/E/T commands still work. PowerShell 5.1+, .NET Framework 4.5.1+ and archive/hash commands are required for the helper; missing requirements are marked unavailable. The compatibility option supports PowerShell 5.0+. There is no automatic elevation or silent retry of an MFT failure using a different scan mode.
+**1** opens **Disk Usage 1.2.0**, the preferred C# helper, in automatic mode: elevated fixed local NTFS drive roots use MFT; folders, other filesystems and unelevated sessions use native enumeration. Native scans show logical sizes, not physical allocation. The browser shows each visible entry's current modified date, the containing volume's space available to the current user and volume-wide reconciliation of NTFS metadata and reserved storage. **2** retains **Disk Usage 0.4.6** as the compatibility scanner. F1 opens helper accounting, diagnostics and timing reports; legacy A/E/T commands still work. PowerShell 5.1+, .NET Framework 4.5.1+ and archive/hash commands are required for the helper; missing requirements are marked unavailable. The compatibility option supports PowerShell 5.0+. There is no automatic elevation or silent retry of an MFT failure using a different scan mode.
 
 The helper downloads from a pinned GitHub release, with the ZIP's SHA-256 checked before extraction. Its client verifies the executable hash and version handshake. It runs from an isolated temporary directory that is removed on exit. No separate `irm` command or permanent installation is required. The noninteractive action ID is `disk-helper`.
 
@@ -51,7 +51,7 @@ Power check IDs: `power`, `nic-power`, `sleep`, `wake`, `quality`. Storage check
 
 ## Storage
 
-Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.5 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
+Choose **Storage > Open disk usage explorer**. Disk Usage 0.4.6 lists drive total/used/free space, with cached folder navigation and partial results. The default native directory scanner reports logical sizes; optional elevated **M** mode reads local NTFS metadata and sorts by **On disk** allocation alongside logical size. It accounts for compressed, sparse, resident and named-stream data, charges hard links once, and reads reparse records without following their targets. Unknown allocation and omissions remain explicit lower bounds. See [Disk Usage documentation](../disk/README.md) for limitations and validation.
 
 ## Printing
 
@@ -336,7 +336,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.17.0`; submenus retain `WINDOWS 0.17.0 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.18.0`; submenus retain `WINDOWS 0.18.0 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -370,3 +370,8 @@ The section can also open the complete tools share for command-line and speciali
 ### Disk Usage modified dates and available space (Windows 0.17.0 / helper 1.1.0)
 
 Disk Usage now displays a `MODIFIED` date for every visible file and directory and reports the containing volume's available space in the summary. Dates are retrieved only for the current page, preserving the compact MFT cache and large-scan memory profile; they reflect the live filesystem and can therefore be newer than the cached size scan. Available space uses the current user's `DriveInfo.AvailableFreeSpace` value.
+
+
+### Faster and reconciled Disk Usage (Windows 0.18.0 / helper 1.2.0)
+
+The MFT helper avoids full-path construction for ordinary single-name records, reducing the path phase and peak memory on large scans. Reports now reconcile attributable DATA allocation with allocated non-DATA NTFS attributes, resident DATA overlap, Windows reserved bytes and the volume storage reserve. Folder rows remain limited to attributable file allocation; filesystem metadata, reservations, unknown allocations and any live residual remain clearly separated at volume level.

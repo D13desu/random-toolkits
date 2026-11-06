@@ -1,4 +1,4 @@
-# Disk Usage 0.4.5
+# Disk Usage 0.4.6
 
 Read-only drive and folder explorer for PowerShell 5.0+; tested on Windows PowerShell 5.1 and PowerShell 7. Open it from the unified Windows launcher: **Storage > Open disk usage explorer**.
 
@@ -65,3 +65,9 @@ For ordinary files only, FindFirstFileName error 50 (not supported) may be resol
 Tests cover normalized WOF allocation, missing unrelated streams, allocation mismatches, changed paths, access denial and multiple links. Test-MftWofLive.ps1 creates an isolated TEMP fixture with compact /EXE:LZX to validate real WOF metadata without modifying existing files. Container and unknown-tag records retain their explicit uncertainty.
 
 Validation on 2026-11-05: the real WOF fixture verified successfully on PowerShell 5.1 and 7.6.5; the existing resident, ordinary, compressed, sparse, ADS and hard-link fixtures also passed. Final C: scan: 44.6 seconds, 5,612 API-verified records, zero FileUnsupported, zero ApiVerificationFailed and zero parse errors. AllocationUnknown fell from 534 to 366. Fifteen system metadata files and four system metadata directories remained intentionally excluded. The remaining uncertain records are container-tagged or have an unavailable reparse tag; their allocations were not guessed.
+
+## Volume reconciliation (0.4.6)
+
+The MFT engine now inventories allocated non-DATA attributes and resident DATA overlap inside `$MFT`. The helper combines those measurements with Windows disk-space information, including reserved bytes and the volume storage reserve, to show a volume-wide reconciled total and residual. These bytes are not assigned to individual folders because they describe filesystem structures and reservations rather than ordinary file ownership.
+
+Validation on 2026-11-06: the optimized helper scanned C: in 35.8 seconds with zero parse errors and 366 unknown allocations. Windows reported 782.796 GiB unavailable; the reconciled total was 782.795 GiB, leaving a 1.79 MiB live residual. Results are machine- and timing-specific, not a promise of identical performance or perfect attribution on every NTFS volume.

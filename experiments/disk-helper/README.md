@@ -1,6 +1,8 @@
-# Disk Usage 1.1.0
+# Disk Usage 1.2.0
 
-The preferred C# disk explorer with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request. Engine semantics are the same as Disk Usage 0.4.4, including WOF verification and explicit unknown allocations.
+The preferred C# disk explorer with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request.
+
+Version 1.2.0 speeds up ordinary single-name MFT records by avoiding unnecessary full-path construction and reports a reconciled volume total. Alongside attributable file data it measures non-DATA NTFS attributes, resident data stored inside the MFT, Windows reserved space and the volume storage reserve. Metadata and reservations remain volume-wide rather than being assigned to folders; unknown allocations and any residual stay explicit.
 
 Version 1.1.0 adds a live `MODIFIED` date for each visible file and directory and the containing volume's space available to the current user. Timestamps are queried only for the current page rather than stored for every scan record, preserving the compact cache and its large-volume memory profile. Because dates and available space are live while sizes are cached, they can reflect filesystem activity after the scan.
 

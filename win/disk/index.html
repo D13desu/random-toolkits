@@ -1,8 +1,8 @@
-# Random Toolkits | Disk Usage 0.4.5 | PowerShell 5.0+
+# Random Toolkits | Disk Usage 0.4.6 | PowerShell 5.0+
 [CmdletBinding()]
 param([switch]$NoMenu, [string]$Path)
 
-$script:DiskUsageVersion = '0.4.5'
+$script:DiskUsageVersion = '0.4.6'
 
 function Format-DiskSize {
     param([double]$Bytes)

@@ -25,7 +25,7 @@ namespace RandomToolkits.HelperExperiment {
   }
  }
  internal static class Program {
-  const string Version="1.1.0";
+  const string Version="1.2.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -187,7 +187,7 @@ namespace RandomToolkits.HelperExperiment {
   static void Send(object value) {Console.WriteLine(Json.Serialize(value));Console.Out.Flush();}
   public static int Main() {
    Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
-   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.5",processId=Process.GetCurrentProcess().Id,
+   Send(new {type="hello",protocol=1,version=Version,engineVersion="0.4.6",processId=Process.GetCurrentProcess().Id,
     architecture=Environment.Is64BitProcess?"x64":"x86"});
    try {
     string line;while((line=Console.ReadLine())!=null) {
