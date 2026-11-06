@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/net/Registry-Tweaks.ps1')
 function Assert-True($Value,$Message) { if (-not $Value) { throw "FAIL: $Message" }; Write-Output "PASS: $Message" }
 $script:Allowed=$true
 function Get-NetworkAvailability { param($Entry) [pscustomobject]@{Available=(!$Entry.Admin -or $script:Allowed);Reason='Requires administrator'} }
@@ -46,4 +46,8 @@ $script:Policy=$false
 function Set-Content { [CmdletBinding()] param($LiteralPath,$Encoding,[Parameter(ValueFromPipeline=$true)]$Value) process { throw 'Backup denied' } }
 $blocked=$false; try { Invoke-PcRegistryTweak outlook } catch { $blocked=$true }
 Assert-True ($blocked -and $script:State.Count -eq 0) 'Backup failure prevents registry writes'
+$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$embedded=($source -split '# BEGIN REGISTRY TWEAKS',2)[1] -split '# END REGISTRY TWEAKS',2
+$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Registry-Tweaks.ps1') -Raw
+Assert-True ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded registry module matches source'
 Write-Output 'Registry tests passed; all registry mutations mocked.'

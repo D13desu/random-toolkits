@@ -55,11 +55,29 @@ function Show-PcServiceDetails($Row) {
         if($answer -ne 'E'){Wait-PcMenuReturn}
     }
 }
+function New-PcServiceMenuItem($Row) {
+    $stateColor=switch([string]$Row.State){'Running'{'Green'}'Start Pending'{'Yellow'}'Stop Pending'{'Yellow'}'Paused'{'Yellow'}'Stopped'{'Gray'}default{'DarkGray'}}
+    $modeColor=switch([string]$Row.StartMode){'Auto'{'Cyan'}'Automatic'{'Cyan'}'Disabled'{'DarkGray'}default{'Gray'}}
+    [pscustomobject]@{
+        Id=$Row.Name;Label=($Row.State+' | '+$Row.StartMode+' | '+$Row.DisplayName+' ('+$Row.Name+')');Detail=$Row.PathName;SearchText=$Row.StartName;Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.State);Color=$stateColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.StartMode);Color=$modeColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.DisplayName);Color='White'}
+            [pscustomobject]@{Text=' (';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Name);Color='Magenta'}
+            [pscustomobject]@{Text=')';Color='DarkGray'}
+        )
+        DetailParts=@([pscustomobject]@{Text=([string]$Row.PathName);Color='Gray'})
+    }
+}
 function Start-PcServices {
     $state=@{};$reload=$true;$rows=@()
     while($true){
         try{if($reload){$rows=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;return}
-        $menu=@(foreach($row in $rows){[pscustomobject]@{Id=$row.Name;Label=($row.State+' | '+$row.StartMode+' | '+$row.DisplayName+' ('+$row.Name+')');Detail=$row.PathName;SearchText=$row.StartName;Data=$row}})
+        $menu=@(foreach($row in $rows){New-PcServiceMenuItem $row})
         $choice=Show-PcMenu -Title 'Windows > Services' -Items $menu -State $state -Filterable -Refreshable -Description 'Enter opens details and confirmed actions. Filtering also searches executable paths and accounts.'
         switch($choice.Action){
             'Back'{return} 'Refresh'{$reload=$true}

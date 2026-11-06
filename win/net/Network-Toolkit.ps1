@@ -16,6 +16,7 @@ function Read-PcInput {
     return $answer
 }
 
+# BEGIN REGISTRY TWEAKS
 function Get-PcRegistryTweak {
     param([ValidateSet('outlook','rdp')][string]$Id)
     if ($Id -eq 'outlook') {
@@ -143,6 +144,7 @@ function Start-PcRegistryMenu {
         }
     }
 }
+# END REGISTRY TWEAKS
 
 function Test-NetworkTarget {
     param([string]$Value)
@@ -362,6 +364,24 @@ function Show-PcEventDetails($EventRecord) {
         }
     }
 }
+function New-PcEventMenuItem($Event) {
+    $preview=@(Format-PcEventPreview -Message $Event.Message -Width 100)
+    $levelColor=switch -Regex ([string]$Event.Level){'Critical|Error'{'Red'}'Warning'{'Yellow'}'Information'{'Gray'}'Verbose'{'DarkGray'}default{'Gray'}}
+    [pscustomobject]@{
+        Id=($Event.Log+'|'+$Event.RecordId)
+        Label=("{0} | {1} | ID {2} | {3}" -f $Event.Time,$Event.Level,$Event.Id,$Event.Provider)
+        Detail=($preview -join ' ');SelectedDetail=$preview;SearchText=$Event.Message;Data=$Event
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Event.Time);Color='DarkGray'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Event.Level);Color=$levelColor}
+            [pscustomobject]@{Text=' | ID ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Event.Id);Color='Magenta'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Event.Provider);Color='Cyan'}
+        )
+    }
+}
 function Start-PcEventBrowser {
     param([string]$DefaultLog='System',[switch]$Quick,[switch]$FixedLog,[string]$InitialProvider='',[string]$InitialText='')
     $log=$DefaultLog;$hours=24;$ids=@();$levels=@();$provider=$InitialProvider;$text=$InitialText;$limit=200
@@ -381,10 +401,7 @@ function Start-PcEventBrowser {
     $events=@(Get-PcEventRecords -LogName $log -Hours $hours -Ids $ids -Levels $levels -Provider $provider -Text $text -Limit $limit)
     $state=@{}
     while($true){
-        $menu=@(foreach($event in $events){
-            $preview=@(Format-PcEventPreview -Message $event.Message -Width 100)
-            [pscustomobject]@{Id=($event.Log+'|'+$event.RecordId);Label=("{0} | {1} | ID {2} | {3}" -f $event.Time,$event.Level,$event.Id,$event.Provider);Detail=($preview -join ' ');SelectedDetail=$preview;SearchText=$event.Message;Data=$event}
-        })
+        $menu=@(foreach($event in $events){New-PcEventMenuItem $event})
         $choice=Show-PcMenu -Title ('Windows > Events > '+$log) -Items $menu -State $state -Filterable -Refreshable -ExpandedPreview -PageSize 20 -Description ("Last {0}h | Candidate cap: {1}. Text filter searches cached candidates; older matches may be omitted." -f $hours,$limit) -Commands @{C='Advanced query (time, IDs, levels, provider)'}
         switch($choice.Action){
             'Back'{return}
@@ -1059,6 +1076,33 @@ function Invoke-NetworkDiscovery {
     }
     [pscustomobject]@{Scope=$Scope;Requested=$targets.Count;Completed=$rows.Count;Cancelled=$cancelled;Rows=@($rows.ToArray() | Sort-Object {ConvertTo-DiscoveryNumber $_.Address})}
 }
+function New-NetworkDiscoveryMenuItem($Row,[switch]$ProbeView) {
+    $open=if([string]::IsNullOrWhiteSpace([string]$Row.OpenTCP)){'none'}else{[string]$Row.OpenTCP}
+    $labelParts=@(
+        [pscustomobject]@{Text=([string]$Row.Address);Color='Cyan'}
+        [pscustomobject]@{Text=' | TCP open: ';Color='DarkGray'}
+        [pscustomobject]@{Text=$open;Color=$(if($open -eq 'none'){'DarkGray'}else{'Yellow'})}
+    )
+    if($ProbeView){
+        $detail="Ping: $($Row.Ping) | $($Row.LatencyMs) ms | Open: $($Row.OpenTCP) | Closed: $($Row.ClosedTCP) | No response: $($Row.NoResponseTCP) | Errors: $($Row.ErrorTCP)"
+        $pingColor=if($Row.Ping -eq 'Success'){'Green'}elseif($Row.Ping -eq 'Error'){'Red'}else{'DarkGray'}
+        $detailParts=@(
+            [pscustomobject]@{Text='Ping: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.Ping);Color=$pingColor}
+            [pscustomobject]@{Text=(' | '+[string]$Row.LatencyMs+' ms | Open: ');Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.OpenTCP);Color='Yellow'}
+            [pscustomobject]@{Text=' | Closed: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.ClosedTCP);Color='Gray'}
+            [pscustomobject]@{Text=' | No response: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.NoResponseTCP);Color='DarkGray'}
+            [pscustomobject]@{Text=' | Errors: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.ErrorTCP);Color='Red'}
+        )
+    }else{
+        $detail="MAC: $($Row.MAC) | $($Row.Vendor) | $($Row.MacStatus)"
+        $detailParts=@(
+            [pscustomobject]@{Text='MAC: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.MAC);Color='Magenta'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.Vendor);Color='Cyan'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.MacStatus);Color='Gray'}
+        )
+    }
+    [pscustomobject]@{Id=$Row.Address;Label=($Row.Address+' | TCP open: '+$Row.OpenTCP);Detail=$detail;LabelParts=$labelParts;DetailParts=$detailParts;SearchText=($Row.MAC+' '+$Row.Vendor+' '+$Row.Ping);Data=$Row}
+}
 function Start-NetworkDiscovery {
     Write-Host 'NETWORK DISCOVERY | IPv4 ICMP + TCP connect | No administrator required' -ForegroundColor Cyan
     if(Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue){Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {$_.IPAddress -notlike '127.*'} | Select-Object InterfaceAlias,IPAddress,PrefixLength | Format-Table -AutoSize | Out-Host}
@@ -1080,10 +1124,7 @@ function Start-NetworkDiscovery {
     $state=@{};$showAll=$false;$probeView=$false
     while($true){
         $rows=@($result.Rows | Where-Object {$showAll -or $_.Responded})
-        $menu=@(foreach($row in $rows){
-            $detail=if($probeView){"Ping: $($row.Ping) | $($row.LatencyMs) ms | Open: $($row.OpenTCP) | Closed: $($row.ClosedTCP) | No response: $($row.NoResponseTCP) | Errors: $($row.ErrorTCP)"}else{"MAC: $($row.MAC) | $($row.Vendor) | $($row.MacStatus)"}
-            [pscustomobject]@{Id=$row.Address;Label=($row.Address+' | TCP open: '+$row.OpenTCP);Detail=$detail;SearchText=($row.MAC+' '+$row.Vendor+' '+$row.Ping);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-NetworkDiscoveryMenuItem $row -ProbeView:$probeView})
         $description="$($result.Completed)/$($result.Requested) checked | Partial/cancelled: $($result.Cancelled). No response does not mean offline; MAC/vendor are unverified cache observations."
         $choice=Show-PcMenu -Title 'Windows > Network > Discovery' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{A=('All/responding (all: '+$showAll+')');D='MAC/probe view';M='Lookup MAC';E='Export all scan rows to CSV';L='Scan and vendor-data notes'}
         switch($choice.Action){
@@ -1156,14 +1197,49 @@ function Get-PcNetworkConnections {
     }
     [pscustomobject]@{CollectedAt=(Get-Date);Rows=@($rows.ToArray() | Sort-Object Protocol,@{Expression={if($_.State -eq 'Listen'){0}else{1}}},LocalPort,LocalAddress,RemoteEndpoint,ProcessId);Issues=@($issues.ToArray())}
 }
+function New-PcNetworkConnectionMenuItem {
+    param($Row)
+    $path=if($Row.ExecutablePath){$Row.ExecutablePath}else{'Executable path unavailable'}
+    $stateColor=switch([string]$Row.State){'Established'{'Green'}'Listen'{'Yellow'}'Bound'{'Cyan'}'TimeWait'{'DarkGray'}default{'Gray'}}
+    $remoteAddress=if($Row.Protocol -eq 'UDP'){'*'}else{[string]$Row.RemoteAddress}
+    $remotePort=if($null -ne $Row.RemotePort){[string]$Row.RemotePort}else{''}
+    $localAddress=if(([string]$Row.LocalAddress).Contains(':')){'['+[string]$Row.LocalAddress+']'}else{[string]$Row.LocalAddress}
+    if($Row.Protocol -ne 'UDP' -and $remoteAddress.Contains(':')){$remoteAddress='['+$remoteAddress+']'}
+    $labelParts=@(
+        [pscustomobject]@{Text=([string]$Row.Protocol);Color='Cyan'}
+        [pscustomobject]@{Text=' ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.State);Color=$stateColor}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=$localAddress;Color='White'}
+        [pscustomobject]@{Text=':';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.LocalPort);Color='Yellow'}
+        [pscustomobject]@{Text=' -> ';Color='DarkGray'}
+        [pscustomobject]@{Text=$remoteAddress;Color='Gray'}
+    )
+    if($remotePort){$labelParts+=@([pscustomobject]@{Text=':';Color='DarkGray'},[pscustomobject]@{Text=$remotePort;Color='Yellow'})}
+    $detailParts=@(
+        [pscustomobject]@{Text='PID ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.ProcessId);Color='Magenta'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.ProcessName);Color='Cyan'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=$path;Color='Gray'}
+    )
+    [pscustomobject]@{
+        Id=$Row.Id
+        Label=('{0} {1} | {2} -> {3}' -f $Row.Protocol,$Row.State,$Row.LocalEndpoint,$Row.RemoteEndpoint)
+        Detail=('PID {0} | {1} | {2}' -f $Row.ProcessId,$Row.ProcessName,$path)
+        LabelParts=$labelParts
+        DetailParts=$detailParts
+        SearchText=($Row.ProcessId.ToString()+' '+$Row.ProcessName+' '+$Row.ExecutablePath)
+        Data=$Row
+    }
+}
 function Start-PcNetworkConnections {
     $snapshot=Get-PcNetworkConnections;$state=@{};$protocol='TCP';$tcpState='All'
     while($true){
         $rows=@($snapshot.Rows | Where-Object {($protocol -eq 'Both' -or $_.Protocol -eq $protocol) -and ($tcpState -eq 'All' -or ($_.Protocol -eq 'TCP' -and $_.State -eq $tcpState))})
-        $menu=@(foreach($row in $rows){
-            $path=if($row.ExecutablePath){$row.ExecutablePath}else{'Executable path unavailable'}
-            [pscustomobject]@{Id=$row.Id;Label=('{0} {1} | {2} -> {3}' -f $row.Protocol,$row.State,$row.LocalEndpoint,$row.RemoteEndpoint);Detail=('PID {0} | {1} | {2}' -f $row.ProcessId,$row.ProcessName,$path);SearchText=($row.ProcessId.ToString()+' '+$row.ProcessName+' '+$row.ExecutablePath);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-PcNetworkConnectionMenuItem $row})
         $description=('{0:HH:mm:ss} snapshot | {1} / {2} | {3} entries | Collection issues: {4} (C)' -f $snapshot.CollectedAt,$protocol,$tcpState,$rows.Count,$snapshot.Issues.Count)
         $choice=Show-PcMenu -Title 'Windows > Network > Connections' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{T='TCP/UDP/both';L='TCP listeners';E='Established TCP';A='All states';C='Collection notes'}
         switch($choice.Action){
@@ -1610,6 +1686,18 @@ function Show-PcHealthFinding($Finding) {
         if($answer.Trim() -eq '1'){try{Open-PcHealthTarget $Finding.Target}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn};return}
     }
 }
+function New-PcHealthMenuItem($Row,[string]$Identity) {
+    $statusColor=switch([string]$Row.Status){'PASS'{'Green'}'WARN'{'Yellow'}'REVIEW'{'Yellow'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
+    [pscustomobject]@{
+        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);Detail=$Row.Detail;Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Title);Color='White'}
+        )
+        DetailParts=@([pscustomobject]@{Text=([string]$Row.Detail);Color='Gray'})
+    }
+}
 function Start-PcHealthDashboard {
     $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
@@ -1620,7 +1708,7 @@ function Start-PcHealthDashboard {
             $base=$identity;$suffix=1
             while($identities.ContainsKey($identity)){$suffix++;$identity=$base+'|'+$suffix}
             $identities[$identity]=$true
-            [pscustomobject]@{Id=$identity;Label=($row.Status+' | '+$row.Title);Detail=$row.Detail;Data=$row}
+            New-PcHealthMenuItem $row $identity
         })
         $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
         switch($choice.Action){
@@ -1693,15 +1781,34 @@ function Get-PcScheduledTaskEntries {
         }
     }finally{Write-Progress -Activity 'Inspecting scheduled tasks (read-only)' -Completed}
 }
+function New-PcStartupTaskMenuItem($Row,[ValidateSet('Startup','Task')][string]$Kind) {
+    $statusColor=switch([string]$Row.Status){'OK'{'Green'}'FOUND'{'Green'}'REVIEW'{'Yellow'}'MISSING'{'Red'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
+    $detail=if($Kind -eq 'Startup'){@('Command: '+$Row.Command; 'Source: '+$Row.Location+' | Path: '+$Row.PathStatus)}else{@($Row.Location+' | '+$Row.State;'Result: '+$Row.Result+' | '+$Row.ResultMeaning)}
+    $firstDetailParts=if($Kind -eq 'Startup'){@(
+        [pscustomobject]@{Text='Command: ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.Command);Color='Gray'}
+    )}else{@(
+        [pscustomobject]@{Text=([string]$Row.Location);Color='Gray'}
+        [pscustomobject]@{Text=' | ';Color='DarkGray'}
+        [pscustomobject]@{Text=([string]$Row.State);Color=$(if($Row.State -eq 'Running'){'Green'}elseif($Row.State -eq 'Disabled'){'DarkGray'}else{'Cyan'})}
+    )}
+    [pscustomobject]@{
+        Id=($Row.Location+'|'+$Row.Name+'|'+$Row.User+'|'+$Row.Command)
+        Label=($Row.Status+' | '+$Row.Name);Detail=$detail;SearchText=($Row.Command+' '+$Row.Executable);Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Name);Color='Cyan'}
+        )
+        DetailParts=$firstDetailParts
+    }
+}
 function Start-PcStartupTaskBrowser([ValidateSet('Startup','Task')][string]$Kind) {
     $state=@{};$reviewOnly=$false;$reload=$true;$all=@()
     while($true){
         if($reload){$all=if($Kind -eq 'Startup'){@(Get-PcStartupEntries)}else{@(Get-PcScheduledTaskEntries)};$reload=$false}
         $rows=@($all | Where-Object {-not $reviewOnly -or $_.Status -in @('REVIEW','UNAVAILABLE')} | Sort-Object @{Expression={if($_.Status -eq 'REVIEW'){0}elseif($_.Status -eq 'UNAVAILABLE'){1}else{2}}},Name)
-        $menu=@(foreach($row in $rows){
-            $detail=if($Kind -eq 'Startup'){@('Command: '+$row.Command; 'Source: '+$row.Location+' | Path: '+$row.PathStatus)}else{@($row.Location+' | '+$row.State;'Result: '+$row.Result+' | '+$row.ResultMeaning)}
-            [pscustomobject]@{Id=($row.Location+'|'+$row.Name+'|'+$row.User+'|'+$row.Command);Label=($row.Status+' | '+$row.Name);Detail=$detail;SearchText=($row.Command+' '+$row.Executable);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-PcStartupTaskMenuItem $row $Kind})
         $description=if($Kind -eq 'Startup'){'Read-only; inventory may omit packaged apps and enabled/approved state.'}else{'Read-only; visible tasks only. Nonzero results need review, not proof of failure.'}
         $choice=Show-PcMenu -Title ('Windows > Startup/tasks > '+$Kind) -Items $menu -State $state -Filterable -Refreshable -DetailLines 2 -Description $description -Commands @{C=('Review only: '+$reviewOnly+' / toggle')}
         switch($choice.Action){
@@ -1796,11 +1903,29 @@ function Show-PcServiceDetails($Row) {
         if($answer -ne 'E'){Wait-PcMenuReturn}
     }
 }
+function New-PcServiceMenuItem($Row) {
+    $stateColor=switch([string]$Row.State){'Running'{'Green'}'Start Pending'{'Yellow'}'Stop Pending'{'Yellow'}'Paused'{'Yellow'}'Stopped'{'Gray'}default{'DarkGray'}}
+    $modeColor=switch([string]$Row.StartMode){'Auto'{'Cyan'}'Automatic'{'Cyan'}'Disabled'{'DarkGray'}default{'Gray'}}
+    [pscustomobject]@{
+        Id=$Row.Name;Label=($Row.State+' | '+$Row.StartMode+' | '+$Row.DisplayName+' ('+$Row.Name+')');Detail=$Row.PathName;SearchText=$Row.StartName;Data=$Row
+        LabelParts=@(
+            [pscustomobject]@{Text=([string]$Row.State);Color=$stateColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.StartMode);Color=$modeColor}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.DisplayName);Color='White'}
+            [pscustomobject]@{Text=' (';Color='DarkGray'}
+            [pscustomobject]@{Text=([string]$Row.Name);Color='Magenta'}
+            [pscustomobject]@{Text=')';Color='DarkGray'}
+        )
+        DetailParts=@([pscustomobject]@{Text=([string]$Row.PathName);Color='Gray'})
+    }
+}
 function Start-PcServices {
     $state=@{};$reload=$true;$rows=@()
     while($true){
         try{if($reload){$rows=@(Get-PcServiceInventory);$reload=$false}}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn;return}
-        $menu=@(foreach($row in $rows){[pscustomobject]@{Id=$row.Name;Label=($row.State+' | '+$row.StartMode+' | '+$row.DisplayName+' ('+$row.Name+')');Detail=$row.PathName;SearchText=$row.StartName;Data=$row}})
+        $menu=@(foreach($row in $rows){New-PcServiceMenuItem $row})
         $choice=Show-PcMenu -Title 'Windows > Services' -Items $menu -State $state -Filterable -Refreshable -Description 'Enter opens details and confirmed actions. Filtering also searches executable paths and accounts.'
         switch($choice.Action){
             'Back'{return} 'Refresh'{$reload=$true}
@@ -1909,6 +2034,24 @@ function Format-PcMenuText {
     if([char]::IsHighSurrogate($clean[$length-1])){$length--}
     return $clean.Substring(0,$length)+'...'
 }
+function Write-PcMenuSegments {
+    param([object[]]$Segments,[string]$Prefix='',[int]$Width=100,[string]$FallbackColor='Gray')
+    $cleanPrefix=($Prefix -replace '[\x00-\x1F\x7F]',' ')
+    $cleanSegments=@(foreach($segment in $Segments){
+        [pscustomobject]@{Text=([string]$segment.Text -replace '[\x00-\x1F\x7F]',' ');Color=$(if($segment.Color){[string]$segment.Color}else{$FallbackColor})}
+    })
+    $bounded=Format-PcMenuText ($cleanPrefix+(($cleanSegments | ForEach-Object Text) -join '')) $Width
+    $prefixLength=[math]::Min($cleanPrefix.Length,$bounded.Length)
+    if($prefixLength){Write-Host $bounded.Substring(0,$prefixLength) -NoNewline -ForegroundColor $FallbackColor}
+    $offset=$prefixLength
+    foreach($segment in $cleanSegments){
+        if($offset -ge $bounded.Length){break}
+        $count=[math]::Min($segment.Text.Length,$bounded.Length-$offset)
+        if($count){Write-Host $bounded.Substring($offset,$count) -NoNewline -ForegroundColor $segment.Color;$offset+=$count}
+    }
+    if($offset -lt $bounded.Length){Write-Host $bounded.Substring($offset) -NoNewline -ForegroundColor $FallbackColor}
+    Write-Host ''
+}
 function Show-PcMenu {
     [CmdletBinding()]
     param(
@@ -1925,7 +2068,8 @@ function Show-PcMenu {
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
     )
-    # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason.
+    # Item contract: unique nonempty Id, Label; optional Kind, Detail, DisabledReason,
+    # LabelParts and DetailParts arrays containing Text/Color objects.
     # Caller retains State and handles Select/Refresh/Back; no scriptblock is executed here.
     $ids=@{};$keys=@{};$displayKeys=@{};$ordinal=0
     foreach($item in $Items){
@@ -1959,12 +2103,20 @@ function Show-PcMenu {
             $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
             $color=if($row.DisabledReason){'DarkGray'}elseif($i -eq $selected){'Cyan'}else{'Gray'}
-            Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color
+            if($row.LabelParts -and -not $row.DisabledReason){
+                $labelParts=@($row.LabelParts)
+                if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
+                Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$displayKey) $width $color
+            }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color}
             $detail=@($row.Detail | Select-Object -First $DetailLines)
             if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
             if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
             if(-not $detail.Count){$detail=@('')}
-            foreach($line in $detail){Write-Host (Format-PcMenuText ('    '+$line) $width) -ForegroundColor $color}
+            for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
+                if($detailIndex -eq 0 -and $row.DetailParts -and -not $row.DisabledReason -and -not ($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail)){
+                    Write-PcMenuSegments @($row.DetailParts) '    ' $width $color
+                }else{Write-Host (Format-PcMenuText ('    '+$detail[$detailIndex]) $width) -ForegroundColor $color}
+            }
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}

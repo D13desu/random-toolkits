@@ -177,6 +177,33 @@ function Invoke-NetworkDiscovery {
     }
     [pscustomobject]@{Scope=$Scope;Requested=$targets.Count;Completed=$rows.Count;Cancelled=$cancelled;Rows=@($rows.ToArray() | Sort-Object {ConvertTo-DiscoveryNumber $_.Address})}
 }
+function New-NetworkDiscoveryMenuItem($Row,[switch]$ProbeView) {
+    $open=if([string]::IsNullOrWhiteSpace([string]$Row.OpenTCP)){'none'}else{[string]$Row.OpenTCP}
+    $labelParts=@(
+        [pscustomobject]@{Text=([string]$Row.Address);Color='Cyan'}
+        [pscustomobject]@{Text=' | TCP open: ';Color='DarkGray'}
+        [pscustomobject]@{Text=$open;Color=$(if($open -eq 'none'){'DarkGray'}else{'Yellow'})}
+    )
+    if($ProbeView){
+        $detail="Ping: $($Row.Ping) | $($Row.LatencyMs) ms | Open: $($Row.OpenTCP) | Closed: $($Row.ClosedTCP) | No response: $($Row.NoResponseTCP) | Errors: $($Row.ErrorTCP)"
+        $pingColor=if($Row.Ping -eq 'Success'){'Green'}elseif($Row.Ping -eq 'Error'){'Red'}else{'DarkGray'}
+        $detailParts=@(
+            [pscustomobject]@{Text='Ping: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.Ping);Color=$pingColor}
+            [pscustomobject]@{Text=(' | '+[string]$Row.LatencyMs+' ms | Open: ');Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.OpenTCP);Color='Yellow'}
+            [pscustomobject]@{Text=' | Closed: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.ClosedTCP);Color='Gray'}
+            [pscustomobject]@{Text=' | No response: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.NoResponseTCP);Color='DarkGray'}
+            [pscustomobject]@{Text=' | Errors: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.ErrorTCP);Color='Red'}
+        )
+    }else{
+        $detail="MAC: $($Row.MAC) | $($Row.Vendor) | $($Row.MacStatus)"
+        $detailParts=@(
+            [pscustomobject]@{Text='MAC: ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.MAC);Color='Magenta'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.Vendor);Color='Cyan'}
+            [pscustomobject]@{Text=' | ';Color='DarkGray'},[pscustomobject]@{Text=([string]$Row.MacStatus);Color='Gray'}
+        )
+    }
+    [pscustomobject]@{Id=$Row.Address;Label=($Row.Address+' | TCP open: '+$Row.OpenTCP);Detail=$detail;LabelParts=$labelParts;DetailParts=$detailParts;SearchText=($Row.MAC+' '+$Row.Vendor+' '+$Row.Ping);Data=$Row}
+}
 function Start-NetworkDiscovery {
     Write-Host 'NETWORK DISCOVERY | IPv4 ICMP + TCP connect | No administrator required' -ForegroundColor Cyan
     if(Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue){Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {$_.IPAddress -notlike '127.*'} | Select-Object InterfaceAlias,IPAddress,PrefixLength | Format-Table -AutoSize | Out-Host}
@@ -198,10 +225,7 @@ function Start-NetworkDiscovery {
     $state=@{};$showAll=$false;$probeView=$false
     while($true){
         $rows=@($result.Rows | Where-Object {$showAll -or $_.Responded})
-        $menu=@(foreach($row in $rows){
-            $detail=if($probeView){"Ping: $($row.Ping) | $($row.LatencyMs) ms | Open: $($row.OpenTCP) | Closed: $($row.ClosedTCP) | No response: $($row.NoResponseTCP) | Errors: $($row.ErrorTCP)"}else{"MAC: $($row.MAC) | $($row.Vendor) | $($row.MacStatus)"}
-            [pscustomobject]@{Id=$row.Address;Label=($row.Address+' | TCP open: '+$row.OpenTCP);Detail=$detail;SearchText=($row.MAC+' '+$row.Vendor+' '+$row.Ping);Data=$row}
-        })
+        $menu=@(foreach($row in $rows){New-NetworkDiscoveryMenuItem $row -ProbeView:$probeView})
         $description="$($result.Completed)/$($result.Requested) checked | Partial/cancelled: $($result.Cancelled). No response does not mean offline; MAC/vendor are unverified cache observations."
         $choice=Show-PcMenu -Title 'Windows > Network > Discovery' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{A=('All/responding (all: '+$showAll+')');D='MAC/probe view';M='Lookup MAC';E='Export all scan rows to CSV';L='Scan and vendor-data notes'}
         switch($choice.Action){
