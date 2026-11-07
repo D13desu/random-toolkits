@@ -8,7 +8,7 @@ $storage=Get-NetworkCategories | Where-Object Id -eq 'storage'
 $items=@(Get-NetworkMenuItems $storage)
 Assert ($items.Count -eq 2 -and $items[0].Entry.Id -eq 'disk-helper' -and $items[1].Entry.Id -eq 'disk') 'Preferred helper and compatibility scanner are reachable in Storage'
 $entry=$items[0].Entry
-Assert (-not $entry.Admin -and $entry.MinPS -eq '5.1' -and $entry.Name -match '1.2.0') 'Default helper is available without elevation and reports its version'
+Assert (-not $entry.Admin -and $entry.MinPS -eq '5.1' -and $entry.Name -match '1.3.0') 'Default helper is available without elevation and reports its version'
 Assert ((Get-NetworkAvailability $entry -Version '5.0').Reason -match 'Requires PowerShell 5.1') 'Older PowerShell is marked unavailable'
 $runtimeFunction=(Get-Item Function:Get-PcDiskHelperRuntimeReason).ScriptBlock
 function Get-PcDiskHelperRuntimeReason {'Requires test runtime'}

@@ -92,7 +92,7 @@ namespace RandomToolkits.HelperExperiment {
   }
  }
  internal static class Program {
-  const string Version="1.2.0";
+  const string Version="1.3.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
