@@ -113,6 +113,29 @@ Assert-True ($result.Status -eq 'PASS' -and $result.defaultNamingContext -eq 'DC
 $ids=@((Get-AdChecks).Id)
 Assert-True (@('ad-identity','ad-ports','ad-rootdse' | Where-Object {$_ -notin $ids}).Count -eq 0) 'New AD checks are registered'
 
+$script:DcHealthCalls=New-Object System.Collections.Generic.List[string]
+function netdom.exe { $script:DcHealthCalls.Add('netdom ' + ($args -join ' '));$script:LASTEXITCODE=0;'FSMO fixture' }
+function repadmin.exe { $script:DcHealthCalls.Add('repadmin ' + ($args -join ' '));$script:LASTEXITCODE=0;'Replication fixture' }
+function dcdiag.exe { $script:DcHealthCalls.Add('dcdiag ' + ($args -join ' '));$script:LASTEXITCODE=0;'DCDiag fixture' }
+$null=Get-AdFsmoRoles ([pscustomobject]@{Domain='example.test'})
+$null=Get-AdReplicationHealth 'dc.example.test'
+$dcdiagResults=@(Get-AdDcDiagnostics 'dc.example.test')
+Assert-True ($script:DcHealthCalls[0] -eq 'netdom query /domain:example.test FSMO') 'FSMO discovery uses read-only netdom query'
+Assert-True (($script:DcHealthCalls -join '|') -match 'repadmin /replsummary dc.example.test /bysrc /bydest /sort:delta\|repadmin /showrepl dc.example.test /all\|repadmin /queue dc.example.test') 'Replication health uses status-only repadmin commands'
+Assert-True ($dcdiagResults.Count -eq 7 -and -not (($script:DcHealthCalls -join ' ') -match '/fix|/syncall|/replicate')) 'DCDiag runs selected read-only tests without repair or replication triggers'
+
+function Get-WinEvent {
+    param($ListLog,$ComputerName,$FilterHashtable,$MaxEvents,$ErrorAction)
+    if ($ListLog) { return [pscustomobject]@{LogName=$ListLog} }
+    if ($FilterHashtable.LogName -eq 'DNS Server') { return }
+    [pscustomobject]@{TimeCreated=[datetime]'2026-01-01';ProviderName='Fixture';Id=42;LevelDisplayName='Warning';Message='Fixture event message'}
+}
+$eventResults=@(Get-AdEventSummary 'dc.example.test')
+Assert-True ($eventResults.Count -eq 4 -and @($eventResults | Where-Object Status -eq 'PASS').Count -eq 1 -and @($eventResults | Where-Object Status -eq 'WARN').Count -eq 3) 'DC event summary keeps logs independent and reports empty windows cleanly'
+
+$ids=@((Get-AdChecks).Id)
+Assert-True (@('ad-fsmo','ad-replication','ad-dcdiag','ad-events' | Where-Object {$_ -notin $ids}).Count -eq 0) 'DC Health checks are registered'
+
 # Submenu navigation and recovery after a failed action.
 $script:FakeComputer.DomainRole = 1
 $script:Answers = New-Object 'System.Collections.Generic.Queue[string]'

@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.21.0
+# Random Toolkits | Windows Toolkit 0.22.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -845,6 +845,59 @@ function Get-AdRootDse {
     }
 }
 
+function Get-AdFsmoRoles {
+    param($Context)
+    Test-NetworkTarget $Context.Domain
+    Invoke-AdNative 'netdom.exe' @('query',('/domain:' + $Context.Domain),'FSMO')
+}
+
+function Get-AdReplicationHealth {
+    param([string]$Controller)
+    $dcName = Get-AdController $Controller
+    Invoke-AdNative 'repadmin.exe' @('/replsummary',$dcName,'/bysrc','/bydest','/sort:delta')
+    Invoke-AdNative 'repadmin.exe' @('/showrepl',$dcName,'/all')
+    Invoke-AdNative 'repadmin.exe' @('/queue',$dcName)
+}
+
+function Get-AdDcDiagnostics {
+    param([string]$Controller)
+    $dcName = Get-AdController $Controller
+    foreach ($test in @('Advertising','Services','NetLogons','SysVolCheck','DFSREvent','Replications','DNS')) {
+        Invoke-AdNative 'dcdiag.exe' @(('/s:' + $dcName),('/test:' + $test))
+    }
+}
+
+function Get-AdEventSummary {
+    param([string]$Controller, [ValidateRange(1,168)][int]$Hours = 24)
+    $dcName = Get-AdController $Controller
+    $start = (Get-Date).AddHours(-$Hours)
+    $sources = @(
+        [pscustomobject]@{Name='Directory Service';Log='Directory Service';Providers=@()}
+        [pscustomobject]@{Name='DNS Server';Log='DNS Server';Providers=@()}
+        [pscustomobject]@{Name='DFS Replication';Log='DFS Replication';Providers=@()}
+        [pscustomobject]@{Name='Netlogon and KDC';Log='System';Providers=@('NETLOGON','Microsoft-Windows-Kerberos-Key-Distribution-Center')}
+    )
+    foreach ($source in $sources) {
+        try {
+            $null = Get-WinEvent -ListLog $source.Log -ComputerName $dcName -ErrorAction Stop
+            $filter = @{LogName=$source.Log;StartTime=$start;Level=@(1,2,3)}
+            if ($source.Providers.Count) { $filter.ProviderName = $source.Providers }
+            $events = @(Get-WinEvent -ComputerName $dcName -FilterHashtable $filter -MaxEvents 25 -ErrorAction SilentlyContinue)
+            if (-not $events.Count) {
+                [pscustomobject]@{Test='AD event summary';Target=$dcName;Source=$source.Name;Status='PASS';Detail="No critical, error, or warning events returned in the last $Hours hours."}
+                continue
+            }
+            foreach ($event in $events) {
+                $message = ([string]$event.Message -replace '\s+',' ').Trim()
+                if ($message.Length -gt 500) { $message = $message.Substring(0,497) + '...' }
+                [pscustomobject]@{Test='AD event summary';Target=$dcName;Source=$source.Name;Status='WARN';Time=$event.TimeCreated;Provider=$event.ProviderName;Id=$event.Id;Level=$event.LevelDisplayName;Detail=$message}
+            }
+        } catch {
+            [pscustomobject]@{Test='AD event summary';Target=$dcName;Source=$source.Name;Status='WARN';Detail=$_.Exception.Message}
+        }
+    }
+}
+
 function Get-AdChecks {
     @(
         [pscustomobject]@{Key='1'; Id='ad-context'; Name='Domain membership and machine role'; MinPS='5.0'; Commands=@('Get-CimInstance'); Admin=$false; Roles=@(); Action={param($c,$dc) $c}}
@@ -856,6 +909,10 @@ function Get-AdChecks {
         [pscustomobject]@{Key='7'; Id='ad-identity'; Name='Current identity and Kerberos tickets / sessions'; MinPS='5.0'; Commands=@('whoami.exe','klist.exe'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdIdentity}}
         [pscustomobject]@{Key='8'; Id='ad-ports'; Name='Domain controller service ports'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Test-AdDcPorts $dc}}
         [pscustomobject]@{Key='9'; Id='ad-rootdse'; Name='LDAP RootDSE capabilities and naming contexts'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdRootDse $dc}}
+        [pscustomobject]@{Key='10'; Id='ad-fsmo'; Name='FSMO role owners'; MinPS='5.0'; Commands=@('netdom.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdFsmoRoles $c}}
+        [pscustomobject]@{Key='11'; Id='ad-replication'; Name='AD replication summary, inbound status, and queue'; MinPS='5.0'; Commands=@('repadmin.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdReplicationHealth $dc}}
+        [pscustomobject]@{Key='12'; Id='ad-dcdiag'; Name='Selected domain controller diagnostics'; MinPS='5.0'; Commands=@('dcdiag.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdDcDiagnostics $dc}}
+        [pscustomobject]@{Key='13'; Id='ad-events'; Name='Recent AD, DNS, DFSR, Netlogon, and KDC events'; MinPS='5.0'; Commands=@('Get-WinEvent'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdEventSummary $dc}}
     )
 }
 
@@ -1498,7 +1555,7 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='1'; Id='overview'; Name='Overview and quick diagnosis'; Checks=@('overview','quick'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview','discovery','connections'); AdChecks=@(); Repairs=@('renew-dhcp')}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS'; Checks=@('dns'); AdChecks=@(); Repairs=@('flush-dns')}
-        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse'); Repairs=@('repair-trust','resync-time')}
+        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse','ad-fsmo','ad-replication','ad-dcdiag','ad-events'); Repairs=@('repair-trust','resync-time')}
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
@@ -1535,7 +1592,7 @@ function Invoke-InteractiveCheck {
     if ($Item.Kind -eq 'Repair') { Invoke-InteractiveRepair $entry; return }
     if ($Item.Kind -eq 'AD') {
         $dcName = $null
-        if ($entry.Id -in @('ad-secure','ad-time','ad-shares','ad-ports','ad-rootdse')) {
+        if ($entry.Id -in @('ad-secure','ad-time','ad-shares','ad-ports','ad-rootdse','ad-replication','ad-dcdiag','ad-events')) {
             $answer = Read-PcInput 'DC hostname [automatic discovery]'
             if ($answer) { $dcName = $answer.Trim() }
             if ($dcName) { $null = Get-AdController $dcName }
@@ -2215,7 +2272,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.21.0')
+    param([string]$Title,[string]$Version='0.22.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2282,7 +2339,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.21.0',
+        [string]$Version='0.22.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
