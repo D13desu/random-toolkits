@@ -2,6 +2,9 @@
 function Test-PcMenuKeyboard {
     try{return $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected}catch{return $false}
 }
+function Clear-PcMenuScreen {
+    if(Test-PcMenuKeyboard){try{Clear-Host}catch{}}
+}
 function ConvertFrom-PcMenuKey($Key) {
     switch([string]$Key.Key){
         'UpArrow'{return 'Up'} 'DownArrow'{return 'Down'}
@@ -40,7 +43,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.24.1')
+    param([string]$Title,[string]$Version='0.25.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -107,7 +110,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.24.1',
+        [string]$Version='0.25.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -276,6 +279,7 @@ function Wait-PcMenuReturn {
 
 function Show-PcListDetails {
     param($Row,[string]$Title='Details')
+    Clear-PcMenuScreen
     Write-Host ("`n"+$Title) -ForegroundColor Cyan
     $Row | Format-List * | Out-Host
     while($true){

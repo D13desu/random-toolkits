@@ -36,6 +36,7 @@ function Show-PcServiceDetails($Row) {
         )
         $answer=Read-PcCategoryMenu ('Windows > Services > '+$Row.Name) $menu $state ($Row.DisplayName+' | '+$Row.State+' | '+$Row.StartMode)
         if($answer -eq 'B'){return}
+        Clear-PcMenuScreen
         try{
             switch($answer){
                 'D'{
@@ -138,6 +139,7 @@ function Start-PcWindowsRepair {
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         $action=switch($answer.Trim()){'1'{'CheckHealth'} '2'{'ScanHealth'} '3'{'VerifyFiles'} '4'{'RestoreHealth'} '5'{'RepairFiles'}}
         if(-not $action){Write-Warning 'Choose a listed option.';continue}
+        Clear-PcMenuScreen
         try{Invoke-PcWindowsRepair $action}catch{Write-Warning $_.Exception.Message}
         $null=Read-Host 'Enter to return'
     }

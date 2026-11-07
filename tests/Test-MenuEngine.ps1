@@ -35,8 +35,8 @@ Assert $blocked 'Duplicate IDs are rejected'
 Feed @('','yes');Assert (-not (Confirm-PcMenuChange 'Fixture')) 'Changes default to No';Assert (Confirm-PcMenuChange 'Fixture') 'Explicit yes confirms'
 Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters cannot inject terminal commands'
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
-Assert ((Get-PcMenuHeading Windows) -eq 'WINDOWS TOOLKIT 0.24.1') 'Root menu uses the toolkit product heading without a redundant breadcrumb'
-Assert ((Get-PcMenuHeading 'Windows > Network') -eq 'WINDOWS 0.24.1 | Windows > Network') 'Submenus retain their navigation breadcrumb'
+Assert ((Get-PcMenuHeading Windows) -eq 'WINDOWS TOOLKIT 0.25.0') 'Root menu uses the toolkit product heading without a redundant breadcrumb'
+Assert ((Get-PcMenuHeading 'Windows > Network') -eq 'WINDOWS 0.25.0 | Windows > Network') 'Submenus retain their navigation breadcrumb'
 Assert ((Get-PcMenuPageSize 29 1 12) -eq 10) 'A 29-row two-line browser uses ten items'
 Assert ((Get-PcMenuPageSize 49 1 100) -eq 20) 'Tall terminals are not artificially capped at twelve items'
 Assert ((Get-PcMenuPageSize 29 3 20) -eq 5) 'Expanded previews account for all detail lines'
@@ -100,3 +100,7 @@ $incrementalState=@{}
 $incrementalResult=Show-PcMenu -Title Incremental -Items @([pscustomobject]@{Id='one';Label='One';Detail='First'},[pscustomobject]@{Id='two';Label='Two';Detail='Second'}) -State $incrementalState
 Assert ($incrementalResult.Action -eq 'Back' -and $incrementalState.SelectedId -eq 'one') 'Incremental navigation preserves selection behavior'
 Assert ($script:IncrementalClears -eq 1 -and $script:IncrementalMoves -gt 0) 'Same-page arrow navigation repaints rows without clearing the screen'
+
+$script:IncrementalClears=0
+Clear-PcMenuScreen
+Assert ($script:IncrementalClears -eq 1) 'Interactive result transitions use the shared screen-clear helper'

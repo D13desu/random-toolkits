@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.24.1
+# Random Toolkits | Windows Toolkit 0.25.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -112,6 +112,7 @@ function Start-PcRegistryCategory {
         }
         $answer=Read-PcCategoryMenu $title $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        Clear-PcMenuScreen
         try {
             switch ($answer.Trim()) {
                 '1' { $tweak=Get-PcRegistryTweak $Id; Write-Host $tweak.Path; Get-PcRegistryValues $tweak | Format-Table -AutoSize | Out-Host }
@@ -192,6 +193,7 @@ function Start-PcSysinternalsLiveTool([string]$Id) {
 }
 
 function Show-PcSysinternalsLiveNotes {
+    Clear-PcMenuScreen
     Write-Host "`nMicrosoft Sysinternals Live" -ForegroundColor Cyan
     Write-Host 'Share: \\live.sysinternals.com\tools'
     Write-Host 'Browser: https://live.sysinternals.com/'
@@ -1766,6 +1768,7 @@ function Start-NetworkCategory {
         $answer=Read-PcCategoryMenu ("Windows > "+$category.Name) $menu $state $description
         if($answer -eq 'B'){return}
         $item=$items | Where-Object Key -EQ $answer | Select-Object -First 1
+        Clear-PcMenuScreen
         try{
             $availability=Get-NetworkItemAvailability $item (Get-AdContext)
             if(-not $availability.Available){throw $availability.Reason}
@@ -1881,6 +1884,7 @@ function Start-ToolkitCleanup {
         if($answer -in @('B','0') -or $null -eq $answer){return}
         $scope=switch($answer){'1'{'Temp'}'2'{'Cache'}'3'{'Both'}default{''}}
         if(-not $scope){continue}
+        Clear-PcMenuScreen
         try{
             $items=@(Get-ToolkitCleanupCandidates $scope)
             if(-not $items.Count){Write-Host 'No recognized cleanup candidates found.';continue}
@@ -2035,6 +2039,7 @@ function Open-PcHealthTarget([string]$Target) {
     else{throw 'Unknown dashboard target.'}
 }
 function Show-PcHealthFinding($Finding) {
+    Clear-PcMenuScreen
     Write-Host ("`n[{0}] {1}" -f $Finding.Status,$Finding.Title) -ForegroundColor Cyan
     Write-Host $Finding.Detail
     while($true){
@@ -2245,6 +2250,7 @@ function Show-PcServiceDetails($Row) {
         )
         $answer=Read-PcCategoryMenu ('Windows > Services > '+$Row.Name) $menu $state ($Row.DisplayName+' | '+$Row.State+' | '+$Row.StartMode)
         if($answer -eq 'B'){return}
+        Clear-PcMenuScreen
         try{
             switch($answer){
                 'D'{
@@ -2347,6 +2353,7 @@ function Start-PcWindowsRepair {
         if($null -eq $answer -or $answer.Trim() -in @('B','0')){return}
         $action=switch($answer.Trim()){'1'{'CheckHealth'} '2'{'ScanHealth'} '3'{'VerifyFiles'} '4'{'RestoreHealth'} '5'{'RepairFiles'}}
         if(-not $action){Write-Warning 'Choose a listed option.';continue}
+        Clear-PcMenuScreen
         try{Invoke-PcWindowsRepair $action}catch{Write-Warning $_.Exception.Message}
         $null=Read-Host 'Enter to return'
     }
@@ -2357,6 +2364,9 @@ function Start-PcWindowsRepair {
 # Shared menu foundation. Returns a choice; never invokes an item's action.
 function Test-PcMenuKeyboard {
     try{return $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected}catch{return $false}
+}
+function Clear-PcMenuScreen {
+    if(Test-PcMenuKeyboard){try{Clear-Host}catch{}}
 }
 function ConvertFrom-PcMenuKey($Key) {
     switch([string]$Key.Key){
@@ -2396,7 +2406,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.24.1')
+    param([string]$Title,[string]$Version='0.25.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2463,7 +2473,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.24.1',
+        [string]$Version='0.25.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2632,6 +2642,7 @@ function Wait-PcMenuReturn {
 
 function Show-PcListDetails {
     param($Row,[string]$Title='Details')
+    Clear-PcMenuScreen
     Write-Host ("`n"+$Title) -ForegroundColor Cyan
     $Row | Format-List * | Out-Host
     while($true){
@@ -2694,12 +2705,19 @@ function Get-PcSecurityHeader {
     return 'Unavailable'
 }
 
-function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.24.1') {
+function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.25.0') {
     return ($null -ne $Summary -and [string]$Summary.SchemaVersion -eq $SchemaVersion)
 }
 
+function Format-PcUptime([timespan]$Value) {
+    if($Value.TotalSeconds -lt 0){return 'Unavailable'}
+    if($Value.Days -gt 0){return ('{0}d {1:00}h {2:00}m' -f $Value.Days,$Value.Hours,$Value.Minutes)}
+    if($Value.Hours -gt 0){return ('{0}h {1:00}m' -f $Value.Hours,$Value.Minutes)}
+    return ('{0}m' -f [math]::Max(0,$Value.Minutes))
+}
+
 function Get-PcSystemSummary {
-    $schemaVersion='0.24.1'
+    $schemaVersion='0.25.0'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
@@ -2707,7 +2725,7 @@ function Get-PcSystemSummary {
     $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable;$securitySummary=$unavailable
     $userSid=$unavailable;$authenticationType=$unavailable;$administrator=$unavailable;$groupNames=@()
     $manufacturer=$unavailable;$model=$unavailable;$domain=$unavailable;$domainJoined=$unavailable
-    $cpuCores=$unavailable;$logicalProcessors=$unavailable;$diskDetails=@();$osArchitecture=$unavailable;$lastBoot=$unavailable;$uptime=$unavailable
+    $cpuCores=$unavailable;$logicalProcessors=$unavailable;$diskDetails=@();$osArchitecture=$unavailable;$lastBoot=$unavailable;$lastBootTime=$null;$uptime=$unavailable
 
     try {
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -2754,7 +2772,7 @@ function Get-PcSystemSummary {
         $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5 -ErrorAction Stop
         $osVersion=('{0} {1} (build {2})' -f $os.Caption,$os.Version,$os.BuildNumber).Trim()
         if($os.OSArchitecture){$osArchitecture=[string]$os.OSArchitecture}
-        if($os.LastBootUpTime){$lastBoot=([datetime]$os.LastBootUpTime).ToString('yyyy-MM-dd HH:mm:ss');$uptime=((Get-Date)-[datetime]$os.LastBootUpTime).ToString('d\.hh\:mm\:ss')}
+        if($os.LastBootUpTime){$lastBootTime=[datetime]$os.LastBootUpTime;$lastBoot=$lastBootTime.ToString('yyyy-MM-dd HH:mm:ss');$uptime=Format-PcUptime ((Get-Date)-$lastBootTime)}
     } catch {}
     try{$securitySummary=Get-PcSecurityHeader}catch{}
 
@@ -2765,12 +2783,13 @@ function Get-PcSystemSummary {
         UserSid=$userSid;AuthenticationType=$authenticationType;Administrator=$administrator;GroupNames=@($groupNames)
         Manufacturer=$manufacturer;Model=$model;Domain=$domain;DomainJoined=$domainJoined
         CpuCores=$cpuCores;LogicalProcessors=$logicalProcessors;DiskDetails=@($diskDetails)
-        OsArchitecture=$osArchitecture;LastBoot=$lastBoot;Uptime=$uptime
+        OsArchitecture=$osArchitecture;LastBoot=$lastBoot;LastBootTime=$lastBootTime;Uptime=$uptime
     }
     return $script:PcSystemSummary
 }
 
 function Show-PcSystemDetails($Summary) {
+    Clear-PcMenuScreen
     Write-Host "`nCOMPUTER AND USER DETAILS" -ForegroundColor Cyan
     Write-Host "`nUSER" -ForegroundColor Cyan
     Write-Host ('Name: '+$Summary.Username)
@@ -2803,7 +2822,7 @@ function Show-PcSystemDetails($Summary) {
     Write-Host ('Version: '+$Summary.OsVersion)
     Write-Host ('Architecture: '+$Summary.OsArchitecture)
     Write-Host ('Last boot: '+$Summary.LastBoot)
-    Write-Host ('Uptime (days.hh:mm:ss): '+$Summary.Uptime)
+    Write-Host ('Uptime: '+(Get-PcSummaryUptime $Summary))
     Write-Host "`nEnter / Esc / Backspace / B: back"
     if(Test-PcMenuKeyboard){
         while($true){
@@ -2814,12 +2833,18 @@ function Show-PcSystemDetails($Summary) {
     $null=Read-Host 'Enter to return'
 }
 
+function Get-PcSummaryUptime($Summary) {
+    if($Summary.LastBootTime){try{return Format-PcUptime ((Get-Date)-[datetime]$Summary.LastBootTime)}catch{}}
+    return [string]$Summary.Uptime
+}
+
 function Format-PcSystemSummary($Summary) {
+    $uptime=Get-PcSummaryUptime $Summary
     @(
         "User: $($Summary.Username)"
         "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
         "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
-        "OS: $($Summary.OsVersion)"
+        "OS: $($Summary.OsVersion) | Uptime: $uptime"
         "Security: $($Summary.SecuritySummary)"
     )
 }
@@ -2975,6 +3000,7 @@ function Start-PcDiagnosticMenu {
         if($answer -eq 'B'){return}
         $entry=$Entries | Where-Object Key -eq $answer | Select-Object -First 1
         if(-not $entry){continue}
+        Clear-PcMenuScreen
         try{
             $availability=Get-NetworkAvailability $entry;if(-not $availability.Available){throw $availability.Reason}
             if($entry.ConfirmRun -and (Read-Host 'Run this read-only scan now? It may contact the configured update service and take several minutes. [y/N]') -notmatch '^(?i:y|yes)$'){[pscustomobject]@{Test=$entry.Id;Status='CANCELLED';Detail='Scan not started.'}|Format-List|Out-Host;continue}
@@ -2989,8 +3015,9 @@ function Start-PcSecurityMenu { Start-PcDiagnosticMenu 'Windows > Security' @(Ge
 function Start-PcUpdateMenu { Start-PcDiagnosticMenu 'Windows > Windows Update' @(Get-PcUpdateChecks) }
 
 function Start-WindowsMenu {
-    $state=@{};$systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
+    $state=@{}
     while ($true) {
+        $systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
         $menu=@(
             New-PcMenuItem '1' 'Computer and user details' 'Check' 'Full untruncated identity, groups, hardware, network and Windows information'
             New-PcMenuItem '2' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'

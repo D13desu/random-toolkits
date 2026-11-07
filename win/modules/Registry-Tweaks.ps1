@@ -93,6 +93,7 @@ function Start-PcRegistryCategory {
         }
         $answer=Read-PcCategoryMenu $title $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        Clear-PcMenuScreen
         try {
             switch ($answer.Trim()) {
                 '1' { $tweak=Get-PcRegistryTweak $Id; Write-Host $tweak.Path; Get-PcRegistryValues $tweak | Format-Table -AutoSize | Out-Host }

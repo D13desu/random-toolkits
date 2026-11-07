@@ -43,6 +43,7 @@ function Start-PcSysinternalsLiveTool([string]$Id) {
 }
 
 function Show-PcSysinternalsLiveNotes {
+    Clear-PcMenuScreen
     Write-Host "`nMicrosoft Sysinternals Live" -ForegroundColor Cyan
     Write-Host 'Share: \\live.sysinternals.com\tools'
     Write-Host 'Browser: https://live.sysinternals.com/'
