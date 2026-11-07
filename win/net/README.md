@@ -1,4 +1,4 @@
-# Windows Toolkit 0.20.1
+# Windows Toolkit 0.20.2
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -19,9 +19,9 @@ irm https://tools.d0xd.com/win | iex
 
 ## Menu layout
 
-The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**, **8 Cleanup**, **9 Health dashboard**, **10 Startup/tasks**, **11 Services**, and **12 Windows repair centre**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+The root menu is **1 Computer and user details**, **2 Network**, **3 Power and device health**, **4 Storage**, **5 Printing**, **6 Group Policy**, **7 Event Logs**, **8 Registry tweaks**, **9 Health dashboard**, **10 Startup/tasks**, **11 Services**, **12 Windows repair centre**, **13 Microsoft Sysinternals Live**, and **99 Toolkit cleanup**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
 
-The root menu also shows a cached system summary: current username and security groups, hostname, public and private IPv4 addresses, aggregate fixed-disk capacity/free space, CPU, physical RAM, and Windows version/build. Public-IP discovery makes one HTTPS request to `api.ipify.org` with a three-second timeout when the menu starts; a failed or blocked lookup is shown as unavailable and does not block use of the toolkit.
+The root menu also shows a cached system summary: current username, hostname, public and private IPv4 addresses, aggregate fixed-disk capacity/free space, CPU, physical RAM, and Windows version/build. Public-IP discovery makes one HTTPS request to `api.ipify.org` with a three-second timeout when the menu starts; a failed or blocked lookup is shown as unavailable and does not block use of the toolkit. Full security-group membership is available under option 1 rather than the compact root header.
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ Get-PcEventRecords -LogName System -Hours 48 -Ids 7031,7034 -Levels 2,3 -Limit 1
 
 ## Registry tweaks
 
-Root option **7 Registry tweaks** has separate **1 Outlook** and **2 Remote Desktop** submenus. Each submenu inspects its own values, applies a tweak, or removes its override to use defaults. Each mutation requires `y`/`yes`, saves a unique `.reg` undo file under `%LOCALAPPDATA%\Random-Toolkits\registry-backups`, then reads back the values. If backup fails, nothing is changed. If a write fails partway through, the error names the undo file. Import it with Registry Editor under the same account (elevated for RDP) to restore the exact previous values, including deleting values that were originally absent. Resetting defaults is distinct from restoring that backup. No unrelated values are removed.
+Root option **8 Registry tweaks** has separate **1 Outlook** and **2 Remote Desktop** submenus. Each submenu inspects its own values, applies a tweak, or removes its override to use defaults. Each mutation requires `y`/`yes`, saves a unique `.reg` undo file under `%LOCALAPPDATA%\Random-Toolkits\registry-backups`, then reads back the values. If backup fails, nothing is changed. If a write fails partway through, the error names the undo file. Import it with Registry Editor under the same account (elevated for RDP) to restore the exact previous values, including deleting values that were originally absent. Resetting defaults is distinct from restoring that backup. No unrelated values are removed.
 
 - **Classic Outlook local PST/OST limit:** Office `16.0` current-user preferences, Unicode files only. Choose a whole number of GB (1â€“1000; default 100). Sets `MaxLargeFileSize` in MB and `WarnLargeFileSize` to 95% of that maximum. This threshold stops adding data; it does not produce an advance warning popup. Close Outlook first. The tool blocks changes when size values exist in the corresponding current-user policy key. Run as the intended Outlook user; elevation under another account targets that account. This does not increase Exchange/Microsoft 365 server mailbox quotas or configure new Outlook. Above 50 GB can reduce performance; archive or reduce cached mail where practical. Resetting after a file has grown beyond the default may prevent adding mail until its size is reduced.
 - **Older RDP redirection warning:** administrator required. Sets `HKLM\Software\Policies\Microsoft\Windows NT\Terminal Services\Client\RedirectionWarningDialogVersion` to DWORD `1`. This machine-wide compatibility setting reduces the newer resource-consent protection for connections opened from RDP files; it does not turn off certificate validation or NLA. Use for trusted connections. Microsoft may remove support in a future update. Reset deletes the override; managed policy can reapply it. Start a new connection after changing it.
@@ -220,7 +220,7 @@ Use `tests/Sync-NetworkDiscovery.ps1` after editing the maintained module. Tests
 
 ## Toolkit cleanup
 
-Windows menu **8** previews recognized temporary packages, local diagnostic reports and test fixtures, download caches, or both. It lists each candidate path, size and eligibility before a yes/no deletion prompt. Only the current account's resolved TEMP directory and `%LOCALAPPDATA%\Random-Toolkits` are considered. This is not a general Windows Temp cleaner.
+Windows menu **99** previews recognized temporary packages, local diagnostic reports and test fixtures, download caches, or both. It lists each candidate path, size and eligibility before a yes/no deletion prompt. Only the current account's resolved TEMP directory and `%LOCALAPPDATA%\Random-Toolkits` are considered. This is not a general Windows Temp cleaner.
 
 Normal disk-launcher exits already remove their downloaded packages. Diagnostic JSON reports may contain local file paths and machine details. Network/M365 exports can contain sensitive data; being in TEMP does not make a file harmless. The OUI cache contains public IEEE assignments.
 
@@ -232,7 +232,7 @@ Maintain `win/net/Toolkit-Cleanup.ps1`, then run `tests/Sync-ToolkitCleanup.ps1`
 
 ### Event log picker
 
-Windows menu **6: Event Logs** now offers Application, System, Security, Setup, Forwarded Events, Windows PowerShell, PowerShell Operational, Defender, Windows Update, Group Policy and Printing. Selecting a preset immediately displays up to 200 recent events from the last 24 hours, including all levels (Security audit events are not filtered out). Disabled/missing/inaccessible logs report their status without enabling logs or changing permissions.
+Windows menu **7: Event Logs** now offers Application, System, Security, Setup, Forwarded Events, Windows PowerShell, PowerShell Operational, Defender, Windows Update, Group Policy and Printing. Selecting a preset immediately displays up to 200 recent events from the last 24 hours, including all levels (Security audit events are not filtered out). Disabled/missing/inaccessible logs report their status without enabling logs or changing permissions.
 
 Inside a log, R refreshes the current query, F opens a filtered child view for that log, an event number displays full details, and N/P pages. B returns to the previous view/menu. Empty results keep the browser available so filters can widen the time window. C in the picker opens a custom exact log name and advanced filters; L lists/searches available logs. Advanced filters retain time, event IDs, levels, provider and literal message search, with a candidate cap of 1000. Message filtering applies after the candidate cap. Security and some operational logs may require elevated access.
 
@@ -340,7 +340,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.20.1`; submenus retain `WINDOWS 0.20.1 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.20.2`; submenus retain `WINDOWS 0.20.2 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -388,11 +388,16 @@ The MFT helper avoids full-path construction for ordinary single-name records, r
 
 ### Main-menu system summary (0.20.0)
 
-The Windows root menu displays cached identity, group membership, network addresses, aggregate fixed-storage capacity, CPU, physical memory and Windows version/build information above its actions. Public IP precedes the potentially long private-address list so it remains visible in narrow terminals. Unavailable providers do not prevent the menu from opening.
+The Windows root menu displays cached identity, network addresses, aggregate fixed-storage capacity, CPU, physical memory and Windows version/build information above its actions. Public IP precedes the private address so it remains visible in narrow terminals. Unavailable providers do not prevent the menu from opening.
 
 
 ### Internet-route address and full details (0.20.1)
 
 The root summary now shows only the private IPv4 address selected by Windows for its lowest-cost active default route. If NetTCPIP route data is unavailable, the toolkit asks the Windows routing stack which source address it would use for a public IPv4 destination; no UDP payload is sent.
 
-Root option **14 Computer and user details** shows the full username, SID, authentication type, administrator-token state, every security group, manufacturer/model, domain or workgroup, selected private and public IPs, CPU/core topology, RAM, each fixed disk, Windows architecture, boot time and uptime. Detail lines are written without the root menu's width clipping.
+Root option **1 Computer and user details** shows the full username, SID, authentication type, administrator-token state, every security group, manufacturer/model, domain or workgroup, selected private and public IPs, CPU/core topology, RAM, each fixed disk, Windows architecture, boot time and uptime. Detail lines are written without the root menu's width clipping.
+
+
+### Compact identity header and details-first ordering (0.20.2)
+
+Security groups no longer appear in the compact root header. **1 Computer and user details** is the first displayed and initially selected root option. The remaining diagnostic sections follow sequentially through **13**, while destructive **Toolkit cleanup** is separated as **99**. Summary caches carry a schema version so rerunning an updated toolkit in the same PowerShell session automatically replaces older cached objects instead of showing stale addresses or blank newly added fields.

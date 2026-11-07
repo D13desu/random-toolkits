@@ -16,11 +16,11 @@ function Invoke-PcWindowsRepair {param($Action) $script:Calls.Add('Repair:'+ $Ac
 function Start-PcStartupTaskBrowser {param($Kind) $script:Calls.Add('Startup:'+ $Kind)}
 function Start-PcEventBrowser {param($DefaultLog,[switch]$Quick) $script:Calls.Add('Events')}
 function Invoke-InteractiveCheck {param($Item) $script:Calls.Add('Network:'+ $Item.Entry.Id)}
-foreach($key in @('7','2','2','B','B','12','5','B','10','2','B','6','C','B','1','2','1','B','B','B')){$script:Keys.Enqueue($key)}
+foreach($key in @('8','2','2','B','B','12','5','B','10','2','B','7','C','B','2','2','1','B','B','B')){$script:Keys.Enqueue($key)}
 Start-WindowsMenu
 Assert (($script:Calls -join ',') -eq 'Registry:rdp,Repair:RepairFiles,Startup:Task,Events,Network:connectivity') 'Root/category numbers dispatch only the selected mocked actions'
 Assert ($script:Keys.Count -eq 0) 'Nested Back returns exactly one level'
-Assert (@($script:Output | Where-Object {$_ -match '^[> ] \[12\] Windows repair centre'}).Count -gt 0) 'Root shows all twelve sections without paging'
+Assert (@($script:Output | Where-Object {$_ -match '^[> ] \[12\] Windows repair centre'}).Count -gt 0 -and @($script:Output | Where-Object {$_ -match '^[> ] \[99\] Toolkit cleanup'}).Count -gt 0) 'Root shows every section including cleanup 99 without paging'
 $script:Calls.Clear()
 function Invoke-PcServiceAction {param($Name,$Action) $script:Calls.Add($Name+':'+$Action)}
 function Get-PcServiceInventory {[pscustomobject]@{Name='Fixture';DisplayName='Fixture';State='Running';StartMode='Auto'}}

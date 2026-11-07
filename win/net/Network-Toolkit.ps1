@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.20.1
+# Random Toolkits | Windows Toolkit 0.20.2
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2122,7 +2122,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.20.1')
+    param([string]$Title,[string]$Version='0.20.2')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2189,7 +2189,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.20.1',
+        [string]$Version='0.20.2',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2391,8 +2391,13 @@ function Get-PcInternetPrivateIPv4 {
     return $null
 }
 
+function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.20.2') {
+    return ($null -ne $Summary -and [string]$Summary.SchemaVersion -eq $SchemaVersion)
+}
+
 function Get-PcSystemSummary {
-    if($script:PcSystemSummary){return $script:PcSystemSummary}
+    $schemaVersion='0.20.2'
+    if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
     $username=$unavailable;$groups=$unavailable;$privateIp=$unavailable;$publicIp=$unavailable
@@ -2450,6 +2455,7 @@ function Get-PcSystemSummary {
     } catch {}
 
     $script:PcSystemSummary=[pscustomobject]@{
+        SchemaVersion=$schemaVersion
         Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
         Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion
         UserSid=$userSid;AuthenticationType=$authenticationType;Administrator=$administrator;GroupNames=@($groupNames)
@@ -2503,7 +2509,7 @@ function Show-PcSystemDetails($Summary) {
 
 function Format-PcSystemSummary($Summary) {
     @(
-        "User: $($Summary.Username) | Groups: $($Summary.Groups)"
+        "User: $($Summary.Username)"
         "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
         "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
         "OS: $($Summary.OsVersion)"
@@ -2514,38 +2520,38 @@ function Start-WindowsMenu {
     $state=@{};$systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
     while ($true) {
         $menu=@(
+            New-PcMenuItem '1' 'Computer and user details' 'Check' 'Full untruncated identity, groups, hardware, network and Windows information'
+            New-PcMenuItem '2' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
+            New-PcMenuItem '3' 'Power and device health'
+            New-PcMenuItem '4' 'Storage'
+            New-PcMenuItem '5' 'Printing'
+            New-PcMenuItem '6' 'Group Policy'
+            New-PcMenuItem '7' 'Event Logs'
+            New-PcMenuItem '8' 'Registry tweaks'
             New-PcMenuItem '9' 'Health dashboard' 'Menu'
-            New-PcMenuItem '1' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
-            New-PcMenuItem '2' 'Power and device health'
-            New-PcMenuItem '3' 'Storage'
-            New-PcMenuItem '4' 'Printing'
-            New-PcMenuItem '5' 'Group Policy'
-            New-PcMenuItem '6' 'Event Logs'
-            New-PcMenuItem '7' 'Registry tweaks'
-            New-PcMenuItem '8' 'Toolkit cleanup'
             New-PcMenuItem '10' 'Startup apps and scheduled tasks'
             New-PcMenuItem '11' 'Services'
             New-PcMenuItem '12' 'Windows repair centre'
             New-PcMenuItem '13' 'Microsoft Sysinternals Live' 'Menu' 'Microsoft-hosted network-share shortcuts; no local download'
-            New-PcMenuItem '14' 'Computer and user details' 'Check' 'Full untruncated identity, hardware, network and Windows information'
+            New-PcMenuItem '99' 'Toolkit cleanup' 'Change' 'Preview and remove recognized toolkit temporary data or caches'
         )
         $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
-            '1' { Start-NetworkMenu }
-            '2' { Start-NetworkCategory 'power' }
-            '3' { Start-NetworkCategory 'storage' }
-            '4' { Start-NetworkCategory 'printing' }
-            '5' { Start-NetworkCategory 'policy' }
-            '6' { Start-PcEventLogMenu }
-            '7' { Start-PcRegistryMenu }
-            '8' { Start-ToolkitCleanup }
+            '1' { Show-PcSystemDetails (Get-PcSystemSummary) }
+            '2' { Start-NetworkMenu }
+            '3' { Start-NetworkCategory 'power' }
+            '4' { Start-NetworkCategory 'storage' }
+            '5' { Start-NetworkCategory 'printing' }
+            '6' { Start-NetworkCategory 'policy' }
+            '7' { Start-PcEventLogMenu }
+            '8' { Start-PcRegistryMenu }
             '9' { Start-PcHealthDashboard }
             '10' { Start-PcStartupTaskMenu }
             '11' { Start-PcServices }
             '12' { Start-PcWindowsRepair }
             '13' { Start-PcSysinternalsMenu }
-            '14' { Show-PcSystemDetails (Get-PcSystemSummary) }
+            '99' { Start-ToolkitCleanup }
             default { Write-Warning 'Choose a listed section.' }
         }
     }
