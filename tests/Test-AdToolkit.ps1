@@ -136,6 +136,42 @@ Assert-True ($eventResults.Count -eq 4 -and @($eventResults | Where-Object Statu
 $ids=@((Get-AdChecks).Id)
 Assert-True (@('ad-fsmo','ad-replication','ad-dcdiag','ad-events' | Where-Object {$_ -notin $ids}).Count -eq 0) 'DC Health checks are registered'
 
+function Get-ADUser {
+    param($Identity,$Properties,$ErrorAction)
+    [pscustomobject]@{SamAccountName=$Identity;UserPrincipalName="$Identity@example.test";Enabled=$true;LockedOut=$false;PasswordExpired=$false;PasswordNeverExpires=$false;PasswordLastSet=[datetime]'2026-01-01';LastBadPasswordAttempt=$null;BadPwdCount=0;LastLogonDate=[datetime]'2026-01-02';AccountExpirationDate=$null;DistinguishedName="CN=$Identity,DC=example,DC=test"}
+}
+function Get-ADComputer {
+    param($Identity,$Properties,$ErrorAction)
+    [pscustomobject]@{Name=$Identity;DNSHostName="$Identity.example.test";Enabled=$true;OperatingSystem='Windows';OperatingSystemVersion='10.0';LastLogonDate=[datetime]'2026-01-02';PasswordLastSet=[datetime]'2026-01-01';TrustedForDelegation=$false;TrustedToAuthForDelegation=$false;ServicePrincipalName=@("HOST/$Identity.example.test");DistinguishedName="CN=$Identity,DC=example,DC=test"}
+}
+$userResult=Invoke-AdCheck ad-user $null 'alice'
+$computerResult=Invoke-AdCheck ad-computer $null 'PC01'
+Assert-True ($userResult.SamAccountName -eq 'alice' -and $userResult.Enabled -and -not $userResult.LockedOut) 'Targeted user lookup returns diagnostic properties without mutation'
+Assert-True ($computerResult.Name -eq 'PC01' -and $computerResult.ServicePrincipalNames -eq 'HOST/PC01.example.test') 'Targeted computer lookup returns OS, delegation, and SPN properties'
+$blocked=$false;try{Get-AdUserDiagnostic "bad`nidentity"}catch{$blocked=$true}
+Assert-True $blocked 'Targeted object lookup rejects control characters'
+
+function nltest.exe { $script:LASTEXITCODE=0;'Site-A' }
+function Get-ADReplicationSubnet { param($Filter,$Properties,$ErrorAction) [pscustomobject]@{Name='192.0.2.0/24';Site='CN=Site-A,CN=Sites,CN=Configuration,DC=example,DC=test'} }
+function Get-NetIPAddress { param($AddressFamily,$ErrorAction) [pscustomobject]@{IPAddress='192.0.2.10';InterfaceAlias='Ethernet'};[pscustomobject]@{IPAddress='198.51.100.20';InterfaceAlias='VPN'} }
+$siteResults=@(Get-AdSiteSubnetDiagnostic)
+Assert-True ($siteResults.Count -eq 2 -and @($siteResults | Where-Object Status -eq 'PASS').Count -eq 1 -and @($siteResults | Where-Object {$_.Detail -match 'No matching'}).Count -eq 1) 'Site diagnostic uses longest subnet match and preserves unmapped adapters'
+
+$script:SpnCalls=New-Object System.Collections.Generic.List[string]
+function setspn.exe { $script:SpnCalls.Add($args -join ' ');$script:LASTEXITCODE=0;'SPN fixture' }
+$null=Find-AdSpn 'HTTP/server.example.test';$null=Find-AdDuplicateSpn
+Assert-True (($script:SpnCalls -join '|') -eq '-Q HTTP/server.example.test|-F -X') 'SPN tools expose exact query and forest-wide duplicate-scan modes only'
+$blocked=$false;try{Find-AdSpn 'HTTP/*'}catch{$blocked=$true}
+Assert-True $blocked 'Exact SPN lookup rejects wildcards'
+
+function Get-DnsClientServerAddress { param($AddressFamily,$ErrorAction) [pscustomobject]@{InterfaceAlias='Ethernet';ServerAddresses=@('10.0.0.53','8.8.8.8')} }
+function Resolve-DnsName { param($Server,$Name,$Type,[switch]$DnsOnly,$ErrorAction) [pscustomobject]@{Type='SRV';NameTarget='dc.example.test'} }
+$dnsResults=@(Get-AdDnsClientQuality ([pscustomobject]@{Domain='example.test'}))
+Assert-True ($dnsResults.Count -eq 2 -and @($dnsResults | Where-Object Status -eq 'PASS').Count -eq 1 -and @($dnsResults | Where-Object {$_.Status -eq 'WARN' -and $_.Server -eq '8.8.8.8'}).Count -eq 1) 'AD DNS quality tests every resolver and flags publicly routable configuration for review'
+
+$ids=@((Get-AdChecks).Id)
+Assert-True (@('ad-site-subnet','ad-user','ad-computer','ad-spn','ad-spn-duplicates','ad-dns-quality' | Where-Object {$_ -notin $ids}).Count -eq 0) 'AD object and Kerberos checks are registered'
+
 # Submenu navigation and recovery after a failed action.
 $script:FakeComputer.DomainRole = 1
 $script:Answers = New-Object 'System.Collections.Generic.Queue[string]'
