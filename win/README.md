@@ -16,6 +16,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Use **B**, **Esc**, or **0** to go back.
 - Lists may offer **F** to filter, **R** to refresh, and **N/P** to change pages.
 - Unavailable tools remain visible with their missing requirement.
+- Category menus keep labels concise; runtime text is shown only when PowerShell 7 or newer is required.
 
 ## Tools by menu
 
