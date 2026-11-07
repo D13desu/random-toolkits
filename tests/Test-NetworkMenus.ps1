@@ -30,14 +30,14 @@ $script:Answers.Enqueue('0')
 Start-NetworkMenu
 Assert-True ($script:Answers.Count -eq 0) 'Every network category returns to the network menu'
 foreach ($answer in @('2','0','3','0','4','0','5','0','6','0','7','0','8','0','14','B','15','B','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates legacy, Security, and Update sections and returns'
 $rootOutput=$script:Output -join '|'
 Assert-True ($rootOutput -match 'User: DOMAIN\\User' -and $rootOutput -notmatch 'Groups:' -and $rootOutput -match 'Public IP: 198\.51\.100\.20' -and $rootOutput -match 'Security: Microsoft Defender') 'Windows main menu omits groups while retaining the compact system and security summary'
 Assert-True ($rootOutput.IndexOf('[1] Computer and user details') -lt $rootOutput.IndexOf('[2] Network')) 'Computer and user details is root option 1 and appears first'
 $script:Output.Clear()
 foreach ($answer in @('1','B','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0 -and '  Extremely Long Group Name That Must Remain Fully Visible' -in $script:Output -and 'SID: S-1-5-21-fixture' -in $script:Output) 'Computer and user details show complete untruncated identity data'
 $returnPrompt='Enter / Esc / Backspace / B: back'
 $beforeReturnPrompts=@($script:Output | Where-Object {$_.Trim() -eq $returnPrompt}).Count
@@ -63,7 +63,7 @@ Assert-True ('DC hostname [automatic discovery]' -notin $script:Output) 'Unavail
 Write-Output "Menu tests passed on PowerShell $($PSVersionTable.PSVersion)."
 
 foreach ($answer in @('2','1','b','b','3','b','4','b','5','b','6','b','7','b','8','1','2','b','b','2','b','b','14','b','15','b','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'B returns from every Windows section and cancels registry input'
 foreach ($answer in @('1','b','b')) { $script:Answers.Enqueue($answer) }
 Start-NetworkCategory connectivity
@@ -77,12 +77,12 @@ foreach ($answer in @('1','2','b')) { $script:Answers.Enqueue($answer) }
 Start-NetworkCategory storage
 Assert-True ($script:Answers.Count -eq 0) 'Both disk tools return directly to Storage without an extra pause'
 foreach ($answer in @('99','B','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'Cleanup is reachable and returns to the Windows menu without deleting'
 function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@{CollectedAt=(Get-Date);Rows=@((New-PcHealthFinding INFO 'Fixture' 'Test dashboard' power))}}
 foreach ($answer in @('9','B','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'Health dashboard is reachable and returns to Windows menu'
 foreach ($answer in @('10','B','0')) { $script:Answers.Enqueue($answer) }
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'Startup and scheduled-task menu returns to Windows menu'

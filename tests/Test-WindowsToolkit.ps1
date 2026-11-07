@@ -44,7 +44,9 @@ Assert-True ($result.Status -eq 'WARN') 'TCP failure is a warning with details'
 Assert-True (@(Get-NetworkOverview).Count -gt 0) 'Adapter overview returns structured data'
 Assert-True (@(Get-NetworkDns localhost).Count -gt 0) 'Local DNS resolution works'
 # Exercise the actual IEX entry point without network probes or user interaction.
-function Read-Host { param($Prompt) '0' }
+# The first response proves 0 no longer quits the root; null then simulates a closed input stream.
+$script:IexPromptCount=0
+function Read-Host { param($Prompt) $script:IexPromptCount++;if($script:IexPromptCount -eq 1){'0'}else{$null} }
 Get-Content -Raw $endpoint | Invoke-Expression
-Assert-True $true 'IEX endpoint opens menu and exits on 0'
+Assert-True ($script:IexPromptCount -ge 2) 'IEX root ignores 0 and only returns when its input stream closes'
 Write-Host "All checks passed on PowerShell $($PSVersionTable.PSVersion)."

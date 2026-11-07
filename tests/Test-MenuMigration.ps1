@@ -17,7 +17,7 @@ function Start-PcStartupTaskBrowser {param($Kind) $script:Calls.Add('Startup:'+ 
 function Start-PcEventBrowser {param($DefaultLog,[switch]$Quick) $script:Calls.Add('Events')}
 function Invoke-InteractiveCheck {param($Item) $script:Calls.Add('Network:'+ $Item.Entry.Id)}
 foreach($key in @('8','2','2','B','B','12','5','B','10','2','B','7','C','B','2','2','1','B','B','B')){$script:Keys.Enqueue($key)}
-Start-WindowsMenu
+Start-WindowsMenu -AllowCallerReturn
 Assert (($script:Calls -join ',') -eq 'Registry:rdp,Repair:RepairFiles,Startup:Task,Events,Network:connectivity') 'Root/category numbers dispatch only the selected mocked actions'
 Assert ($script:Keys.Count -eq 0) 'Nested Back returns exactly one level'
 Assert (@($script:Output | Where-Object {$_ -match '^[> ] \[12\] Windows repair centre'}).Count -gt 0 -and @($script:Output | Where-Object {$_ -match '^[> ] \[99\] Toolkit cleanup'}).Count -gt 0) 'Root shows every section including cleanup 99 without paging'

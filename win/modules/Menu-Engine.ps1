@@ -43,7 +43,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.1')
+    param([string]$Title,[string]$Version='0.25.2')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -110,7 +110,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.1',
+        [string]$Version='0.25.2',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -234,7 +234,7 @@ function New-PcMenuItem {
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
 function Read-PcCategoryMenu {
-    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@())
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@(),[switch]$Root)
     $keyboard=Test-PcMenuKeyboard;$selected=0
     for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
@@ -252,10 +252,14 @@ function Read-PcCategoryMenu {
             elseif(([string]($item.Detail -join ' ')) -match '(?i)\bPowerShell\s+(7(?:\.\d+)*)\+'){$label+=' - PowerShell '+$Matches[1]+'+'}
             Write-Host (Format-PcMenuText $label $width) -ForegroundColor $color
         }
-        if($keyboard){Write-Host 'Arrows + Enter or number + Enter | Esc/Backspace/B/0: back'}
+        if($Root){
+            if($keyboard){Write-Host 'Arrows + Enter or number + Enter | Ctrl+C: quit'}
+            else{Write-Host 'Number + Enter | Ctrl+C: quit'}
+        }elseif($keyboard){Write-Host 'Arrows + Enter or number + Enter | Esc/Backspace/B/0: back'}
         else{Write-Host 'Number + Enter | B / 0: back'}
         $answer=Read-PcMenuInput $keyboard
-        if($null -eq $answer -or $answer.Trim() -in @('Back','B','0')){return 'B'}
+        if($null -eq $answer){return 'B'}
+        if($answer.Trim() -in @('Back','B','0')){if($Root){continue};return 'B'}
         $item=$null
         switch($answer.Trim().ToUpperInvariant()){
             'UP'{$selected=[math]::Max(0,$selected-1)}
