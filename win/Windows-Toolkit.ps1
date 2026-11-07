@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.25.2
+# Random Toolkits | Windows Toolkit 0.25.3
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2406,7 +2406,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.2')
+    param([string]$Title,[string]$Version='0.25.3')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2473,7 +2473,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.2',
+        [string]$Version='0.25.3',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2596,6 +2596,14 @@ function New-PcMenuItem {
     param([string]$Key,[string]$Label,[string]$Kind='Menu',[string]$Detail='', [string]$DisabledReason='')
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
+function Get-PcMainSummaryColor([string]$Text) {
+    switch -Regex ($Text){
+        '^Host:'{return 'Cyan'}
+        '^Storage:'{return 'Green'}
+        '^Security:'{return 'Magenta'}
+        default{return 'White'}
+    }
+}
 function Read-PcCategoryMenu {
     param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@(),[switch]$Root)
     $keyboard=Test-PcMenuKeyboard;$selected=0
@@ -2604,7 +2612,7 @@ function Read-PcCategoryMenu {
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
         Write-Host ("`n"+(Get-PcMenuHeading $Title)) -ForegroundColor Cyan
-        foreach($line in $Description){if($line){Write-Host (Format-PcMenuText $line $width) -ForegroundColor DarkGray}}
+        foreach($line in $Description){if($line){$descriptionColor=if($Root){Get-PcMainSummaryColor $line}else{'DarkGray'};Write-Host (Format-PcMenuText $line $width) -ForegroundColor $descriptionColor}}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
             $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}

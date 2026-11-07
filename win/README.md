@@ -15,6 +15,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Use arrow keys and Enter, or type a menu number.
 - Use **B**, **Esc**, or **0** to go back.
 - The main menu stays open when a back control is pressed; use **Ctrl+C** to quit the toolkit.
+- Main-menu identity, network, hardware, OS, and security summary lines use distinct high-contrast colors.
 - Lists may offer **F** to filter, **R** to refresh, and **N/P** to change pages.
 - Unavailable tools remain visible with their missing requirement.
 - Category menus keep labels concise; runtime text is shown only when PowerShell 7 or newer is required.
