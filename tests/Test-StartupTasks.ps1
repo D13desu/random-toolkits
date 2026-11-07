@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $exe=Join-Path $env:WINDIR 'System32\cmd.exe'
 Assert ((Test-PcLaunchPath ('"'+$exe+'" /c echo test') -CommandLine).Status -eq 'FOUND') 'Quoted command resolves without execution'
@@ -35,7 +35,7 @@ function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpec
 function Test-PcMenuKeyboard {$false}
 Start-PcStartupTaskBrowser Task
 Assert ($script:Answers.Count -eq 0) 'Task navigation, details, name filter, review filter and refresh work'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN STARTUP TASKS',2)[1] -split '# END STARTUP TASKS',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Startup-Tasks.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Startup-Tasks.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded module matches source'

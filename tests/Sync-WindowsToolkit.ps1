@@ -17,13 +17,12 @@ foreach($syncScript in $syncScripts){
     & (Join-Path $PSScriptRoot $syncScript)
 }
 
-$launcher=Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1'
+$launcher=Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1'
 $launcherHash=(Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash
-foreach($endpoint in @('../win/index.html','../win/net/index.html')){
-    $endpointPath=Join-Path $PSScriptRoot $endpoint
-    if((Get-FileHash -LiteralPath $endpointPath -Algorithm SHA256).Hash -ne $launcherHash){
-        throw "$endpoint does not match Network-Toolkit.ps1 after synchronization."
-    }
+$endpoint='../win/index.html'
+$endpointPath=Join-Path $PSScriptRoot $endpoint
+if((Get-FileHash -LiteralPath $endpointPath -Algorithm SHA256).Hash -ne $launcherHash){
+    throw "$endpoint does not match Windows-Toolkit.ps1 after synchronization."
 }
 
 $diskSource=Join-Path $PSScriptRoot '../win/disk/Disk-Usage.ps1'

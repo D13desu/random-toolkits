@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Discovery.ps1')
+. (Join-Path $PSScriptRoot '../win/modules/Network-Discovery.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $db=[pscustomobject]@{Entries=@{'001122'='Large';'0011223'='Medium';'001122334'='Small'};RetrievedUtc='2026-01-01T00:00:00Z';Status='Test'}
 Assert ((Resolve-DiscoveryOui '00-11-22-33-44-55' $db).Vendor -eq 'Small') 'Longest /36 prefix wins'

@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1')
-. (Join-Path $PSScriptRoot '../win/net/Toolkit-Cleanup.ps1')
+. (Join-Path $PSScriptRoot '../win/modules/Menu-Engine.ps1')
+. (Join-Path $PSScriptRoot '../win/modules/Toolkit-Cleanup.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Fixture=Join-Path $env:TEMP ('cleanup-safety-test-'+[guid]::NewGuid().ToString('N'))
 $script:CleanupRoots=[pscustomobject]@{Temp=(Join-Path $script:Fixture 'temp');Data=(Join-Path $script:Fixture 'data')}
@@ -50,7 +50,7 @@ $active=Join-Path $script:CleanupRoots.Temp ('toolkit-helper-'+[guid]::NewGuid()
 Write-OldFile (Join-Path $active 'helper.zip');(Get-Item $active).LastWriteTimeUtc=[datetime]::UtcNow.AddHours(-1)
 function Get-Process {param($Name,$ErrorAction) [pscustomobject]@{Id=123}}
 Assert (-not (Get-ToolkitCleanupCandidates Temp | Where-Object Path -eq $active).Eligible) 'Running helpers prevent package cleanup'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN TOOLKIT CLEANUP',2)[1] -split '# END TOOLKIT CLEANUP',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Toolkit-Cleanup.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Toolkit-Cleanup.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded cleanup matches maintained source'

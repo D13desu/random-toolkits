@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert-True($Value,$Message) { if (-not $Value) { throw "FAIL: $Message" }; Write-Output "PASS: $Message" }
 $script:Mode='ok'
 function Get-WinEvent {

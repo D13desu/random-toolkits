@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1')
+. (Join-Path $PSScriptRoot '../win/modules/Menu-Engine.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
 $script:Output=New-Object 'Collections.Generic.List[string]'
@@ -66,9 +66,9 @@ Assert ($script:Output -contains '    source') 'Startup source stays visible bes
 $blocked=$false;try{Show-PcMenu -Title Test -Items $items -Filterable -Commands @{F='conflict'} -Plain}catch{$blocked=$true}
 Assert $blocked 'Custom command cannot override filter control'
 Assert ($script:Answers.Count -eq 0) 'All expected prompts consumed'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN MENU ENGINE',2)[1] -split '# END MENU ENGINE',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Menu-Engine.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Menu-Engine.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded menu engine matches source'
 
 $script:DetailColors.Clear();Feed @('B')

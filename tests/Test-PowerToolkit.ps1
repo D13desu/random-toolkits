@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert-True($Value,$Message) { if (-not $Value) { throw "FAIL: $Message" }; Write-Output "PASS: $Message" }
 $script:CurrentPlan='381b4222-f694-41f0-9685-ff5bb260df2e'
 $script:HighAvailable=$true

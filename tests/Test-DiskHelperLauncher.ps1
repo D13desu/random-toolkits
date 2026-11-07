@@ -2,7 +2,7 @@
 param([Parameter(Mandatory=$true)][string]$PackagePath)
 $ErrorActionPreference='Stop'
 $PackagePath=[IO.Path]::GetFullPath($PackagePath)
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($value,$message){if(-not $value){throw $message};Write-Output "PASS: $message"}
 $storage=Get-NetworkCategories | Where-Object Id -eq 'storage'
 $items=@(Get-NetworkMenuItems $storage)

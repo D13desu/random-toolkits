@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 function Invoke-NetworkRepair {throw 'Dashboard must not invoke repairs'}
 function Get-CimInstance {
@@ -58,9 +58,9 @@ foreach($answer in @('Down','Select','1','R','A','C','B')){$script:Answers.Enque
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 Start-PcHealthDashboard
 Assert ($script:Answers.Count -eq 0 -and $script:Routes[-1] -eq 'power') 'Selection, linked tools, refresh, explicit live checks and Back work'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN HEALTH DASHBOARD',2)[1] -split '# END HEALTH DASHBOARD',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Health-Dashboard.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Health-Dashboard.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded dashboard matches maintained module'
 
 function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@{CollectedAt=(Get-Date);Rows=@((New-PcHealthFinding INFO 'Same disk model' 'Disk 0' storage),(New-PcHealthFinding INFO 'Same disk model' 'Disk 1' storage))}}

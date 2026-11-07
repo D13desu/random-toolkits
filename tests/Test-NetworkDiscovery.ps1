@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 Assert ((@(Get-DiscoveryTargets '192.168.1.7/30') -join ',') -eq '192.168.1.5,192.168.1.6') 'CIDR normalizes network and excludes network/broadcast'
 Assert ((@(Get-DiscoveryTargets '192.168.1.0/31') -join ',') -eq '192.168.1.0,192.168.1.1') '/31 includes both endpoints'
@@ -20,9 +20,9 @@ try{
 function Read-DiscoveryCancelKey {'B'}
 $cancelled=Invoke-NetworkDiscovery -Scope '127.0.0.1-127.0.0.4' -Ports 1 -Concurrency 1 -TimeoutMs 100
 Assert ($cancelled.Cancelled -and $cancelled.Completed -lt $cancelled.Requested) 'B cancels queued work and returns explicitly partial results'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN NETWORK DISCOVERY',2)[1] -split '# END NETWORK DISCOVERY',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Discovery.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Network-Discovery.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded module matches maintained source'
 Assert ('discovery' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -eq connectivity)).Entry.Id) 'Discovery reachable under connectivity'
 $discoveryColorItem=New-NetworkDiscoveryMenuItem ([pscustomobject]@{Address='127.0.0.1';OpenTCP='443';Ping='Success';LatencyMs=1;ClosedTCP='';NoResponseTCP='';ErrorTCP='';MAC='001122334455';Vendor='Fixture';MacStatus='Observed'}) -ProbeView
