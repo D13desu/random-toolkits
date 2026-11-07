@@ -15,12 +15,18 @@ $result=Get-PcDefenderDetections
 Assert ($result.Status -eq 'WARN' -and $result.ThreatId -eq 42) 'Defender detection history preserves prior findings without claiming they remain active'
 
 function Get-CimInstance {
-    param($Namespace,$ClassName,$ErrorAction)
+    param($Namespace,$ClassName,$OperationTimeoutSec,$ErrorAction)
     if($ClassName -eq 'AntiVirusProduct'){return [pscustomobject]@{displayName='Fixture AV';productState=397568;pathToSignedProductExe='C:\Fixture\av.exe';pathToSignedReportingExe='C:\Fixture\report.exe';timestamp='fixture'}}
     [pscustomobject]@{VirtualizationBasedSecurityStatus=2;SecurityServicesConfigured=@(1,2);SecurityServicesRunning=@(1,2);CodeIntegrityPolicyEnforcementStatus=2;UserModeCodeIntegrityPolicyEnforcementStatus=2}
 }
+function Get-Item {param($LiteralPath,$ErrorAction)[pscustomobject]@{VersionInfo=[pscustomobject]@{ProductVersion='9.9.9'}}}
 Assert ((Get-PcAntivirusProviders).Name -eq 'Fixture AV') 'Security Center antivirus registration is reported without decoding vendor-specific state'
 Assert ((Get-PcDeviceGuardStatus).Status -eq 'PASS') 'Running virtualization-based security is detected'
+$header=Get-PcSecurityHeader
+Assert ($header -eq 'Microsoft Defender 4.5.6 | Real-time: On | Signatures: 7.8.9') 'Main security header prefers confidently active Defender and includes product/signature versions'
+function Get-MpComputerStatus {[pscustomobject]@{AntivirusEnabled=$false;RealTimeProtectionEnabled=$false;AMRunningMode='Passive Mode';AMProductVersion='4.5.6'}}
+$header=Get-PcSecurityHeader
+Assert ($header -eq 'Fixture AV 9.9.9 (registered) | Defender: Passive Mode') 'Passive Defender header uses signed executable version metadata and labels third-party antivirus as registered'
 
 function Get-Tpm {[pscustomobject]@{TpmPresent=$true;TpmReady=$true;TpmEnabled=$true;TpmActivated=$true;TpmOwned=$true;ManufacturerVersion='fixture'}}
 function Confirm-SecureBootUEFI {$true}

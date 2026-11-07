@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.24.0
+# Random Toolkits | Windows Toolkit 0.24.1
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2396,7 +2396,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.24.0')
+    param([string]$Title,[string]$Version='0.24.1')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2463,7 +2463,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.24.0',
+        [string]$Version='0.24.1',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2665,17 +2665,46 @@ function Get-PcInternetPrivateIPv4 {
     return $null
 }
 
-function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.20.2') {
+function Get-PcSecurityHeader {
+    $defender=$null
+    try{if(Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue){$defender=Get-MpComputerStatus -ErrorAction Stop}}catch{}
+    if($defender -and $defender.AntivirusEnabled -and $defender.RealTimeProtectionEnabled){
+        $label='Microsoft Defender';if($defender.AMProductVersion){$label+=' '+[string]$defender.AMProductVersion}
+        $label+=' | Real-time: On';if($defender.AntivirusSignatureVersion){$label+=' | Signatures: '+[string]$defender.AntivirusSignatureVersion}
+        return $label
+    }
+    $providers=@()
+    try{
+        $registered=@(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -OperationTimeoutSec 3 -ErrorAction Stop | Where-Object {$_.displayName -and $_.displayName -notmatch 'Microsoft Defender|Windows Defender'})
+        foreach($name in @($registered.displayName | Sort-Object -Unique)){
+            $version=$null
+            foreach($product in @($registered | Where-Object displayName -eq $name)){
+                try{$version=(Get-Item -LiteralPath $product.pathToSignedProductExe -ErrorAction Stop).VersionInfo.ProductVersion}catch{}
+                if($version){break}
+            }
+            $providers+=if($version){$name+' '+$version}else{$name}
+        }
+    }catch{}
+    $mode=if($defender -and $defender.AMRunningMode){[string]$defender.AMRunningMode}elseif($defender){'Inactive'}else{'Unavailable'}
+    if($providers.Count){return (($providers -join ', ')+' (registered) | Defender: '+$mode)}
+    if($defender){
+        $label='Microsoft Defender';if($defender.AMProductVersion){$label+=' '+[string]$defender.AMProductVersion}
+        return ($label+' | Real-time: Off | Mode: '+$mode)
+    }
+    return 'Unavailable'
+}
+
+function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.24.1') {
     return ($null -ne $Summary -and [string]$Summary.SchemaVersion -eq $SchemaVersion)
 }
 
 function Get-PcSystemSummary {
-    $schemaVersion='0.20.2'
+    $schemaVersion='0.24.1'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
     $username=$unavailable;$groups=$unavailable;$privateIp=$unavailable;$publicIp=$unavailable
-    $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable
+    $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable;$securitySummary=$unavailable
     $userSid=$unavailable;$authenticationType=$unavailable;$administrator=$unavailable;$groupNames=@()
     $manufacturer=$unavailable;$model=$unavailable;$domain=$unavailable;$domainJoined=$unavailable
     $cpuCores=$unavailable;$logicalProcessors=$unavailable;$diskDetails=@();$osArchitecture=$unavailable;$lastBoot=$unavailable;$uptime=$unavailable
@@ -2727,11 +2756,12 @@ function Get-PcSystemSummary {
         if($os.OSArchitecture){$osArchitecture=[string]$os.OSArchitecture}
         if($os.LastBootUpTime){$lastBoot=([datetime]$os.LastBootUpTime).ToString('yyyy-MM-dd HH:mm:ss');$uptime=((Get-Date)-[datetime]$os.LastBootUpTime).ToString('d\.hh\:mm\:ss')}
     } catch {}
+    try{$securitySummary=Get-PcSecurityHeader}catch{}
 
     $script:PcSystemSummary=[pscustomobject]@{
         SchemaVersion=$schemaVersion
         Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
-        Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion
+        Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion;SecuritySummary=$securitySummary
         UserSid=$userSid;AuthenticationType=$authenticationType;Administrator=$administrator;GroupNames=@($groupNames)
         Manufacturer=$manufacturer;Model=$model;Domain=$domain;DomainJoined=$domainJoined
         CpuCores=$cpuCores;LogicalProcessors=$logicalProcessors;DiskDetails=@($diskDetails)
@@ -2790,6 +2820,7 @@ function Format-PcSystemSummary($Summary) {
         "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
         "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
         "OS: $($Summary.OsVersion)"
+        "Security: $($Summary.SecuritySummary)"
     )
 }
 

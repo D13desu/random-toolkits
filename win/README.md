@@ -24,6 +24,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Current identity, SID, authentication type, administrator token, and group memberships.
 - Manufacturer, model, domain/workgroup membership, CPU, memory, fixed storage, Windows version, architecture, last boot, and uptime.
 - Internet-route private IPv4 and public IP summary.
+- Main header security summary with active Defender product/signature versions, or registered third-party antivirus names when Defender is passive.
 
 ### 2. Network
 
