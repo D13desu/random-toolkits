@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.25.3
+# Random Toolkits | Windows Toolkit 0.25.4
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -611,9 +611,9 @@ function Get-PcDiskHelperRuntimeReason {
 
 function Get-PcDiskHelperPackage {
     [pscustomobject]@{
-        Version='1.3.0'
-        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-v1.3.0/DiskHelper-1.3.0.zip'
-        Sha256='9D1FFB11A88F2E2CA4A67AF0F648B28811C7C7BF1F888297B61528E1CF2032CD'
+        Version='1.3.1'
+        Uri='https://github.com/D13desu/random-toolkits/releases/download/disk-helper-v1.3.1/DiskHelper-1.3.1.zip'
+        Sha256='B8827F9A3FA43B37F0F9D82C95BB15FC097EB7107CEE01F91B24F8F6EC1BE565'
     }
 }
 
@@ -1627,7 +1627,7 @@ function Get-NetworkChecks {
         [pscustomobject]@{Key='wake';Id='wake';Name='Sleep blockers and last wake reason';MinPS='5.0';Commands=@('powercfg.exe');Admin=$true;Action={param($t,$p) Invoke-AdNative 'powercfg.exe' @('/requests'); Invoke-AdNative 'powercfg.exe' @('/lastwake')}}
         [pscustomobject]@{Key='quality';Id='quality';Name='Uptime, disk headroom and reboot indicators';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcQualityChecks}}
         [pscustomobject]@{Key='disk';Id='disk';Name='Compatibility disk scanner 0.4.6 (verified download)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcDiskExplorer}}
-        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Disk Usage 1.3.0 (automatic MFT/native)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$false;Action={param($t,$p) Start-PcDiskHelper}}
+        [pscustomobject]@{Key='disk-helper';Id='disk-helper';Name='Disk Usage 1.3.1 (automatic MFT/native)';MinPS='5.1';Commands=@('Expand-Archive','Get-FileHash');Admin=$false;Action={param($t,$p) Start-PcDiskHelper}}
         [pscustomobject]@{Key='1'; Id='overview'; Name='Adapter / IP / DNS overview'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkOverview}}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Gateway + target ping / TCP 443'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Test-NetworkConnectivity $t}}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS lookup (system resolver fallback)'; MinPS='5.0'; Commands=@(); Admin=$false; Action={param($t,$p) Get-NetworkDns $t}}
@@ -2406,7 +2406,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.3')
+    param([string]$Title,[string]$Version='0.25.4')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2473,7 +2473,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.3',
+        [string]$Version='0.25.4',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,

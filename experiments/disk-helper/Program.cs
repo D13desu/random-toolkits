@@ -92,7 +92,7 @@ namespace RandomToolkits.HelperExperiment {
   }
  }
  internal static class Program {
-  const string Version="1.3.0";
+  const string Version="1.3.1";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -232,7 +232,7 @@ namespace RandomToolkits.HelperExperiment {
    var presented=new BrowseRow[rows.Length];
    for(int index=0;index<rows.Length;index++) {
     Row row=rows[index];var output=new BrowseRow {Name=row.Name,Path=row.Path,Kind=row.Kind,ReparseTag=row.ReparseTag,Bytes=row.Bytes,Allocated=row.Allocated,Partial=row.Partial,AllocationUnknown=row.AllocationUnknown};
-    try {DateTime modified=File.GetLastWriteTime(row.Path);output.Modified=modified.Year>1601?modified.ToString("yyyy-MM-dd"):null;}catch {output.Modified=null;}
+    try {DateTime modified=File.GetLastWriteTime(row.Path);output.Modified=modified.Year>1601?modified.ToString("yyyy-MM-dd HH:mm"):null;}catch {output.Modified=null;}
     if(live && row.Kind!="DIR" && row.Kind!="LINK") {
      long logical,allocation;string identity;bool deleted;
      if(LiveFileInfo.Query(row.Path,out logical,out allocation,out identity,out deleted)) {

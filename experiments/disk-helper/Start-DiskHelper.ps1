@@ -103,7 +103,7 @@ try {
                 Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
             }
             if($live){Write-Host 'LIVE: visible files and directories are checked in turn; page totals, sorting and reconciliation remain cached until R.' -ForegroundColor Green}
-            Write-Host '     ON DISK       | LOGICAL      | MODIFIED   | TYPE NAME' -ForegroundColor DarkGray
+            Write-Host '     ON DISK       | LOGICAL      | MODIFIED         | TYPE NAME' -ForegroundColor DarkGray
             for($i=0;$i -lt $rows.Count;$i++){
                 $row=$rows[$i];$allocation=if($scanEngine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
                 if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
@@ -121,7 +121,7 @@ try {
                     if($scanEngine -eq 'mft' -and $row.AllocatedDelta -ne 0){$parts+='disk '+(Format-HelperSignedBytes $row.AllocatedDelta)}
                     $change=' ['+($parts -join ', ')+']'
                 }
-                Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-10} | {5,-4} {6}{7}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$modified,$row.Kind,$row.Name,$change) -ForegroundColor $color
+                Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-16} | {5,-4} {6}{7}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$modified,$row.Kind,$row.Name,$change) -ForegroundColor $color
             }
             Write-Host ('Page {0}/{1} | Sort: {2}' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
             if($keyboard){

@@ -48,7 +48,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 
 ### 4. Storage
 
-- Disk Usage 1.3.0 with automatic MFT or native scanning, modified dates, available space, live refresh, and clean rescans.
+- Disk Usage 1.3.1 with automatic MFT or native scanning, modified dates and times, available space, live refresh, and clean rescans.
 - Compatibility disk scanner for drives, folders, and files sorted by size.
 
 ### 5. Printing
