@@ -99,6 +99,19 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Microsoft-hosted shortcuts for Process Explorer, Process Monitor, Autoruns, TCPView, RAMMap, WinObj, VMMap, DebugView, ZoomIt, and Disk2vhd.
 - Tools run from Microsoft's network share; the toolkit does not download, install, or cache them.
 
+### 14. Windows Security
+
+- Microsoft Defender protection and detection history, plus registered antivirus providers.
+- TPM, Secure Boot, VBS/Credential Guard, code integrity, BitLocker, audit policy, and firewall status.
+- Security and Microsoft Defender event browsers.
+- Security checks are read-only and do not reveal BitLocker recovery keys.
+
+### 15. Windows Update
+
+- Update service state, configured policy, Windows Update Agent history, installed hotfixes, and reboot indicators.
+- Optional confirmed search for applicable updates using the configured update service.
+- The toolkit does not accept licenses, download, install, hide, uninstall, or reboot for updates.
+
 ### 99. Toolkit cleanup
 
 - Preview and remove recognized toolkit temporary packages, reports, test fixtures, and download caches.

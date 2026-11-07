@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.23.0
+# Random Toolkits | Windows Toolkit 0.24.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2396,7 +2396,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.23.0')
+    param([string]$Title,[string]$Version='0.24.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2463,7 +2463,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.23.0',
+        [string]$Version='0.24.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2793,6 +2793,170 @@ function Format-PcSystemSummary($Summary) {
     )
 }
 
+function Get-PcDefenderStatus {
+    $status=Get-MpComputerStatus -ErrorAction Stop
+    [pscustomobject]@{
+        Test='Microsoft Defender status';Status=$(if($status.AntivirusEnabled -and $status.RealTimeProtectionEnabled){'PASS'}else{'WARN'})
+        AntivirusEnabled=$status.AntivirusEnabled;AntispywareEnabled=$status.AntispywareEnabled;AMServiceEnabled=$status.AMServiceEnabled
+        RealTimeProtectionEnabled=$status.RealTimeProtectionEnabled;BehaviorMonitorEnabled=$status.BehaviorMonitorEnabled;IoavProtectionEnabled=$status.IoavProtectionEnabled
+        NetworkInspectionEnabled=$status.NISEnabled;TamperProtected=$status.IsTamperProtected;EngineVersion=$status.AMEngineVersion
+        ProductVersion=$status.AMProductVersion;AntivirusSignatureVersion=$status.AntivirusSignatureVersion;AntivirusSignatureUpdated=$status.AntivirusSignatureLastUpdated
+        QuickScanAgeDays=$status.QuickScanAge;QuickScanEnd=$status.QuickScanEndTime;FullScanAgeDays=$status.FullScanAge;FullScanEnd=$status.FullScanEndTime
+        Detail='Status reported by the local Defender provider. Another registered antivirus product can legitimately place Defender in passive mode.'
+    }
+}
+
+function Get-PcDefenderDetections {
+    $detections=@(Get-MpThreatDetection -ErrorAction Stop | Sort-Object InitialDetectionTime -Descending | Select-Object -First 50)
+    if(-not $detections.Count){return [pscustomobject]@{Test='Defender detections';Status='PASS';Detail='No active or past detections were returned by Microsoft Defender.'}}
+    foreach($detection in $detections){
+        [pscustomobject]@{Test='Defender detection';Status='WARN';InitialDetection=$detection.InitialDetectionTime;LastThreatStatusChange=$detection.LastThreatStatusChangeTime;ThreatId=$detection.ThreatID;ThreatStatusId=$detection.ThreatStatusID;ActionSuccess=$detection.ActionSuccess;Resources=@($detection.Resources) -join '; ';Detail='Detection history does not by itself prove that a threat remains active.'}
+    }
+}
+
+function Get-PcAntivirusProviders {
+    $products=@(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop)
+    if(-not $products.Count){return [pscustomobject]@{Test='Registered antivirus';Status='WARN';Detail='Windows Security Center reported no antivirus products. This namespace may be unavailable on Windows Server.'}}
+    foreach($product in $products){[pscustomobject]@{Test='Registered antivirus';Status='INFO';Name=$product.displayName;ProductState=('0x{0:X6}' -f [int]$product.productState);ProductPath=$product.pathToSignedProductExe;ReportingPath=$product.pathToSignedReportingExe;Timestamp=$product.timestamp;Detail='ProductState is provider-defined Security Center metadata; use the product status command for authoritative protection state.'}}
+}
+
+function Get-PcPlatformSecurity {
+    try{
+        $tpm=Get-Tpm -ErrorAction Stop
+        [pscustomobject]@{Test='TPM';Status=$(if($tpm.TpmPresent -and $tpm.TpmReady){'PASS'}else{'WARN'});Present=$tpm.TpmPresent;Ready=$tpm.TpmReady;Enabled=$tpm.TpmEnabled;Activated=$tpm.TpmActivated;Owned=$tpm.TpmOwned;ManufacturerVersion=$tpm.ManufacturerVersion;Detail='TPM state only; no ownership, provisioning, or clearing operation is performed.'}
+    }catch{[pscustomobject]@{Test='TPM';Status='WARN';Detail=$_.Exception.Message}}
+    try{
+        $enabled=Confirm-SecureBootUEFI -ErrorAction Stop
+        [pscustomobject]@{Test='Secure Boot';Status=$(if($enabled){'PASS'}else{'WARN'});Enabled=[bool]$enabled;Detail='Firmware Secure Boot state; no firmware setting is changed.'}
+    }catch{[pscustomobject]@{Test='Secure Boot';Status='WARN';Detail=$_.Exception.Message}}
+}
+
+function Get-PcDeviceGuardStatus {
+    $guard=Get-CimInstance -Namespace 'root/Microsoft/Windows/DeviceGuard' -ClassName Win32_DeviceGuard -ErrorAction Stop
+    $vbs=@('Disabled','Enabled but not running','Running')
+    $vbsCode=[int]$guard.VirtualizationBasedSecurityStatus
+    $vbsLabel=if($vbsCode -ge 0 -and $vbsCode -lt $vbs.Count){$vbs[$vbsCode]}else{'Unknown'}
+    [pscustomobject]@{Test='VBS / Device Guard';Status=$(if([int]$guard.VirtualizationBasedSecurityStatus -eq 2){'PASS'}else{'REVIEW'});VirtualizationBasedSecurity=$vbsLabel;SecurityServicesConfigured=@($guard.SecurityServicesConfigured) -join ',';SecurityServicesRunning=@($guard.SecurityServicesRunning) -join ',';CodeIntegrityPolicyEnforcementStatus=$guard.CodeIntegrityPolicyEnforcementStatus;UserModeCodeIntegrityPolicyEnforcementStatus=$guard.UserModeCodeIntegrityPolicyEnforcementStatus;Detail='Numeric service identifiers are preserved because configured protections vary by Windows edition and policy.'}
+}
+
+function Get-PcBitLockerStatus {
+    foreach($volume in @(Get-BitLockerVolume -ErrorAction Stop)){
+        [pscustomobject]@{Test='BitLocker';Status=$(if([string]$volume.ProtectionStatus -eq 'On'){'PASS'}else{'REVIEW'});MountPoint=$volume.MountPoint;VolumeType=$volume.VolumeType;VolumeStatus=$volume.VolumeStatus;ProtectionStatus=$volume.ProtectionStatus;EncryptionMethod=$volume.EncryptionMethod;EncryptionPercentage=$volume.EncryptionPercentage;LockStatus=$volume.LockStatus;AutoUnlockEnabled=$volume.AutoUnlockEnabled;Detail='Recovery keys and key-protector material are not displayed.'}
+    }
+}
+
+function Get-PcAuditPolicy { Invoke-AdNative 'auditpol.exe' @('/get','/category:*') }
+
+function Get-PcWindowsUpdateServices {
+    $names=@('wuauserv','UsoSvc','WaaSMedicSvc','BITS','CryptSvc')
+    $services=@(Get-Service -Name $names -ErrorAction SilentlyContinue)
+    foreach($name in $names){
+        $service=$services | Where-Object Name -eq $name | Select-Object -First 1
+        if($service){[pscustomobject]@{Test='Windows Update service';Status=$(if($service.Status -eq 'Running' -or $service.StartType -in @('Manual','Automatic')){'PASS'}else{'REVIEW'});Name=$service.Name;DisplayName=$service.DisplayName;ServiceStatus=$service.Status;StartType=$service.StartType;Detail='Trigger-start services can legitimately be stopped when idle.'}}
+        else{[pscustomobject]@{Test='Windows Update service';Status='UNAVAILABLE';Name=$name;Detail='Service was not found on this Windows edition.'}}
+    }
+}
+
+function Get-PcWindowsUpdatePolicy {
+    $paths=@('HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate','HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU')
+    $rows=New-Object 'Collections.Generic.List[object]'
+    foreach($path in $paths){
+        $item=Get-ItemProperty -LiteralPath $path -ErrorAction SilentlyContinue
+        if(-not $item){continue}
+        foreach($property in $item.PSObject.Properties | Where-Object {$_.Name -notmatch '^PS(Path|ParentPath|ChildName|Drive|Provider)$'}){
+            $rows.Add([pscustomobject]@{Test='Windows Update policy';Status='INFO';Path=$path;Name=$property.Name;Value=([string]$property.Value);Detail='Configured policy value; interpretation depends on Windows version and management authority.'})
+        }
+    }
+    if(-not $rows.Count){return [pscustomobject]@{Test='Windows Update policy';Status='INFO';Detail='No values were found in the two standard Windows Update policy registry paths. MDM policy may still apply.'}}
+    $rows.ToArray()
+}
+
+function New-PcWindowsUpdateSession { New-Object -ComObject Microsoft.Update.Session }
+function Release-PcComObject($Value) { if($null -ne $Value -and [Runtime.InteropServices.Marshal]::IsComObject($Value)){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($Value)} }
+function ConvertFrom-PcUpdateResultCode([int]$Code) { @('Not started','In progress','Succeeded','Succeeded with errors','Failed','Aborted')[[math]::Min([math]::Max($Code,0),5)] }
+
+function Get-PcWindowsUpdateHistory {
+    $session=$null;$searcher=$null;$history=$null
+    try{
+        $session=New-PcWindowsUpdateSession;$searcher=$session.CreateUpdateSearcher();$count=[math]::Min(50,[int]$searcher.GetTotalHistoryCount())
+        if($count -eq 0){return [pscustomobject]@{Test='Windows Update history';Status='INFO';Detail='Windows Update Agent returned no history entries.'}}
+        $history=$searcher.QueryHistory(0,$count)
+        for($i=0;$i -lt $history.Count;$i++){$entry=$history.Item($i);$result=ConvertFrom-PcUpdateResultCode ([int]$entry.ResultCode);$hresult=[uint32]([int64]$entry.HResult -band 0xffffffffL);[pscustomobject]@{Test='Windows Update history';Status=$(if([int]$entry.ResultCode -eq 2){'PASS'}else{'WARN'});Date=$entry.Date;Title=$entry.Title;Operation=$(switch([int]$entry.Operation){1{'Installation'}2{'Uninstallation'}default{'Other'}});Result=$result;HResult=('0x{0:X8}' -f $hresult);SupportUrl=$entry.SupportUrl;Detail='Latest 50 Windows Update Agent history events; Settings can use additional orchestrator history.'}}
+    }finally{Release-PcComObject $history;Release-PcComObject $searcher;Release-PcComObject $session}
+}
+
+function Get-PcInstalledUpdates {
+    Get-HotFix -ErrorAction Stop | Sort-Object InstalledOn -Descending | Select-Object Source,Description,HotFixID,InstalledBy,InstalledOn
+}
+
+function Get-PcUpdateRebootStatus {
+    $indicators=@(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+    )
+    foreach($path in $indicators){[pscustomobject]@{Test='Update reboot indicator';Status=$(if(Test-Path -LiteralPath $path){'WARN'}else{'PASS'});Indicator=$path;Present=[bool](Test-Path -LiteralPath $path);Detail='Common servicing marker only; absence does not prove that no application or update needs a restart.'}}
+    $rename=(Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+    [pscustomobject]@{Test='Pending file rename';Status=$(if($rename){'WARN'}else{'PASS'});Present=[bool]$rename;Detail='Pending file rename operations can be created by updates, drivers, or applications.'}
+}
+
+function Find-PcAvailableUpdates {
+    $session=$null;$searcher=$null;$result=$null;$updates=$null
+    try{
+        $session=New-PcWindowsUpdateSession;$searcher=$session.CreateUpdateSearcher();$result=$searcher.Search('IsInstalled=0 and IsHidden=0');$updates=$result.Updates
+        if(-not $updates.Count){return [pscustomobject]@{Test='Available updates';Status='PASS';Detail='Windows Update Agent returned no applicable, non-hidden updates.'}}
+        for($i=0;$i -lt $updates.Count;$i++){$update=$updates.Item($i);[pscustomobject]@{Test='Available update';Status='REVIEW';Title=$update.Title;KB=@($update.KBArticleIDs) -join ',';Severity=$update.MsrcSeverity;Type=$update.Type;Downloaded=$update.IsDownloaded;Mandatory=$update.IsMandatory;RebootRequired=$update.RebootRequired;Detail='Discovery only. The toolkit did not accept a license, download, install, hide, or uninstall this update.'}}
+    }finally{Release-PcComObject $updates;Release-PcComObject $result;Release-PcComObject $searcher;Release-PcComObject $session}
+}
+
+function Get-PcSecurityChecks {
+    @(
+        [pscustomobject]@{Key='1';Id='security-defender';Name='Microsoft Defender protection status';MinPS='5.0';Commands=@('Get-MpComputerStatus');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcDefenderStatus}}
+        [pscustomobject]@{Key='2';Id='security-detections';Name='Microsoft Defender detection history';MinPS='5.0';Commands=@('Get-MpThreatDetection');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcDefenderDetections}}
+        [pscustomobject]@{Key='3';Id='security-providers';Name='Registered antivirus providers';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcAntivirusProviders}}
+        [pscustomobject]@{Key='4';Id='security-platform';Name='TPM and Secure Boot status';MinPS='5.0';Commands=@('Get-Tpm','Confirm-SecureBootUEFI');Admin=$true;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcPlatformSecurity}}
+        [pscustomobject]@{Key='5';Id='security-vbs';Name='VBS, Credential Guard, and code-integrity status';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcDeviceGuardStatus}}
+        [pscustomobject]@{Key='6';Id='security-bitlocker';Name='BitLocker volume status';MinPS='5.0';Commands=@('Get-BitLockerVolume');Admin=$true;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcBitLockerStatus}}
+        [pscustomobject]@{Key='7';Id='security-audit';Name='Effective Windows audit policy';MinPS='5.0';Commands=@('auditpol.exe');Admin=$true;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcAuditPolicy}}
+        [pscustomobject]@{Key='8';Id='security-firewall';Name='Windows Firewall profiles';MinPS='5.0';Commands=@('Get-NetFirewallProfile');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-NetworkFirewall}}
+        [pscustomobject]@{Key='9';Id='security-events';Name='Security event browser';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$true;OpenMenu=$true;ConfirmRun=$false;Action={Start-PcEventBrowser 'Security'}}
+        [pscustomobject]@{Key='10';Id='security-defender-events';Name='Microsoft Defender event browser';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;OpenMenu=$true;ConfirmRun=$false;Action={Start-PcEventBrowser 'Microsoft-Windows-Windows Defender/Operational'}}
+    )
+}
+
+function Get-PcUpdateChecks {
+    @(
+        [pscustomobject]@{Key='1';Id='update-services';Name='Windows Update service state';MinPS='5.0';Commands=@('Get-Service');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcWindowsUpdateServices}}
+        [pscustomobject]@{Key='2';Id='update-policy';Name='Configured Windows Update policy';MinPS='5.0';Commands=@('Get-ItemProperty');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcWindowsUpdatePolicy}}
+        [pscustomobject]@{Key='3';Id='update-history';Name='Windows Update Agent history (latest 50)';MinPS='5.0';Commands=@();Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcWindowsUpdateHistory}}
+        [pscustomobject]@{Key='4';Id='update-installed';Name='Installed hotfix inventory';MinPS='5.0';Commands=@('Get-HotFix');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcInstalledUpdates}}
+        [pscustomobject]@{Key='5';Id='update-reboot';Name='Update and servicing reboot indicators';MinPS='5.0';Commands=@('Test-Path','Get-ItemProperty');Admin=$false;OpenMenu=$false;ConfirmRun=$false;Action={Get-PcUpdateRebootStatus}}
+        [pscustomobject]@{Key='6';Id='update-available';Name='Search configured update service for applicable updates';MinPS='5.0';Commands=@();Admin=$true;OpenMenu=$false;ConfirmRun=$true;Action={Find-PcAvailableUpdates}}
+        [pscustomobject]@{Key='7';Id='update-events';Name='Windows Update event browser';MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false;OpenMenu=$true;ConfirmRun=$false;Action={Start-PcEventBrowser 'Microsoft-Windows-WindowsUpdateClient/Operational'}}
+    )
+}
+
+function Start-PcDiagnosticMenu {
+    param([string]$Title,[object[]]$Entries)
+    $state=@{}
+    while($true){
+        $menu=@(foreach($entry in $Entries){$availability=Get-NetworkAvailability $entry;$reason=if($availability.Available){''}else{$availability.Reason};$detail='Read-only';if($entry.Admin){$detail+=' | Administrator'};if($entry.ConfirmRun){$detail+=' | Confirmation before potentially slow scan'};New-PcMenuItem $entry.Key $entry.Name 'Check' $detail $reason})
+        $answer=Read-PcCategoryMenu $Title $menu $state 'Diagnostics only. No security setting or update installation is changed.'
+        if($answer -eq 'B'){return}
+        $entry=$Entries | Where-Object Key -eq $answer | Select-Object -First 1
+        if(-not $entry){continue}
+        try{
+            $availability=Get-NetworkAvailability $entry;if(-not $availability.Available){throw $availability.Reason}
+            if($entry.ConfirmRun -and (Read-Host 'Run this read-only scan now? It may contact the configured update service and take several minutes. [y/N]') -notmatch '^(?i:y|yes)$'){[pscustomobject]@{Test=$entry.Id;Status='CANCELLED';Detail='Scan not started.'}|Format-List|Out-Host;continue}
+            & $entry.Action | Format-List | Out-Host
+        }catch [OperationCanceledException]{continue}catch{Write-Warning $_.Exception.Message}
+        if($entry.OpenMenu){continue}
+        $null=Read-Host 'Press Enter to return'
+    }
+}
+
+function Start-PcSecurityMenu { Start-PcDiagnosticMenu 'Windows > Security' @(Get-PcSecurityChecks) }
+function Start-PcUpdateMenu { Start-PcDiagnosticMenu 'Windows > Windows Update' @(Get-PcUpdateChecks) }
+
 function Start-WindowsMenu {
     $state=@{};$systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
     while ($true) {
@@ -2810,6 +2974,8 @@ function Start-WindowsMenu {
             New-PcMenuItem '11' 'Services'
             New-PcMenuItem '12' 'Windows repair centre'
             New-PcMenuItem '13' 'Microsoft Sysinternals Live' 'Menu' 'Microsoft-hosted network-share shortcuts; no local download'
+            New-PcMenuItem '14' 'Windows Security' 'Menu' 'Defender, platform protections, encryption, audit, firewall and events'
+            New-PcMenuItem '15' 'Windows Update' 'Menu' 'Services, policy, history, installed fixes, reboot state and read-only search'
             New-PcMenuItem '99' 'Toolkit cleanup' 'Change' 'Preview and remove recognized toolkit temporary data or caches'
         )
         $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary
@@ -2828,6 +2994,8 @@ function Start-WindowsMenu {
             '11' { Start-PcServices }
             '12' { Start-PcWindowsRepair }
             '13' { Start-PcSysinternalsMenu }
+            '14' { Start-PcSecurityMenu }
+            '15' { Start-PcUpdateMenu }
             '99' { Start-ToolkitCleanup }
             default { Write-Warning 'Choose a listed section.' }
         }
