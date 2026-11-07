@@ -43,7 +43,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.0')
+    param([string]$Title,[string]$Version='0.25.1')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -110,7 +110,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.0',
+        [string]$Version='0.25.1',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -249,7 +249,7 @@ function Read-PcCategoryMenu {
             $label='{0} [{1}] {2}' -f $marker,$item.Key,$item.Label
             if($item.Kind -eq 'Change'){$label+=' [CHANGES SYSTEM]'}
             if($item.DisabledReason){$label+=' [UNAVAILABLE: '+$item.DisabledReason+']'}
-            elseif($item.Detail){$label+=' - '+($item.Detail -join ' ')}
+            elseif(([string]($item.Detail -join ' ')) -match '(?i)\bPowerShell\s+(7(?:\.\d+)*)\+'){$label+=' - PowerShell '+$Matches[1]+'+'}
             Write-Host (Format-PcMenuText $label $width) -ForegroundColor $color
         }
         if($keyboard){Write-Host 'Arrows + Enter or number + Enter | Esc/Backspace/B/0: back'}

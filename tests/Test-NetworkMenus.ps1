@@ -54,7 +54,7 @@ $script:Output.Clear()
 foreach ($answer in @('3','2','n','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu
 Assert-True ($script:Answers.Count -eq 0 -and 'Apply this change? [y/N]' -in $script:Output) 'DNS repair stays in DNS and preserves yes/no cancellation'
-Assert-True (($script:Output -join '|') -match 'Requires confirmation') 'Change actions are clearly identified'
+Assert-True (($script:Output -join '|') -match '\[CHANGES SYSTEM\]') 'Change actions retain a concise warning badge'
 $script:Output.Clear()
 foreach ($answer in @('4','7','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu
