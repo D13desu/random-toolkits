@@ -35,8 +35,10 @@ Assert $blocked 'Duplicate IDs are rejected'
 Feed @('','yes');Assert (-not (Confirm-PcMenuChange 'Fixture')) 'Changes default to No';Assert (Confirm-PcMenuChange 'Fixture') 'Explicit yes confirms'
 Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters cannot inject terminal commands'
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
-Assert ((Get-PcMenuHeading Windows) -eq 'WINDOWS TOOLKIT 0.25.2') 'Root menu uses the toolkit product heading without a redundant breadcrumb'
-Assert ((Get-PcMenuHeading 'Windows > Network') -eq 'WINDOWS 0.25.2 | Windows > Network') 'Submenus retain their navigation breadcrumb'
+Assert ((Get-PcMenuHeading Windows) -eq 'WINDOWS TOOLKIT 0.25.3') 'Root menu uses the toolkit product heading without a redundant breadcrumb'
+Assert ((Get-PcMenuHeading 'Windows > Network') -eq 'WINDOWS 0.25.3 | Windows > Network') 'Submenus retain their navigation breadcrumb'
+Assert ((Get-PcMainSummaryColor 'User: fixture') -eq 'White' -and (Get-PcMainSummaryColor 'OS: fixture') -eq 'White') 'Identity and OS summary lines use high-contrast white'
+Assert ((Get-PcMainSummaryColor 'Host: fixture') -eq 'Cyan' -and (Get-PcMainSummaryColor 'Storage: fixture') -eq 'Green' -and (Get-PcMainSummaryColor 'Security: fixture') -eq 'Magenta') 'Network, hardware, and security summary lines use distinct colors'
 $script:Output.Clear();Feed @('B')
 $null=Read-PcCategoryMenu 'Windows > Concise' @((New-PcMenuItem '1' 'Legacy tool' 'Check' 'PowerShell 5.1+ | descriptive text'),(New-PcMenuItem '2' 'Modern tool' 'Check' 'PowerShell 7.4+ | Administrator'),(New-PcMenuItem '3' 'Cleanup' 'Change' 'Preview and remove files')) @{}
 $categoryText=$script:Output -join '|'
