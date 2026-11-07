@@ -16,16 +16,22 @@ function ConvertFrom-HelperKey($Key) {
     }
     return ([string]$Key.KeyChar).ToUpperInvariant()
 }
-function Read-HelperChoice([bool]$Keyboard) {
+function Read-HelperChoice([bool]$Keyboard,[bool]$Live=$false,[int]$LiveIntervalMilliseconds=2000) {
     if (-not $Keyboard) { return Read-Host 'Select' }
     $digits=''
+    $timer=if($Live){[Diagnostics.Stopwatch]::StartNew()}else{$null}
     while ($true) {
+        if($Live -and -not [Console]::KeyAvailable){
+            if($timer.ElapsedMilliseconds -ge $LiveIntervalMilliseconds -and -not $digits.Length){return '@LIVE_TICK'}
+            Start-Sleep -Milliseconds 50
+            continue
+        }
         $key=[Console]::ReadKey($true)
         if ($key.Key -eq 'Backspace' -and $digits.Length) { $digits=$digits.Substring(0,$digits.Length-1); continue }
         $command=ConvertFrom-HelperKey $key
         if ($command -match '^\d$') { $digits+=$command; continue }
         if ($command -eq '@ENTER' -and $digits.Length) { return $digits }
-        if ($command -in @('@UP','@DOWN','@ENTER','@EXPLORER','@REPORTS','H','B','U','N','P','S','E','A','T','O')) { return $command }
+        if ($command -in @('@UP','@DOWN','@ENTER','@EXPLORER','@REPORTS','H','B','U','N','P','S','E','A','T','O','L','R')) { return $command }
     }
 }
 function Read-HelperReport([bool]$Keyboard) {

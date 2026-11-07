@@ -1,16 +1,26 @@
 # PowerShell 5.1-compatible transport. No Add-Type and no scan tree in PowerShell.
 function Start-DiskHelper {
     param([Parameter(Mandatory=$true)][string]$Executable,[Parameter(Mandatory=$true)][string]$Manifest)
-    $meta=Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
-    if($meta.Protocol -ne 1 -or $meta.File -ne [IO.Path]::GetFileName($Executable)){throw 'Unsupported helper manifest.'}
-    if((Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash -ne $meta.Sha256){throw 'Helper checksum mismatch. Rebuild or obtain a fresh package.'}
+    $resolvedExecutable=[IO.Path]::GetFullPath($Executable)
+    $resolvedManifest=[IO.Path]::GetFullPath($Manifest)
+    if(-not [IO.File]::Exists($resolvedExecutable)){throw "Disk helper executable not found: $resolvedExecutable"}
+    if(-not [IO.File]::Exists($resolvedManifest)){throw "Disk helper manifest not found: $resolvedManifest"}
+    $meta=Get-Content -LiteralPath $resolvedManifest -Raw | ConvertFrom-Json
+    if($meta.Protocol -ne 1 -or $meta.File -ne [IO.Path]::GetFileName($resolvedExecutable)){throw 'Unsupported helper manifest.'}
+    if((Get-FileHash -LiteralPath $resolvedExecutable -Algorithm SHA256).Hash -ne $meta.Sha256){throw 'Helper checksum mismatch. Rebuild or obtain a fresh package.'}
     $start=[Diagnostics.ProcessStartInfo]::new()
-    $start.FileName=[IO.Path]::GetFullPath($Executable);$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.FileName=$resolvedExecutable;$start.WorkingDirectory=[IO.Path]::GetDirectoryName($resolvedExecutable);$start.UseShellExecute=$false;$start.CreateNoWindow=$true
     $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true
     $start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
     $process=[Diagnostics.Process]::new();$process.StartInfo=$start
     try {
-        $null=$process.Start()
+        try{$null=$process.Start()}
+        catch [ComponentModel.Win32Exception]{
+            if(-not [IO.File]::Exists($resolvedExecutable)){throw}
+            Start-Sleep -Milliseconds 300
+            try{$null=$process.Start()}
+            catch [ComponentModel.Win32Exception]{throw ('Unable to start the verified disk helper at "{0}" (Windows error {1}: {2}). Security software may have blocked the unsigned local test binary.' -f $resolvedExecutable,$_.Exception.NativeErrorCode,$_.Exception.Message)}
+        }
         # Use our own UTF-8 writer: Framework defaults differ from PowerShell 7.
         $writer=[IO.StreamWriter]::new($process.StandardInput.BaseStream,[Text.UTF8Encoding]::new($false))
         $writer.AutoFlush=$true

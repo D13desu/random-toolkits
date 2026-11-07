@@ -6,10 +6,77 @@ using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Runtime.InteropServices;
+using System.Threading;
 using RandomToolkits.DiskV10;
 
 namespace RandomToolkits.HelperExperiment {
  internal sealed class VolumeSpaceSnapshot {internal long Used,Reserved,VolumeStorageReserve,Total,Available;}
+ internal sealed class LiveFileSample {internal long Allocation;internal string Identity;}
+ internal sealed class LiveDirectorySample {internal long Initial,Last;internal bool HasInitial,HasLast,Unavailable;internal DateTime Next;}
+ internal sealed class BrowseRow {
+  public string Name,Path,Kind,ReparseTag,Modified,LiveState;
+  public long Bytes,Allocated,LogicalDelta,AllocatedDelta;
+  public bool Partial,AllocationUnknown;
+ }
+ internal static class LiveFileInfo {
+  const uint FileReadAttributes=0x80,ShareRead=1,ShareWrite=2,ShareDelete=4,OpenExisting=3;
+  const uint OpenReparsePoint=0x00200000,OpenNoRecall=0x00100000;
+  static readonly IntPtr InvalidHandle=new IntPtr(-1);
+  [StructLayout(LayoutKind.Sequential)] struct FileStandardInfo {internal long AllocationSize,EndOfFile;internal uint NumberOfLinks;[MarshalAs(UnmanagedType.Bool)]internal bool DeletePending;[MarshalAs(UnmanagedType.Bool)]internal bool Directory;}
+  [StructLayout(LayoutKind.Sequential)] struct ByHandleInfo {
+   internal uint Attributes,CreationLow,CreationHigh,AccessLow,AccessHigh,WriteLow,WriteHigh,VolumeSerial,SizeHigh,SizeLow,Links,FileIndexHigh,FileIndexLow;
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandleEx(IntPtr handle,int informationClass,out FileStandardInfo information,uint size);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(IntPtr handle,out ByHandleInfo information);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  static string DevicePath(string path){if(path.StartsWith(@"\\?\",StringComparison.Ordinal))return path;if(path.StartsWith(@"\\",StringComparison.Ordinal))return @"\\?\UNC\"+path.Substring(2);return @"\\?\"+path;}
+  internal static bool Query(string path,out long logical,out long allocated,out string identity,out bool deleted){
+   logical=allocated=0;identity=null;deleted=false;IntPtr handle=CreateFileW(DevicePath(path),FileReadAttributes,ShareRead|ShareWrite|ShareDelete,IntPtr.Zero,OpenExisting,OpenReparsePoint|OpenNoRecall,IntPtr.Zero);
+   if(handle==InvalidHandle){int error=Marshal.GetLastWin32Error();deleted=error==2 || error==3 || error==303;return false;}
+   try {
+    FileStandardInfo standard;ByHandleInfo byHandle;
+    if(!GetFileInformationByHandleEx(handle,1,out standard,(uint)Marshal.SizeOf(typeof(FileStandardInfo))) || standard.Directory)return false;
+    logical=standard.EndOfFile;allocated=standard.AllocationSize;
+    if(GetFileInformationByHandle(handle,out byHandle))identity=String.Format("{0:X8}:{1:X8}{2:X8}",byHandle.VolumeSerial,byHandle.FileIndexHigh,byHandle.FileIndexLow);
+    return true;
+   } finally {CloseHandle(handle);}
+  }
+ }
+ internal sealed class LiveDirectoryProbe {
+  const uint Reparse=0x400,DirectoryFlag=0x10;static readonly IntPtr Invalid=new IntPtr(-1);
+  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct FindData {
+   internal uint Attributes,CreationLow,CreationHigh,AccessLow,AccessHigh,WriteLow,WriteHigh,SizeHigh,SizeLow,Reserved0,Reserved1;
+   [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)]internal string Name;
+   [MarshalAs(UnmanagedType.ByValTStr,SizeConst=14)]internal string Alternate;
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr FindFirstFileExW(string path,int level,out FindData data,int search,IntPtr filter,int flags);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]static extern bool FindNextFileW(IntPtr handle,out FindData data);
+  [DllImport("kernel32.dll",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]static extern bool FindClose(IntPtr handle);
+  internal volatile bool Done,CancelRequested;internal bool Partial;internal long Logical;internal string Error;readonly string root;
+  LiveDirectoryProbe(string path){root=path;}
+  static string DevicePath(string path){if(path.StartsWith(@"\\?\",StringComparison.Ordinal))return path;if(path.StartsWith(@"\\",StringComparison.Ordinal))return @"\\?\UNC\"+path.Substring(2);return @"\\?\"+path;}
+  static string Child(string parent,string name){return parent.TrimEnd('\\')+"\\"+name;}
+  static IntPtr Open(string path,out FindData data){IntPtr handle=FindFirstFileExW(Child(DevicePath(path),"*"),1,out data,0,IntPtr.Zero,2);if(handle==Invalid && Marshal.GetLastWin32Error()==87)handle=FindFirstFileExW(Child(DevicePath(path),"*"),1,out data,0,IntPtr.Zero,0);return handle;}
+  internal static LiveDirectoryProbe Start(string path){var probe=new LiveDirectoryProbe(path);var thread=new Thread(probe.Run);thread.IsBackground=true;thread.Start();return probe;}
+  void Run(){
+   try {
+    var pending=new Stack<string>();pending.Push(root);long total=0;
+    while(pending.Count>0 && !CancelRequested) {
+     string directory=pending.Pop();FindData data;IntPtr handle=Open(directory,out data);
+     if(handle==Invalid){int openError=Marshal.GetLastWin32Error();if(openError!=2 && openError!=3 && openError!=18)Partial=true;continue;}
+     try {
+      do {
+       if(CancelRequested)break;if(data.Name=="." || data.Name=="..")continue;if((data.Attributes&Reparse)!=0)continue;
+       string path=Child(directory,data.Name);if((data.Attributes&DirectoryFlag)!=0)pending.Push(path);else total=checked(total+(((long)data.SizeHigh<<32)|data.SizeLow));
+      } while(FindNextFileW(handle,out data));
+      int error=Marshal.GetLastWin32Error();if(!CancelRequested && error!=18)Partial=true;
+     } finally {FindClose(handle);}
+    }
+    if(!CancelRequested)Logical=total;
+   } catch(Exception ex){Error=ex.Message;} finally {Done=true;}
+  }
+ }
  internal static class VolumeSpace {
   [StructLayout(LayoutKind.Sequential)] struct DiskSpaceInformation {
    internal ulong ActualTotal,ActualAvailable,ActualPoolUnavailable,CallerTotal,CallerAvailable,CallerPoolUnavailable;
@@ -25,7 +92,7 @@ namespace RandomToolkits.HelperExperiment {
   }
  }
  internal static class Program {
-  const string Version="1.2.0";
+  const string Version="1.3.0";
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer {MaxJsonLength=16777216,RecursionLimit=32};
   static Scanner native; static MftScanner mft; static Scan scan;
   static CompactIndex compact;static object completedSummary;static int[] cachedOrder;
@@ -33,6 +100,9 @@ namespace RandomToolkits.HelperExperiment {
   static double cleanupMilliseconds,preCompactCleanupMilliseconds,finalCleanupMilliseconds,compactMilliseconds;
   static ScanProfile profile;
   static Stopwatch elapsed; static string mode, cachedPath, cachedSort; static Row[] cachedRows;
+  static readonly Dictionary<string,LiveFileSample> liveFiles=new Dictionary<string,LiveFileSample>(StringComparer.OrdinalIgnoreCase);
+  static readonly Dictionary<string,LiveDirectorySample> liveDirectories=new Dictionary<string,LiveDirectorySample>(StringComparer.OrdinalIgnoreCase);
+  static LiveDirectoryProbe liveDirectoryScanner;static string liveDirectoryPath;
   static bool Running {get {return (native!=null && !native.Done) || (mft!=null && !mft.Done);}}
   static string Text(Dictionary<string,object> request,string key,string fallback) {
    object value;return request.TryGetValue(key,out value) && value!=null ? Convert.ToString(value):fallback;
@@ -41,6 +111,9 @@ namespace RandomToolkits.HelperExperiment {
    object value;int result=request.TryGetValue(key,out value)?Convert.ToInt32(value):fallback;
    if(result<min || result>max) throw new ArgumentException(key+" is outside its allowed range.");return result;
   }
+  static bool Boolean(Dictionary<string,object> request,string key,bool fallback) {object value;return request.TryGetValue(key,out value) && value!=null?Convert.ToBoolean(value):fallback;}
+  static void ResetLiveDirectory(){if(liveDirectoryScanner!=null && !liveDirectoryScanner.Done)liveDirectoryScanner.CancelRequested=true;liveDirectoryScanner=null;liveDirectoryPath=null;liveDirectories.Clear();}
+  static void ResetLive(){liveFiles.Clear();ResetLiveDirectory();}
   static void Cancel() {if(native!=null) native.CancelRequested=true;if(mft!=null) mft.CancelRequested=true;}
   static void Finish() {
    if(completedSummary!=null || Running || (native==null && mft==null)) return;
@@ -116,18 +189,70 @@ namespace RandomToolkits.HelperExperiment {
     if(!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) throw new UnauthorizedAccessException("MFT scanning requires an administrator PowerShell. No automatic elevation.");
     var drive=new DriveInfo(path);if(drive.DriveType==DriveType.Network || drive.DriveFormat!="NTFS") throw new ArgumentException("MFT requires a local NTFS volume.");
    }
-   mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;
+   mode=engine;scan=null;native=null;mft=null;compact=null;completedSummary=null;issues=null;causes=null;issueCount=0;cachedOrder=null;ResetLive();
    cleanupMilliseconds=0;preCompactCleanupMilliseconds=0;finalCleanupMilliseconds=0;compactMilliseconds=0;cachedRows=null;cachedPath=null;cachedSort=null;elapsed=Stopwatch.StartNew();
    profile=null;if(engine=="mft") {mft=MftScanner.Start(path);profile=mft.Profile;}else native=Scanner.Start(path);
    return new {type="accepted",engine=engine,path=path};
   }
   static void RequireReady() {Finish();if(completedSummary==null) throw new InvalidOperationException("Wait for scan completion before browsing.");}
-  static Row[] AddModifiedDates(Row[] rows) {
-   foreach(Row row in rows) {
-    try {DateTime modified=File.GetLastWriteTime(row.Path);row.Modified=modified.Year>1601?modified.ToString("yyyy-MM-dd"):null;}
-    catch {row.Modified=null;}
+  static void PresentDirectories(BrowseRow[] rows,string priorityPath) {
+   var visible=new HashSet<string>(StringComparer.OrdinalIgnoreCase);foreach(BrowseRow row in rows)if(row.Kind=="DIR")visible.Add(row.Path);
+   if(visible.Count==0){ResetLiveDirectory();return;}
+   if(liveDirectoryPath!=null && !visible.Contains(liveDirectoryPath)){if(liveDirectoryScanner!=null && !liveDirectoryScanner.Done)liveDirectoryScanner.CancelRequested=true;liveDirectoryScanner=null;liveDirectoryPath=null;}
+   var remove=new List<string>();foreach(string path in liveDirectories.Keys)if(!visible.Contains(path))remove.Add(path);foreach(string path in remove)liveDirectories.Remove(path);
+   foreach(string path in visible)if(!liveDirectories.ContainsKey(path))liveDirectories.Add(path,new LiveDirectorySample {Next=DateTime.MinValue});
+   DateTime now=DateTime.UtcNow;
+   if(liveDirectoryScanner!=null && liveDirectoryScanner.Done) {
+    LiveDirectorySample completed;
+    if(liveDirectories.TryGetValue(liveDirectoryPath,out completed)) {
+     if(liveDirectoryScanner.Error==null && !liveDirectoryScanner.CancelRequested) {
+      long current=liveDirectoryScanner.Logical;if(!completed.HasInitial){completed.Initial=current;completed.HasInitial=true;}completed.Last=current;completed.HasLast=true;completed.Unavailable=false;
+     } else completed.Unavailable=true;
+     completed.Next=now.AddSeconds(2);
+    }
+    liveDirectoryScanner=null;liveDirectoryPath=null;
    }
-   return rows;
+   foreach(BrowseRow row in rows)if(row.Kind=="DIR") {
+    LiveDirectorySample sample=liveDirectories[row.Path];
+    if(sample.HasLast){long delta=checked(sample.Last-sample.Initial);row.Bytes=checked(row.Bytes+delta);row.LogicalDelta=delta;row.LiveState=delta>0?"grown":delta<0?"shrunk":"same";}
+    else row.LiveState=sample.Unavailable?"unavailable":"checking";
+   }
+   if(liveDirectoryScanner==null) {
+    string candidate=null;LiveDirectorySample choice=null;
+    foreach(string path in visible) {
+     LiveDirectorySample sample=liveDirectories[path];if(sample.Next>now)continue;
+     bool better=choice==null || (!sample.HasInitial && choice.HasInitial) || (sample.HasInitial==choice.HasInitial && sample.Next<choice.Next) ||
+      (sample.HasInitial==choice.HasInitial && sample.Next==choice.Next && String.Equals(path,priorityPath,StringComparison.OrdinalIgnoreCase));
+     if(better){candidate=path;choice=sample;}
+    }
+    if(candidate!=null){liveDirectoryPath=candidate;liveDirectoryScanner=LiveDirectoryProbe.Start(candidate);}
+   }
+  }
+  static BrowseRow[] PresentRows(Row[] rows,bool live,string watchPath) {
+   var presented=new BrowseRow[rows.Length];
+   for(int index=0;index<rows.Length;index++) {
+    Row row=rows[index];var output=new BrowseRow {Name=row.Name,Path=row.Path,Kind=row.Kind,ReparseTag=row.ReparseTag,Bytes=row.Bytes,Allocated=row.Allocated,Partial=row.Partial,AllocationUnknown=row.AllocationUnknown};
+    try {DateTime modified=File.GetLastWriteTime(row.Path);output.Modified=modified.Year>1601?modified.ToString("yyyy-MM-dd"):null;}catch {output.Modified=null;}
+    if(live && row.Kind!="DIR" && row.Kind!="LINK") {
+     long logical,allocation;string identity;bool deleted;
+     if(LiveFileInfo.Query(row.Path,out logical,out allocation,out identity,out deleted)) {
+      LiveFileSample sample;
+      if(!liveFiles.TryGetValue(row.Path,out sample)){sample=new LiveFileSample {Allocation=allocation,Identity=identity};liveFiles.Add(row.Path,sample);}
+      if(sample.Identity!=null && identity!=null && !String.Equals(sample.Identity,identity,StringComparison.Ordinal)){output.LiveState="replaced";output.Bytes=logical;output.Allocated=allocation;output.LogicalDelta=checked(logical-row.Bytes);output.AllocatedDelta=checked(allocation-row.Allocated);}
+      else {
+       output.Bytes=logical;output.LogicalDelta=checked(logical-row.Bytes);output.AllocatedDelta=checked(allocation-sample.Allocation);output.Allocated=Math.Max(0,checked(row.Allocated+output.AllocatedDelta));
+       if(output.LogicalDelta==0 && output.AllocatedDelta==0)output.LiveState="same";
+       else if(output.LogicalDelta>=0 && output.AllocatedDelta>=0)output.LiveState="grown";
+       else if(output.LogicalDelta<=0 && output.AllocatedDelta<=0)output.LiveState="shrunk";
+       else output.LiveState="changed";
+      }
+     } else output.LiveState=deleted?"deleted":"unavailable";
+    }
+    presented[index]=output;
+   }
+   if(live)PresentDirectories(presented,watchPath);
+   else if(liveDirectoryPath!=null || liveDirectories.Count>0)ResetLiveDirectory();
+   return presented;
   }
   static object Memory(Dictionary<string,object> request) {
    RequireReady();long managedBefore=GC.GetTotalMemory(false),workingBefore=Process.GetCurrentProcess().WorkingSet64;
@@ -145,7 +270,7 @@ namespace RandomToolkits.HelperExperiment {
    RequireReady();string path=Text(request,"path",compact!=null?compact.Root:scan.Root);
    string sort=Text(request,"sort",mode=="mft"?"allocated":"logical");
    if(sort!="allocated" && sort!="logical" && sort!="name") throw new ArgumentException("Unknown sort order.");
-   int offset=Number(request,"offset",0,0,Int32.MaxValue),limit=Number(request,"limit",20,1,100);
+   int offset=Number(request,"offset",0,0,Int32.MaxValue),limit=Number(request,"limit",20,1,100);bool live=Boolean(request,"live",false);string watchPath=Text(request,"watchPath",null);
    if(compact!=null) {
     int id;if(!compact.Find(path,out id)) throw new ArgumentException("Path is outside the cached scan.");
     CompactIndex.Folder folder=compact.GetFolder(id);
@@ -153,7 +278,7 @@ namespace RandomToolkits.HelperExperiment {
     offset=Math.Min(offset,folder.Count);int compactCount=Math.Min(limit,folder.Count-offset);
     return new {type="listing",path=compact.GetPath(id),parent=folder.Parent<0?null:compact.GetPath(folder.Parent),sort=sort,offset=offset,total=folder.Count,
      logical=folder.Logical,allocated=(long?)folder.Allocated,partial=folder.Partial,allocationUnknown=folder.Unknown,files=folder.Files,
-     rows=AddModifiedDates(compact.Page(id,cachedOrder,offset,compactCount))};
+     rows=PresentRows(compact.Page(id,cachedOrder,offset,compactCount),live,watchPath)};
    }
    Node node;if(!scan.Nodes.TryGetValue(path,out node)) throw new ArgumentException("Path is outside the cached scan.");
    if(cachedRows==null || cachedPath!=path || cachedSort!=sort) {
@@ -164,16 +289,17 @@ namespace RandomToolkits.HelperExperiment {
     });cachedPath=path;cachedSort=sort;
    }
    if(offset>cachedRows.Length) offset=cachedRows.Length;int count=Math.Min(limit,cachedRows.Length-offset);
-   Row[] rows=new Row[count];Array.Copy(cachedRows,offset,rows,0,count);AddModifiedDates(rows);
+   Row[] rows=new Row[count];Array.Copy(cachedRows,offset,rows,0,count);
    return new {type="listing",path=path,parent=node.Parent,sort=sort,offset=offset,total=cachedRows.Length,
     logical=node.Bytes,allocated=mode=="mft"?(long?)node.Allocated:null,partial=node.Partial,
-    allocationUnknown=node.AllocationUnknown,files=node.Files,rows=rows};
+    allocationUnknown=node.AllocationUnknown,files=node.Files,rows=PresentRows(rows,live,watchPath)};
   }
   static object Dispatch(Dictionary<string,object> request) {
    switch(Text(request,"command","")) {
     case "scan":return Start(request);
     case "status":return Status();
     case "cancel":Cancel();return new {type="cancelled",message="Cancellation requested; poll status for partial results."};
+    case "live":ResetLive();return new {type="live",enabled=Boolean(request,"enabled",false)};
     case "list":return List(request);
     case "memory":return Memory(request);
     case "profile":return new {type="profile",scan=profile==null?null:profile.Snapshot()};

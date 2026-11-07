@@ -6,7 +6,7 @@ Personal system administration, investigation, and troubleshooting tools.
 
 | Tool | Location | Requirements |
 | --- | --- | --- |
-| Windows Toolkit v0.18.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
+| Windows Toolkit v0.19.0 | [Windows tools](win/net/README.md) | Windows, PowerShell 5.0+ (tested on 5.1 and 7) |
 | M365 Toolkit v0.4.0 | [m365](m365/README.md) | PowerShell 7.4+, Microsoft 365 permissions appropriate to the selected investigation |
 
 ## Run all Windows tools
@@ -21,7 +21,7 @@ Printing includes inventory, queues, ports/drivers, spooler status and printing 
 
 The old `/win/net` URL also opens this unified menu. No separate command is needed for the disk explorer: its pinned, checksum-verified script downloads when selected. See [compatibility, legacy TLS and local execution](win/net/README.md) and [disk size limitations](win/disk/README.md).
 
-**Storage > 1** opens **Disk Usage 1.2.0**, the preferred C# helper. Auto mode uses MFT for elevated fixed local NTFS drive roots and native enumeration for other paths or unelevated sessions. Browsing shows current modified dates for visible entries, available volume space and volume-wide reconciliation of NTFS metadata and reserved storage. PowerShell 5.1+ and .NET Framework 4.5.1+ are required; no automatic elevation occurs. The pinned ZIP and executable checksums/version are verified, and the temporary package is removed on exit. **Storage > 2** retains the older Disk Usage 0.4.6 compatibility scanner.
+**Storage > 1** opens **Disk Usage 1.3.0**, the preferred C# helper. Auto mode uses MFT for elevated fixed local NTFS drive roots and native enumeration for other paths or unelevated sessions. Browsing shows current modified dates, available volume space and reconciled volume accounting. `L` monitors visible files and directories for live logical-size changes; `R` performs a clean rescan. PowerShell 5.1+ and .NET Framework 4.5.1+ are required; no automatic elevation occurs. The pinned ZIP and executable checksums/version are verified, and the temporary package is removed on exit. **Storage > 2** retains the older Disk Usage 0.4.6 compatibility scanner.
 
 Disk Usage 0.4.6 offers native directory scanning and an optional elevated NTFS MFT view with On disk allocation, logical sizes, cached navigation and explicit incomplete totals. See its documentation for allocation semantics and independent Windows API validation.
 

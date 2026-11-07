@@ -10,6 +10,11 @@ function Format-HelperBytes($Bytes) {
     $value=[double]$Bytes
     foreach($unit in @('B','KiB','MiB','GiB','TiB','PiB')){if([math]::Abs($value) -lt 1024 -or $unit -eq 'PiB'){return ('{0:N1} {1}' -f $value,$unit)};$value/=1024}
 }
+function Format-HelperSignedBytes($Bytes) {
+    $value=[long]$Bytes
+    if($value -eq 0){return '0 B'}
+    return $(if($value -gt 0){'+'}else{'-'})+(Format-HelperBytes ([math]::Abs($value)))
+}
 function Show-HelperAccounting($Summary) {
     $a=$Summary.accounting
     if($null -eq $a){Write-Host 'Accounting comparison is available for MFT scans.';return}
@@ -68,43 +73,66 @@ try {
     } while($true)
     Write-Progress -Activity 'C# helper scanning' -Completed
     $summary=$status.summary;$current=$summary.root;$offset=0;$selected=0;$lastView='';$sort=if($scanEngine -eq 'mft'){'allocated'}else{'logical'}
+    $live=$false;$liveTick=$false;$lastLiveSignature=$null
     while($true){
-        $page=Invoke-DiskHelper $session @{command='list';path=$current;offset=$offset;limit=20;sort=$sort}
+        $requestedView=$current+'|'+$offset+'|'+$sort
+        $watchPath=$null
+        if($live -and $requestedView -eq $lastView -and $rows.Count -and $selected -lt $rows.Count -and $rows[$selected].Kind -eq 'DIR'){$watchPath=$rows[$selected].Path}
+        $page=Invoke-DiskHelper $session @{command='list';path=$current;offset=$offset;limit=20;sort=$sort;live=$live;watchPath=$watchPath}
         $view=$current+'|'+$offset+'|'+$sort
         if($view -ne $lastView){$selected=0;$lastView=$view}
-        if($keyboard){Clear-Host}
-        Write-Host ("`nDISK USAGE {0} | {1} | {2}" -f $session.Hello.version,$scanEngine.ToUpperInvariant(),$page.path) -ForegroundColor Cyan
-        $available=Get-HelperAvailableBytes $page.path
-        $availableText=if($null -eq $available){'Unavailable'}else{Format-HelperBytes $available}
-        Write-Host ('On disk: {0} | Logical: {1} | Available: {2} | Files: {3:N0} | Scan: {4:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$availableText,$page.files,$summary.seconds)
-        if($scanEngine -eq 'native'){Write-Host 'Native scan: logical sizes only; physical allocation is not measured.'}
-        Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
-        if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
-        if($scanEngine -eq 'mft'){
-            if($current -eq $summary.root){
-                if($summary.reconciliation){Write-Host ('Volume unavailable: {0} | Reconciled: {1} | Live residual: {2} (see Reports)' -f (Format-HelperBytes $summary.reconciliation.windowsUnavailable),(Format-HelperBytes $summary.reconciliation.reconciled),(Format-HelperBytes $summary.reconciliation.residual))}
-                else{Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
-            }
-            Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
-        }
         $rows=@($page.rows)
-        Write-Host '     ON DISK       | LOGICAL      | MODIFIED   | TYPE NAME' -ForegroundColor DarkGray
-        for($i=0;$i -lt $rows.Count;$i++){
-            $row=$rows[$i];$allocation=if($scanEngine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
-            if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
-            $marker=if($i -eq $selected){'>'}else{' '}
-            $color=if($i -eq $selected){'Cyan'}else{'Gray'}
-            $modified=if($row.Modified){[string]$row.Modified}else{'-'}
-            Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-10} | {5,-4} {6}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$modified,$row.Kind,$row.Name) -ForegroundColor $color
+        $liveSignature=if($live){($rows | ForEach-Object {'{0}|{1}|{2}|{3}|{4}' -f $_.Path,$_.Bytes,$_.Allocated,$_.LiveState,$_.Modified}) -join "`n"}else{$null}
+        $redraw=-not ($liveTick -and $liveSignature -eq $lastLiveSignature)
+        $liveTick=$false
+        if($redraw){
+            $lastLiveSignature=$liveSignature
+            if($keyboard){Clear-Host}
+            Write-Host ("`nDISK USAGE {0} | {1} | {2}" -f $session.Hello.version,$scanEngine.ToUpperInvariant(),$page.path) -ForegroundColor Cyan
+            $available=Get-HelperAvailableBytes $page.path
+            $availableText=if($null -eq $available){'Unavailable'}else{Format-HelperBytes $available}
+            Write-Host ('On disk: {0} | Logical: {1} | Available: {2} | Files: {3:N0} | Scan: {4:N1}s' -f (Format-HelperBytes $page.allocated),(Format-HelperBytes $page.logical),$availableText,$page.files,$summary.seconds)
+            if($scanEngine -eq 'native'){Write-Host 'Native scan: logical sizes only; physical allocation is not measured.'}
+            Write-Host ('Cache preparation: {0:N1}s | Ready: {1:N1}s' -f (($status.cleanupMilliseconds+$status.compactMilliseconds)/1000),$status.readySeconds)
+            if($page.partial -or $page.allocationUnknown){Write-Host 'PARTIAL: displayed values may be lower bounds; see Reports > Scan diagnostics.' -ForegroundColor Yellow}
+            if($scanEngine -eq 'mft'){
+                if($current -eq $summary.root){
+                    if($summary.reconciliation){Write-Host ('Volume unavailable: {0} | Reconciled: {1} | Live residual: {2} (see Reports)' -f (Format-HelperBytes $summary.reconciliation.windowsUnavailable),(Format-HelperBytes $summary.reconciliation.reconciled),(Format-HelperBytes $summary.reconciliation.residual))}
+                    else{Write-Host ('Volume used: {0} | Included allocation: {1} | Unreconciled: {2} (see Reports)' -f (Format-HelperBytes $summary.volumeUsed),(Format-HelperBytes $summary.allocated),(Format-HelperBytes ($summary.volumeUsed-$summary.allocated)))}
+                }
+                Write-Host ('API verified: {0:N0} | Unknown allocations: {1:N0} | Omitted files: {2:N0}' -f $summary.apiVerified,$summary.unknownAllocations,$summary.omittedFiles)
+            }
+            if($live){Write-Host 'LIVE: visible files and directories are checked in turn; page totals, sorting and reconciliation remain cached until R.' -ForegroundColor Green}
+            Write-Host '     ON DISK       | LOGICAL      | MODIFIED   | TYPE NAME' -ForegroundColor DarkGray
+            for($i=0;$i -lt $rows.Count;$i++){
+                $row=$rows[$i];$allocation=if($scanEngine -eq 'mft'){Format-HelperBytes $row.Allocated}else{'-'}
+                if($row.AllocationUnknown){$allocation=if($row.Allocated -eq 0){'Unknown'}else{'>= '+$allocation}}
+                $marker=if($i -eq $selected){'>'}else{' '}
+                $liveColor=switch([string]$row.LiveState){'grown'{'Green'}'shrunk'{'Yellow'}'changed'{'Yellow'}'replaced'{'Yellow'}'deleted'{'Red'}'unavailable'{'DarkYellow'}'checking'{'DarkCyan'}default{$null}}
+                $color=if($liveColor){$liveColor}elseif($i -eq $selected){'Cyan'}else{'Gray'}
+                $modified=if($row.Modified){[string]$row.Modified}else{'-'}
+                $change=''
+                if($row.LiveState -eq 'deleted'){$change=' [DELETED]'}
+                elseif($row.LiveState -eq 'unavailable'){$change=' [UNAVAILABLE]'}
+                elseif($row.LiveState -eq 'checking'){$change=' [CHECKING]'}
+                elseif($row.LiveState -eq 'replaced'){$change=' [REPLACED]'}
+                elseif($row.LiveState -in @('grown','shrunk','changed')){
+                    $parts=@();if($row.LogicalDelta -ne 0){$parts+='logical '+(Format-HelperSignedBytes $row.LogicalDelta)}
+                    if($scanEngine -eq 'mft' -and $row.AllocatedDelta -ne 0){$parts+='disk '+(Format-HelperSignedBytes $row.AllocatedDelta)}
+                    $change=' ['+($parts -join ', ')+']'
+                }
+                Write-Host ('{0}[{1,2}] {2,14} | {3,12} | {4,-10} | {5,-4} {6}{7}' -f $marker,($i+1),$allocation,(Format-HelperBytes $row.Bytes),$modified,$row.Kind,$row.Name,$change) -ForegroundColor $color
+            }
+            Write-Host ('Page {0}/{1} | Sort: {2}' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
+            if($keyboard){
+                Write-Host 'Up/Down: select | Enter: open | Left/Esc: back | Ctrl+Enter: Explorer'
+                Write-Host ('PgUp/PgDn: pages | S: sort | L: live {0} | R: refresh | F1: reports' -f $(if($live){'ON'}else{'off'}))
+            }else{Write-Host 'Number: folder | B: back | N/P: pages | S: sort | L: live | R: refresh | O: Explorer | H: reports | 0: drives'}
         }
-        Write-Host ('Page {0}/{1} | Sort: {2}' -f ([int]($offset/20)+1),([math]::Max(1,[math]::Ceiling($page.total/20))),$sort)
-        if($keyboard){
-            Write-Host 'Up/Down: select | Enter: open | Left/Esc: back | Ctrl+Enter: Explorer'
-            Write-Host 'PgUp/PgDn: pages | S: sort | F1: reports'
-        }else{Write-Host 'Number: folder | B: back | N/P: pages | S: sort | O: Explorer | H: reports | 0: drives'}
-        $choice=Read-HelperChoice $keyboard;$number=0
+        $choice=Read-HelperChoice $keyboard $live;$number=0
         if($choice -in @('@REPORTS','H')){$choice=Read-HelperReport $keyboard}
         switch(([string]$choice).Trim().ToUpperInvariant()){
+            '@LIVE_TICK'{$liveTick=$true}
             '@UP'{if($selected -gt 0){$selected--}elseif($offset -gt 0){$offset=[math]::Max(0,$offset-20)}}
             '@DOWN'{if($selected+1 -lt $rows.Count){$selected++}elseif($offset+20 -lt $page.total){$offset+=20}}
             '@ENTER'{if($rows.Count -and $rows[$selected].Kind -eq 'DIR'){$current=$rows[$selected].Path;$offset=0}}
@@ -119,6 +147,30 @@ try {
             'N'{if($offset+20 -lt $page.total){$offset+=20}}
             'P'{$offset=[math]::Max(0,$offset-20)}
             'S'{$sort=switch($sort){'allocated'{'logical'}'logical'{'name'}default{if($scanEngine -eq 'mft'){'allocated'}else{'logical'}}};$offset=0}
+            'L'{
+                if(-not $keyboard){Write-Host 'Live polling requires an interactive ConsoleHost. Use R for an updated snapshot.' -ForegroundColor Yellow;$null=Read-Host 'Enter to return'}
+                else{$live=-not $live;$null=Invoke-DiskHelper $session @{command='live';enabled=$live};$lastLiveSignature=$null}
+            }
+            'R'{
+                $live=$false;$liveTick=$false;$lastLiveSignature=$null
+                $refreshRoot=$summary.root;$returnPath=$current
+                $newSession=Start-DiskHelper (Join-Path $HelperDirectory 'DiskHelper.exe') (Join-Path $HelperDirectory 'manifest.json')
+                Stop-DiskHelper $session;$session=$newSession
+                $null=Invoke-DiskHelper $session @{command='scan';path=$refreshRoot;engine=$scanEngine}
+                Write-Host ('Refreshing {0} with {1} scan. Q opens partial results.' -f $refreshRoot,$scanEngine) -ForegroundColor Cyan
+                do{
+                    $status=Invoke-DiskHelper $session @{command='status'}
+                    if($status.state -eq 'ready'){break}
+                    Write-Progress -Activity 'Refreshing disk snapshot' -Status ('{0} | {1:N0} records | {2:N0} files | {3:N1}s' -f $status.phase,$status.records,$status.files,$status.seconds)
+                    $refreshKey=$null;try{if(-not [Console]::IsInputRedirected -and [Console]::KeyAvailable){$refreshKey=[Console]::ReadKey($true).Key}}catch{}
+                    if($refreshKey -eq 'Q'){$null=Invoke-DiskHelper $session @{command='cancel'}}
+                    Start-Sleep -Milliseconds 200
+                }while($true)
+                Write-Progress -Activity 'Refreshing disk snapshot' -Completed
+                $summary=$status.summary
+                try{$null=Invoke-DiskHelper $session @{command='list';path=$returnPath;limit=1};$current=$returnPath}catch{$current=$summary.root}
+                $offset=0;$selected=0;$lastView=''
+            }
             'E'{
                 $issues=Invoke-DiskHelper $session @{command='issues';limit=100}
                 Write-Host 'Included-file information does not mark totals PARTIAL. Metadata exclusions and other incomplete results remain flagged. A shows volume accounting.'
