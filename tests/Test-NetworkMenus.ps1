@@ -9,6 +9,9 @@ foreach ($entry in @((Get-NetworkChecks)) + @((Get-AdChecks)) + @((Get-NetworkRe
 function Get-AdContext { [pscustomobject]@{Computer='TEST';Role='Workgroup';Domain='WORKGROUP'} }
 function Get-NetworkAvailability { param($Entry) [pscustomobject]@{Available=$true;Reason=''} }
 function Invoke-AdNative { throw 'A cancelled menu action must never run a native command' }
+$summaryLines=Format-PcSystemSummary ([pscustomobject]@{Username='DOMAIN\User';Groups='Users, Operators';Hostname='PC01';PrivateIp='192.0.2.10';PublicIp='198.51.100.20';Storage='100.0 GiB free / 500.0 GiB';Cpu='Fixture CPU';Ram='16.0 GiB';OsVersion='Fixture Windows 10.0 (build 12345)'})
+Assert-True ($summaryLines.Count -eq 4 -and ($summaryLines -join '|') -match 'Public IP: 198\.51\.100\.20' -and ($summaryLines -join '|') -match 'RAM: 16\.0 GiB') 'Main-menu system summary includes identity, network, hardware and OS details'
+$script:PcSystemSummary=[pscustomobject]@{Username='DOMAIN\User';Groups='Users';Hostname='PC01';PrivateIp='192.0.2.10';PublicIp='198.51.100.20';Storage='100 GiB free / 500 GiB';Cpu='Fixture CPU';Ram='16 GiB';OsVersion='Fixture Windows'}
 $script:Output = New-Object 'System.Collections.Generic.List[string]'
 function Write-Host { param($Object,$ForegroundColor) $script:Output.Add([string]$Object) }
 function Write-Warning { param($Message) $script:Output.Add([string]$Message) }
@@ -21,6 +24,7 @@ Assert-True ($script:Answers.Count -eq 0) 'Every network category returns to the
 foreach ($answer in @('1','0','2','0','3','0','4','0','5','0','6','0','7','0','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
 Assert-True ($script:Answers.Count -eq 0) 'Unified Windows menu navigates all seven sections and returns'
+Assert-True (($script:Output -join '|') -match 'User: DOMAIN\\User \| Groups: Users' -and ($script:Output -join '|') -match 'Public IP: 198\.51\.100\.20') 'Windows main menu renders the cached system summary'
 $script:Output.Clear()
 foreach ($answer in @('3','2','n','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu
