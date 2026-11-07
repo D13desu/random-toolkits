@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.20.3
+# Random Toolkits | Windows Toolkit 0.21.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -755,6 +755,96 @@ function Test-AdShares {
     }
 }
 
+function Get-AdIdentity {
+    Invoke-AdNative 'whoami.exe' @('/all')
+    Invoke-AdNative 'klist.exe' @()
+    Invoke-AdNative 'klist.exe' @('sessions')
+}
+
+function Test-AdDcPorts {
+    param([string]$Controller)
+    $dcName = Get-AdController $Controller
+    $services = @(
+        [pscustomobject]@{Name='DNS';Port=53;Detail='TCP only; UDP DNS is not tested.'}
+        [pscustomobject]@{Name='Kerberos';Port=88;Detail='Kerberos authentication.'}
+        [pscustomobject]@{Name='RPC endpoint mapper';Port=135;Detail='RPC endpoint discovery; dynamic RPC ports are not tested.'}
+        [pscustomobject]@{Name='LDAP';Port=389;Detail='LDAP TCP reachability; bind and directory health are not tested.'}
+        [pscustomobject]@{Name='SMB';Port=445;Detail='SMB transport used by SYSVOL and NETLOGON.'}
+        [pscustomobject]@{Name='Kerberos password';Port=464;Detail='Kerberos password change service.'}
+        [pscustomobject]@{Name='LDAPS';Port=636;Detail='TLS handshake and certificate validity are not tested.'}
+        [pscustomobject]@{Name='Global Catalog';Port=3268;Detail='Global Catalog LDAP.'}
+        [pscustomobject]@{Name='Global Catalog TLS';Port=3269;Detail='TLS handshake and certificate validity are not tested.'}
+        [pscustomobject]@{Name='AD Web Services';Port=9389;Detail='Used by the ActiveDirectory PowerShell module.'}
+    )
+    foreach ($service in $services) {
+        $result = Test-NetworkTcp $dcName $service.Port 2000
+        $detail = $result.Detail
+        if ($result.Status -eq 'PASS') { $detail = $service.Detail }
+        [pscustomobject]@{
+            Test='AD DC port'
+            Target=$result.Target
+            Service=$service.Name
+            Port=$service.Port
+            Status=$result.Status
+            Milliseconds=$result.Milliseconds
+            Detail=$detail
+        }
+    }
+}
+
+function Invoke-AdLdapRootDseRequest {
+    param([string]$Controller, [string[]]$Attributes)
+    Add-Type -AssemblyName System.DirectoryServices.Protocols -ErrorAction Stop
+    $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($Controller)
+    try {
+        $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Negotiate
+        $connection.Timeout = [timespan]::FromSeconds(10)
+        $connection.SessionOptions.ProtocolVersion = 3
+        $request = [System.DirectoryServices.Protocols.SearchRequest]::new(
+            '',
+            '(objectClass=*)',
+            [System.DirectoryServices.Protocols.SearchScope]::Base,
+            $Attributes
+        )
+        $connection.SendRequest($request)
+    } finally {
+        $connection.Dispose()
+    }
+}
+
+function ConvertFrom-AdRootDseResponse {
+    param($Response, [string]$Controller, [string[]]$Attributes)
+    if ($Response.Entries.Count -ne 1) { throw "RootDSE returned $($Response.Entries.Count) entries; expected one." }
+    $attributeSet = $Response.Entries[0].Attributes
+    $row = [ordered]@{Test='LDAP RootDSE';Target=$Controller;Status='PASS'}
+    foreach ($attribute in $Attributes) {
+        $raw = $null
+        if ($attributeSet -is [Collections.IDictionary]) {
+            if ($attributeSet.Contains($attribute)) { $raw = $attributeSet[$attribute] }
+        } elseif ($attributeSet.Contains($attribute)) {
+            $raw = $attributeSet[$attribute].GetValues([string])
+        }
+        $row[$attribute] = @($raw) -join '; '
+    }
+    [pscustomobject]$row
+}
+
+function Get-AdRootDse {
+    param([string]$Controller)
+    $dcName = Get-AdController $Controller
+    $attributes = @(
+        'dnsHostName','defaultNamingContext','rootDomainNamingContext','configurationNamingContext',
+        'schemaNamingContext','domainControllerFunctionality','domainFunctionality','forestFunctionality',
+        'isGlobalCatalogReady','isSynchronized','supportedLDAPVersion','supportedSASLMechanisms'
+    )
+    try {
+        $response = Invoke-AdLdapRootDseRequest $dcName $attributes
+        ConvertFrom-AdRootDseResponse $response $dcName $attributes
+    } catch {
+        [pscustomobject]@{Test='LDAP RootDSE';Target=$dcName;Status='WARN';Detail=$_.Exception.Message}
+    }
+}
+
 function Get-AdChecks {
     @(
         [pscustomobject]@{Key='1'; Id='ad-context'; Name='Domain membership and machine role'; MinPS='5.0'; Commands=@('Get-CimInstance'); Admin=$false; Roles=@(); Action={param($c,$dc) $c}}
@@ -763,6 +853,9 @@ function Get-AdChecks {
         [pscustomobject]@{Key='4'; Id='ad-secure'; Name='Computer secure channel (no repair)'; MinPS='5.0'; Commands=@('Test-ComputerSecureChannel'); Admin=$false; Roles=@('Domain member'); Action={param($c,$dc) Test-AdSecureChannel $dc}}
         [pscustomobject]@{Key='5'; Id='ad-time'; Name='Time source / status and DC offset'; MinPS='5.0'; Commands=@('w32tm.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdTime $dc}}
         [pscustomobject]@{Key='6'; Id='ad-shares'; Name='SYSVOL and NETLOGON access'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Test-AdShares $dc}}
+        [pscustomobject]@{Key='7'; Id='ad-identity'; Name='Current identity and Kerberos tickets / sessions'; MinPS='5.0'; Commands=@('whoami.exe','klist.exe'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdIdentity}}
+        [pscustomobject]@{Key='8'; Id='ad-ports'; Name='Domain controller service ports'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Test-AdDcPorts $dc}}
+        [pscustomobject]@{Key='9'; Id='ad-rootdse'; Name='LDAP RootDSE capabilities and naming contexts'; MinPS='5.0'; Commands=@(); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdRootDse $dc}}
     )
 }
 
@@ -1405,7 +1498,7 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='1'; Id='overview'; Name='Overview and quick diagnosis'; Checks=@('overview','quick'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview','discovery','connections'); AdChecks=@(); Repairs=@('renew-dhcp')}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS'; Checks=@('dns'); AdChecks=@(); Repairs=@('flush-dns')}
-        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares'); Repairs=@('repair-trust','resync-time')}
+        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse'); Repairs=@('repair-trust','resync-time')}
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
@@ -1442,7 +1535,7 @@ function Invoke-InteractiveCheck {
     if ($Item.Kind -eq 'Repair') { Invoke-InteractiveRepair $entry; return }
     if ($Item.Kind -eq 'AD') {
         $dcName = $null
-        if ($entry.Id -in @('ad-secure','ad-time','ad-shares')) {
+        if ($entry.Id -in @('ad-secure','ad-time','ad-shares','ad-ports','ad-rootdse')) {
             $answer = Read-PcInput 'DC hostname [automatic discovery]'
             if ($answer) { $dcName = $answer.Trim() }
             if ($dcName) { $null = Get-AdController $dcName }
@@ -2122,7 +2215,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.20.3')
+    param([string]$Title,[string]$Version='0.21.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2189,7 +2282,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.20.3',
+        [string]$Version='0.21.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
