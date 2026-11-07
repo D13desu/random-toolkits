@@ -32,7 +32,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - IPv4 device and TCP-port discovery with optional IEEE vendor lookup.
 - Active TCP/UDP connections with PID, process, and executable path.
 - DNS lookup, routing table, proxy, and firewall status.
-- Active Directory membership, DC discovery, DNS, secure channel, time, SYSVOL/NETLOGON, Kerberos identity, DC service ports, LDAP RootDSE, FSMO roles, replication, selected DCDiag tests, and recent DC events.
+- Active Directory membership, DC discovery, DNS, secure channel, time, SYSVOL/NETLOGON, Kerberos identity, DC service ports, LDAP RootDSE, FSMO roles, replication, selected DCDiag tests, recent DC events, site/subnet mapping, targeted user/computer diagnostics, SPN queries, and per-resolver AD DNS checks.
 - Confirmed repairs: renew DHCP, flush DNS, repair member trust, and resync time.
 
 ### 3. Power and device health

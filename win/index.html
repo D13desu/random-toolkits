@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.22.0
+# Random Toolkits | Windows Toolkit 0.23.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -898,6 +898,116 @@ function Get-AdEventSummary {
     }
 }
 
+function Test-AdObjectIdentity {
+    param([string]$Identity)
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512 -or $Identity -match '[\x00-\x1F\x7F]') {
+        throw 'Enter one user or computer identity (SAM name, distinguished name, GUID, or SID).'
+    }
+}
+
+function Get-AdUserDiagnostic {
+    param([string]$Identity)
+    Test-AdObjectIdentity $Identity
+    $properties=@('Enabled','LockedOut','PasswordExpired','PasswordLastSet','PasswordNeverExpires','LastBadPasswordAttempt','BadPwdCount','LastLogonDate','UserPrincipalName','AccountExpirationDate')
+    $user=Get-ADUser -Identity $Identity -Properties $properties -ErrorAction Stop
+    [pscustomobject]@{
+        Test='AD user';SamAccountName=$user.SamAccountName;UserPrincipalName=$user.UserPrincipalName;Enabled=$user.Enabled;LockedOut=$user.LockedOut
+        PasswordExpired=$user.PasswordExpired;PasswordNeverExpires=$user.PasswordNeverExpires;PasswordLastSet=$user.PasswordLastSet
+        LastBadPasswordAttempt=$user.LastBadPasswordAttempt;BadPasswordCount=$user.BadPwdCount;LastLogonEstimate=$user.LastLogonDate
+        AccountExpiration=$user.AccountExpirationDate;DistinguishedName=$user.DistinguishedName
+        Detail='LastLogonDate is replicated and approximate; this check does not reset passwords, unlock accounts, or change directory data.'
+    }
+}
+
+function Get-AdComputerDiagnostic {
+    param([string]$Identity)
+    Test-AdObjectIdentity $Identity
+    $properties=@('Enabled','OperatingSystem','OperatingSystemVersion','LastLogonDate','DNSHostName','TrustedForDelegation','TrustedToAuthForDelegation','ServicePrincipalName','PasswordLastSet')
+    $computer=Get-ADComputer -Identity $Identity -Properties $properties -ErrorAction Stop
+    [pscustomobject]@{
+        Test='AD computer';Name=$computer.Name;DNSHostName=$computer.DNSHostName;Enabled=$computer.Enabled;OperatingSystem=$computer.OperatingSystem
+        OperatingSystemVersion=$computer.OperatingSystemVersion;LastLogonEstimate=$computer.LastLogonDate;PasswordLastSet=$computer.PasswordLastSet
+        TrustedForDelegation=$computer.TrustedForDelegation;TrustedToAuthForDelegation=$computer.TrustedToAuthForDelegation
+        ServicePrincipalNames=@($computer.ServicePrincipalName) -join '; ';DistinguishedName=$computer.DistinguishedName
+        Detail='LastLogonDate is replicated and approximate; delegation flags and SPNs are reported without changing the computer object.'
+    }
+}
+
+function Test-AdSpnValue {
+    param([string]$Spn)
+    if ([string]::IsNullOrWhiteSpace($Spn) -or $Spn.Length -gt 512 -or $Spn.StartsWith('-') -or
+        $Spn -match '[\s\x00-\x1F\x7F*?]' -or $Spn -notmatch '^[^/]+/.+$') {
+        throw 'Enter one exact SPN without wildcards (for example HTTP/server.example.com).'
+    }
+}
+
+function Find-AdSpn {
+    param([string]$Spn)
+    Test-AdSpnValue $Spn
+    Invoke-AdNative 'setspn.exe' @('-Q',$Spn)
+}
+
+function Find-AdDuplicateSpn {
+    Invoke-AdNative 'setspn.exe' @('-F','-X')
+}
+
+function Find-AdSubnetMapping {
+    param([string]$Address,[object[]]$Subnets)
+    $number=ConvertTo-DiscoveryNumber $Address
+    $candidates=@()
+    foreach($subnet in $Subnets){
+        if([string]$subnet.Name -notmatch '^(\d{1,3}(?:\.\d{1,3}){3})/(\d|[12]\d|3[0-2])$'){continue}
+        $prefix=[int]$Matches[2]
+        $base=ConvertTo-DiscoveryNumber $Matches[1]
+        [uint64]$size=[math]::Pow(2,32-$prefix)
+        if([uint64]([math]::Floor($number/[double]$size)*$size) -eq $base){$candidates+=[pscustomobject]@{Subnet=$subnet;Prefix=$prefix}}
+    }
+    $candidates | Sort-Object Prefix -Descending | Select-Object -First 1
+}
+
+function Get-AdSiteSubnetDiagnostic {
+    $siteResult=Invoke-AdNative 'nltest.exe' @('/dsgetsite')
+    $currentSite='Unavailable'
+    if($siteResult.ExitCode -eq 0){$currentSite=@($siteResult.Detail -split '[\r\n]+' | Where-Object {-not [string]::IsNullOrWhiteSpace($_)})[0].Trim()}
+    $subnets=@(Get-ADReplicationSubnet -Filter * -Properties Site -ErrorAction Stop)
+    $addresses=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {$_.IPAddress -notmatch '^(127\.|169\.254\.|0\.0\.0\.0$)'})
+    if(-not $addresses.Count){return [pscustomobject]@{Test='AD site/subnet';Status='WARN';CurrentSite=$currentSite;Detail='No usable local IPv4 addresses were found.'}}
+    foreach($address in $addresses){
+        $mapping=Find-AdSubnetMapping $address.IPAddress $subnets
+        if(-not $mapping){[pscustomobject]@{Test='AD site/subnet';Status='WARN';Address=$address.IPAddress;Interface=$address.InterfaceAlias;CurrentSite=$currentSite;Detail='No matching IPv4 subnet object exists in Active Directory.'};continue}
+        $site=[string]$mapping.Subnet.Site;$siteName=$site
+        if($site -match '^CN=([^,]+)'){$siteName=$Matches[1]}
+        $status=if($siteResult.ExitCode -eq 0 -and $siteName -eq $currentSite){'PASS'}else{'WARN'}
+        [pscustomobject]@{Test='AD site/subnet';Status=$status;Address=$address.IPAddress;Interface=$address.InterfaceAlias;CurrentSite=$currentSite;MappedSubnet=$mapping.Subnet.Name;MappedSite=$siteName;Detail='Uses the longest matching IPv4 AD subnet. VPN and virtual adapters may legitimately map differently.'}
+    }
+}
+
+function Test-AdPrivateIpv4 {
+    param([string]$Address)
+    $parsed=$null
+    if(-not [Net.IPAddress]::TryParse($Address,[ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork){return $false}
+    $bytes=$parsed.GetAddressBytes()
+    return $bytes[0] -eq 10 -or ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or ($bytes[0] -eq 192 -and $bytes[1] -eq 168) -or $bytes[0] -eq 127 -or ($bytes[0] -eq 169 -and $bytes[1] -eq 254)
+}
+
+function Get-AdDnsClientQuality {
+    param($Context)
+    $query='_ldap._tcp.dc._msdcs.'+$Context.Domain
+    $rows=@(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {$_.ServerAddresses.Count})
+    if(-not $rows.Count){return [pscustomobject]@{Test='AD DNS client';Status='WARN';Query=$query;Detail='No configured IPv4 DNS servers were reported.'}}
+    foreach($row in $rows){foreach($server in @($row.ServerAddresses)){
+        $public=-not (Test-AdPrivateIpv4 $server)
+        try{
+            $records=@(Resolve-DnsName -Server $server -Name $query -Type SRV -DnsOnly -ErrorAction Stop | Where-Object {$_.Type -eq 'SRV'})
+            if(-not $records.Count){throw 'No AD domain-controller SRV records returned.'}
+            $status=if($public){'WARN'}else{'PASS'}
+            $detail="Returned $($records.Count) AD SRV record(s)."
+            if($public){$detail+=' Resolver is publicly routable; verify it is an approved authoritative/internal AD DNS service.'}
+            [pscustomobject]@{Test='AD DNS client';Status=$status;Interface=$row.InterfaceAlias;Server=$server;Query=$query;Targets=@($records.NameTarget | Select-Object -Unique) -join ', ';Detail=$detail}
+        }catch{[pscustomobject]@{Test='AD DNS client';Status='WARN';Interface=$row.InterfaceAlias;Server=$server;Query=$query;Detail=$_.Exception.Message}}
+    }}
+}
+
 function Get-AdChecks {
     @(
         [pscustomobject]@{Key='1'; Id='ad-context'; Name='Domain membership and machine role'; MinPS='5.0'; Commands=@('Get-CimInstance'); Admin=$false; Roles=@(); Action={param($c,$dc) $c}}
@@ -913,6 +1023,12 @@ function Get-AdChecks {
         [pscustomobject]@{Key='11'; Id='ad-replication'; Name='AD replication summary, inbound status, and queue'; MinPS='5.0'; Commands=@('repadmin.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdReplicationHealth $dc}}
         [pscustomobject]@{Key='12'; Id='ad-dcdiag'; Name='Selected domain controller diagnostics'; MinPS='5.0'; Commands=@('dcdiag.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdDcDiagnostics $dc}}
         [pscustomobject]@{Key='13'; Id='ad-events'; Name='Recent AD, DNS, DFSR, Netlogon, and KDC events'; MinPS='5.0'; Commands=@('Get-WinEvent'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc) Get-AdEventSummary $dc}}
+        [pscustomobject]@{Key='14'; Id='ad-site-subnet'; Name='Local AD site and subnet mapping'; MinPS='5.0'; Commands=@('nltest.exe','Get-ADReplicationSubnet','Get-NetIPAddress'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Get-AdSiteSubnetDiagnostic}}
+        [pscustomobject]@{Key='15'; Id='ad-user'; Name='Targeted AD user diagnostic'; MinPS='5.0'; Commands=@('Get-ADUser'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Get-AdUserDiagnostic $value}}
+        [pscustomobject]@{Key='16'; Id='ad-computer'; Name='Targeted AD computer diagnostic'; MinPS='5.0'; Commands=@('Get-ADComputer'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Get-AdComputerDiagnostic $value}}
+        [pscustomobject]@{Key='17'; Id='ad-spn'; Name='Exact service principal name lookup'; MinPS='5.0'; Commands=@('setspn.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Find-AdSpn $value}}
+        [pscustomobject]@{Key='18'; Id='ad-spn-duplicates'; Name='Duplicate SPN scan (forest-wide; potentially slow)'; MinPS='5.0'; Commands=@('setspn.exe'); Admin=$true; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Find-AdDuplicateSpn}}
+        [pscustomobject]@{Key='19'; Id='ad-dns-quality'; Name='DNS client quality and per-resolver AD SRV test'; MinPS='5.0'; Commands=@('Get-DnsClientServerAddress','Resolve-DnsName'); Admin=$false; Roles=@('Domain member','Domain controller'); Action={param($c,$dc,$value) Get-AdDnsClientQuality $c}}
     )
 }
 
@@ -929,13 +1045,13 @@ function Get-AdAvailability {
 }
 
 function Invoke-AdCheck {
-    param([string]$Id, [string]$Controller)
+    param([string]$Id, [string]$Controller, [string]$InputValue)
     $entry = Get-AdChecks | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
     if (-not $entry) { throw "Unknown AD check: $Id" }
     $context = Get-AdContext
     $availability = Get-AdAvailability $entry $context
     if (-not $availability.Available) { throw $availability.Reason }
-    & $entry.Action $context $Controller
+    & $entry.Action $context $Controller $InputValue
 }
 
 function Start-AdMenu { Start-NetworkCategory -Id 'ad' }
@@ -1555,7 +1671,7 @@ function Get-NetworkCategories {
         [pscustomobject]@{Key='1'; Id='overview'; Name='Overview and quick diagnosis'; Checks=@('overview','quick'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview','discovery','connections'); AdChecks=@(); Repairs=@('renew-dhcp')}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS'; Checks=@('dns'); AdChecks=@(); Repairs=@('flush-dns')}
-        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse','ad-fsmo','ad-replication','ad-dcdiag','ad-events'); Repairs=@('repair-trust','resync-time')}
+        [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse','ad-fsmo','ad-replication','ad-dcdiag','ad-events','ad-site-subnet','ad-user','ad-computer','ad-spn','ad-spn-duplicates','ad-dns-quality'); Repairs=@('repair-trust','resync-time')}
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='6'; Id='firewall'; Name='Firewall'; Checks=@('firewall'); AdChecks=@(); Repairs=@()}
         [pscustomobject]@{Key='7'; Id='power'; Name='Power and device health'; Checks=@('power','nic-power','sleep','wake','quality'); AdChecks=@(); Repairs=@('set-power-plan','nic-awake')}
@@ -1592,12 +1708,20 @@ function Invoke-InteractiveCheck {
     if ($Item.Kind -eq 'Repair') { Invoke-InteractiveRepair $entry; return }
     if ($Item.Kind -eq 'AD') {
         $dcName = $null
+        $inputValue = $null
         if ($entry.Id -in @('ad-secure','ad-time','ad-shares','ad-ports','ad-rootdse','ad-replication','ad-dcdiag','ad-events')) {
             $answer = Read-PcInput 'DC hostname [automatic discovery]'
             if ($answer) { $dcName = $answer.Trim() }
             if ($dcName) { $null = Get-AdController $dcName }
         }
-        Invoke-AdCheck $entry.Id $dcName
+        if($entry.Id -eq 'ad-user'){$inputValue=Read-PcInput 'User identity';Test-AdObjectIdentity $inputValue;$inputValue=$inputValue.Trim()}
+        if($entry.Id -eq 'ad-computer'){$inputValue=Read-PcInput 'Computer identity';Test-AdObjectIdentity $inputValue;$inputValue=$inputValue.Trim()}
+        if($entry.Id -eq 'ad-spn'){$inputValue=Read-PcInput 'Exact SPN [for example HTTP/server.example.com]';Test-AdSpnValue $inputValue;$inputValue=$inputValue.Trim()}
+        if($entry.Id -eq 'ad-spn-duplicates'){
+            $confirmation=Read-Host 'Scan the current forest for duplicate SPNs? This can take time. [y/N]'
+            if($confirmation -notmatch '^(?i:y|yes)$'){[pscustomobject]@{Test='Duplicate SPN scan';Status='CANCELLED';Detail='Scan not started.'};return}
+        }
+        Invoke-AdCheck $entry.Id $dcName $inputValue
         return
     }
     $probeTarget = 'example.com'
@@ -2272,7 +2396,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.22.0')
+    param([string]$Title,[string]$Version='0.23.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2339,7 +2463,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.22.0',
+        [string]$Version='0.23.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
