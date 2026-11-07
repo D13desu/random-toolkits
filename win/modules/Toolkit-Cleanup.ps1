@@ -88,6 +88,7 @@ function Start-ToolkitCleanup {
         if($answer -in @('B','0') -or $null -eq $answer){return}
         $scope=switch($answer){'1'{'Temp'}'2'{'Cache'}'3'{'Both'}default{''}}
         if(-not $scope){continue}
+        Clear-PcMenuScreen
         try{
             $items=@(Get-ToolkitCleanupCandidates $scope)
             if(-not $items.Count){Write-Host 'No recognized cleanup candidates found.';continue}

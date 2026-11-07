@@ -134,6 +134,7 @@ function Open-PcHealthTarget([string]$Target) {
     else{throw 'Unknown dashboard target.'}
 }
 function Show-PcHealthFinding($Finding) {
+    Clear-PcMenuScreen
     Write-Host ("`n[{0}] {1}" -f $Finding.Status,$Finding.Title) -ForegroundColor Cyan
     Write-Host $Finding.Detail
     while($true){
