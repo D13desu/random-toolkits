@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.19.0
+# Random Toolkits | Windows Toolkit 0.20.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2122,7 +2122,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.19.0')
+    param([string]$Title,[string]$Version='0.20.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2189,7 +2189,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.19.0',
+        [string]$Version='0.20.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2313,14 +2313,14 @@ function New-PcMenuItem {
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
 function Read-PcCategoryMenu {
-    param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@())
     $keyboard=Test-PcMenuKeyboard;$selected=0
     for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
         Write-Host ("`n"+(Get-PcMenuHeading $Title)) -ForegroundColor Cyan
-        if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
+        foreach($line in $Description){if($line){Write-Host (Format-PcMenuText $line $width) -ForegroundColor DarkGray}}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
             $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}
@@ -2368,8 +2368,73 @@ function Show-PcListDetails {
 }
 # END MENU ENGINE
 
+function Get-PcSystemSummary {
+    if($script:PcSystemSummary){return $script:PcSystemSummary}
+
+    $unavailable='Unavailable'
+    $username=$unavailable;$groups=$unavailable;$privateIp=$unavailable;$publicIp=$unavailable
+    $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable
+
+    try {
+        $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+        $username=[string]$identity.Name
+        $groupNames=@(foreach($sid in $identity.Groups){try{$sid.Translate([Security.Principal.NTAccount]).Value}catch{[string]$sid.Value}}) | Sort-Object -Unique
+        if($groupNames.Count){$groups=$groupNames -join ', '}
+    } catch {
+        if([Environment]::UserName){$username=[Environment]::UserName}
+    }
+    try {
+        $addresses=@(foreach($adapter in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()){
+            if($adapter.OperationalStatus -ne [Net.NetworkInformation.OperationalStatus]::Up -or $adapter.NetworkInterfaceType -eq [Net.NetworkInformation.NetworkInterfaceType]::Loopback){continue}
+            foreach($address in $adapter.GetIPProperties().UnicastAddresses){
+                $value=[string]$address.Address
+                if($address.Address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $value -notlike '127.*' -and $value -notlike '169.254.*'){$value}
+            }
+        }) | Sort-Object -Unique
+        if($addresses.Count){$privateIp=$addresses -join ', '}
+    } catch {}
+    try {
+        $response=Invoke-RestMethod -UseBasicParsing -Uri 'https://api.ipify.org?format=json' -TimeoutSec 3 -ErrorAction Stop
+        if($response.ip){$publicIp=[string]$response.ip}
+    } catch {}
+    try {
+        $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -OperationTimeoutSec 5 -ErrorAction Stop | Where-Object Size)
+        if($disks.Count){
+            $total=($disks | Measure-Object Size -Sum).Sum;$free=($disks | Measure-Object FreeSpace -Sum).Sum
+            $storage=('{0:N1} GiB free / {1:N1} GiB' -f ($free/1GB),($total/1GB))
+        }
+    } catch {}
+    try {
+        $processors=@(Get-CimInstance Win32_Processor -OperationTimeoutSec 5 -ErrorAction Stop)
+        if($processors.Count){$cpu=(@($processors.Name | ForEach-Object {$_.Trim()} | Sort-Object -Unique) -join ' + ')}
+    } catch {}
+    try {
+        $computer=Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec 5 -ErrorAction Stop
+        if($computer.TotalPhysicalMemory){$ram=('{0:N1} GiB' -f ($computer.TotalPhysicalMemory/1GB))}
+    } catch {}
+    try {
+        $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5 -ErrorAction Stop
+        $osVersion=('{0} {1} (build {2})' -f $os.Caption,$os.Version,$os.BuildNumber).Trim()
+    } catch {}
+
+    $script:PcSystemSummary=[pscustomobject]@{
+        Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
+        Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion
+    }
+    return $script:PcSystemSummary
+}
+
+function Format-PcSystemSummary($Summary) {
+    @(
+        "User: $($Summary.Username) | Groups: $($Summary.Groups)"
+        "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
+        "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
+        "OS: $($Summary.OsVersion)"
+    )
+}
+
 function Start-WindowsMenu {
-    $state=@{}
+    $state=@{};$systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
     while ($true) {
         $menu=@(
             New-PcMenuItem '9' 'Health dashboard' 'Menu'
@@ -2386,7 +2451,7 @@ function Start-WindowsMenu {
             New-PcMenuItem '12' 'Windows repair centre'
             New-PcMenuItem '13' 'Microsoft Sysinternals Live' 'Menu' 'Microsoft-hosted network-share shortcuts; no local download'
         )
-        $answer=Read-PcCategoryMenu 'Windows' $menu $state
+        $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-NetworkMenu }

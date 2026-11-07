@@ -40,7 +40,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.19.0')
+    param([string]$Title,[string]$Version='0.20.0')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -107,7 +107,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.19.0',
+        [string]$Version='0.20.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -231,14 +231,14 @@ function New-PcMenuItem {
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
 function Read-PcCategoryMenu {
-    param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@())
     $keyboard=Test-PcMenuKeyboard;$selected=0
     for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
         Write-Host ("`n"+(Get-PcMenuHeading $Title)) -ForegroundColor Cyan
-        if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
+        foreach($line in $Description){if($line){Write-Host (Format-PcMenuText $line $width) -ForegroundColor DarkGray}}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
             $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}

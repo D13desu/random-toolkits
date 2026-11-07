@@ -1,4 +1,4 @@
-# Windows Toolkit 0.19.0
+# Windows Toolkit 0.20.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -20,6 +20,8 @@ irm https://tools.d0xd.com/win | iex
 ## Menu layout
 
 The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**, **8 Cleanup**, **9 Health dashboard**, **10 Startup/tasks**, **11 Services**, and **12 Windows repair centre**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+
+The root menu also shows a cached system summary: current username and security groups, hostname, public and private IPv4 addresses, aggregate fixed-disk capacity/free space, CPU, physical RAM, and Windows version/build. Public-IP discovery makes one HTTPS request to `api.ipify.org` with a three-second timeout when the menu starts; a failed or blocked lookup is shown as unavailable and does not block use of the toolkit.
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -338,7 +340,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.19.0`; submenus retain `WINDOWS 0.19.0 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.20.0`; submenus retain `WINDOWS 0.20.0 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -382,3 +384,8 @@ The MFT helper avoids full-path construction for ordinary single-name records, r
 ### Live Disk Usage changes (Windows 0.19.0 / helper 1.3.0)
 
 `L` monitors visible files and checks visible directory subtrees in a bounded round-robin cycle, prioritising the selected directory. Logical growth, shrinkage, replacement, deletion and unavailable paths are highlighted without reading file contents. `R` performs a clean same-engine rescan for new rows, refreshed sorting and totals, and current ON DISK directory allocation.
+
+
+### Main-menu system summary (0.20.0)
+
+The Windows root menu displays cached identity, group membership, network addresses, aggregate fixed-storage capacity, CPU, physical memory and Windows version/build information above its actions. Public IP precedes the potentially long private-address list so it remains visible in narrow terminals. Unavailable providers do not prevent the menu from opening.
