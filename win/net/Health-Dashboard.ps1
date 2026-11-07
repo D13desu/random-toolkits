@@ -60,7 +60,9 @@ function Get-PcHealthProbes {
             $nics=@(Get-PcNicPower)
             if(-not $nics.Count){New-PcHealthFinding INFO 'NIC power settings' 'No physical adapters were reported.' power}
             foreach($nic in $nics){
-                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}elseif(@($nic.AllowComputerToTurnOffDevice,$nic.SelectiveSuspend,$nic.DeviceSleepOnDisconnect) -contains 'Enabled'){'REVIEW'}else{'INFO'}
+                # Power-saving support is a policy choice, not a health failure. Keep it
+                # available as context without putting normal laptop settings in Attention.
+                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}else{'INFO'}
                 New-PcHealthFinding $status ('NIC sleep: '+$nic.Adapter) ("Power off: $($nic.AllowComputerToTurnOffDevice); selective suspend: $($nic.SelectiveSuspend); disconnect sleep: $($nic.DeviceSleepOnDisconnect). $($nic.Detail)") power
             }
         }}
@@ -73,7 +75,8 @@ function Get-PcHealthProbes {
                 New-PcHealthFinding $status ("{0} active interfaces without IP addresses" -f $unaddressed.Count) ('Virtual/filter interfaces can legitimately lack addresses; they are not separate network failures. Interfaces: '+($unaddressed.Adapter -join ', ')) connectivity
             }
             foreach($adapter in $addressed){
-                $status=if(-not $adapter.Gateways -or -not $adapter.DNS){'REVIEW'}else{'INFO'}
+                $virtual=([string]$adapter.Type -in @('Tunnel','Unknown')) -or (([string]$adapter.Adapter+' '+[string]$adapter.Description) -match '(?i)virtual|vmware|hyper-v|vethernet|vpn|wintun|wireguard|tap|tun')
+                $status=if((-not $adapter.Gateways -or -not $adapter.DNS) -and -not $virtual){'REVIEW'}else{'INFO'}
                 New-PcHealthFinding $status ('Network: '+$adapter.Adapter) ("Addresses: $($adapter.Addresses)`nGateways: $($adapter.Gateways)`nDNS servers: $($adapter.DNS)`nVirtual/VPN/local-only adapters may legitimately have no gateway or DNS. Open connectivity checks to test reachability.") connectivity
             }
         }}
@@ -142,20 +145,20 @@ function Show-PcHealthFinding($Finding) {
 function New-PcHealthMenuItem($Row,[string]$Identity) {
     $statusColor=switch([string]$Row.Status){'PASS'{'Green'}'WARN'{'Yellow'}'REVIEW'{'Yellow'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
     [pscustomobject]@{
-        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);Detail=$Row.Detail;Data=$Row
+        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);SearchText=$Row.Detail;Data=$Row
         LabelParts=@(
             [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
             [pscustomobject]@{Text=' | ';Color='DarkGray'}
             [pscustomobject]@{Text=([string]$Row.Title);Color='White'}
         )
-        DetailParts=@([pscustomobject]@{Text=([string]$Row.Detail);Color='Gray'})
     }
 }
 function Start-PcHealthDashboard {
-    $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
+    $network=$false;$showAll=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
         $identities=@{}
-        $menu=@(foreach($row in $snapshot.Rows){
+        $visibleRows=if($showAll){@($snapshot.Rows)}else{@($snapshot.Rows | Where-Object Status -in @('WARN','REVIEW','UNAVAILABLE'))}
+        $menu=@(foreach($row in $visibleRows){
             $identity=$row.Target+'|'+$row.Title
             if(@($snapshot.Rows | Where-Object {($_.Target+'|'+$_.Title) -eq $identity}).Count -gt 1){$identity+='|'+$row.Detail}
             $base=$identity;$suffix=1
@@ -163,11 +166,14 @@ function Start-PcHealthDashboard {
             $identities[$identity]=$true
             New-PcHealthMenuItem $row $identity
         })
-        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
+        $counts=@{};foreach($status in @('WARN','REVIEW','UNAVAILABLE','INFO','PASS')){$counts[$status]=@($snapshot.Rows | Where-Object Status -eq $status).Count}
+        $view=if($showAll){'All results'}else{'Attention only'}
+        $description=("{0:g} | {1} | W {2}, R {3}, U {4}, info {5}, pass {6} | Live checks {7}" -f $snapshot.CollectedAt,$view,$counts.WARN,$counts.REVIEW,$counts.UNAVAILABLE,$counts.INFO,$counts.PASS,$(if($network){'on'}else{'off'}))
+        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Compact -EmptyMessage 'No findings need attention. Press A to view all results.' -Description $description -Commands @{A=('View: '+$(if($showAll){'all results'}else{'attention only'}));C='Run live network checks (no repair)'}
         switch($choice.Action){
             'Back'{return}
             'Refresh'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network}
-            'Command'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}
+            'Command'{if($choice.Command -eq 'A'){$showAll=-not $showAll;$state.SelectedId=''}else{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}}
             'Select'{Show-PcHealthFinding $choice.Item.Data}
         }
     }

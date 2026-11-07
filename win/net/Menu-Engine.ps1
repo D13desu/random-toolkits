@@ -62,13 +62,15 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.3',
+        [string]$Version='0.20.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=12,
         [switch]$Plain,
+        [switch]$Compact,
+        [string]$EmptyMessage='No matching items.',
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
@@ -103,7 +105,7 @@ function Show-PcMenu {
         Write-Host (Format-PcMenuText ("WINDOWS {0} | {1}" -f $Version,$Title) $width) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
-        if(-not $rows.Count){Write-Host 'No matching items.'}
+        if(-not $rows.Count){Write-Host $EmptyMessage}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
             $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
@@ -113,10 +115,10 @@ function Show-PcMenu {
                 if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
                 Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$displayKey) $width $color
             }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color}
-            $detail=@($row.Detail | Select-Object -First $DetailLines)
+            $detail=if($Compact){@()}else{@($row.Detail | Select-Object -First $DetailLines)}
             if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
             if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
-            if(-not $detail.Count){$detail=@('')}
+            if(-not $Compact -and -not $detail.Count){$detail=@('')}
             for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
                 if($detailIndex -eq 0 -and $row.DetailParts -and -not $row.DisabledReason -and -not ($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail)){
                     Write-PcMenuSegments @($row.DetailParts) '    ' $width $color
@@ -174,14 +176,14 @@ function New-PcMenuItem {
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
 function Read-PcCategoryMenu {
-    param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@())
     $keyboard=Test-PcMenuKeyboard;$selected=0
     for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
-        Write-Host ("`nWINDOWS 0.14.3 | "+$Title) -ForegroundColor Cyan
-        if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
+        Write-Host ("`nWINDOWS 0.20.0 | "+$Title) -ForegroundColor Cyan
+        foreach($line in $Description){if($line){Write-Host (Format-PcMenuText $line $width) -ForegroundColor DarkGray}}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
             $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}

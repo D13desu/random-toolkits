@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.14.3
+# Random Toolkits | Windows Toolkit 0.20.0
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -1607,7 +1607,9 @@ function Get-PcHealthProbes {
             $nics=@(Get-PcNicPower)
             if(-not $nics.Count){New-PcHealthFinding INFO 'NIC power settings' 'No physical adapters were reported.' power}
             foreach($nic in $nics){
-                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}elseif(@($nic.AllowComputerToTurnOffDevice,$nic.SelectiveSuspend,$nic.DeviceSleepOnDisconnect) -contains 'Enabled'){'REVIEW'}else{'INFO'}
+                # Power-saving support is a policy choice, not a health failure. Keep it
+                # available as context without putting normal laptop settings in Attention.
+                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}else{'INFO'}
                 New-PcHealthFinding $status ('NIC sleep: '+$nic.Adapter) ("Power off: $($nic.AllowComputerToTurnOffDevice); selective suspend: $($nic.SelectiveSuspend); disconnect sleep: $($nic.DeviceSleepOnDisconnect). $($nic.Detail)") power
             }
         }}
@@ -1620,7 +1622,8 @@ function Get-PcHealthProbes {
                 New-PcHealthFinding $status ("{0} active interfaces without IP addresses" -f $unaddressed.Count) ('Virtual/filter interfaces can legitimately lack addresses; they are not separate network failures. Interfaces: '+($unaddressed.Adapter -join ', ')) connectivity
             }
             foreach($adapter in $addressed){
-                $status=if(-not $adapter.Gateways -or -not $adapter.DNS){'REVIEW'}else{'INFO'}
+                $virtual=([string]$adapter.Type -in @('Tunnel','Unknown')) -or (([string]$adapter.Adapter+' '+[string]$adapter.Description) -match '(?i)virtual|vmware|hyper-v|vethernet|vpn|wintun|wireguard|tap|tun')
+                $status=if((-not $adapter.Gateways -or -not $adapter.DNS) -and -not $virtual){'REVIEW'}else{'INFO'}
                 New-PcHealthFinding $status ('Network: '+$adapter.Adapter) ("Addresses: $($adapter.Addresses)`nGateways: $($adapter.Gateways)`nDNS servers: $($adapter.DNS)`nVirtual/VPN/local-only adapters may legitimately have no gateway or DNS. Open connectivity checks to test reachability.") connectivity
             }
         }}
@@ -1689,20 +1692,20 @@ function Show-PcHealthFinding($Finding) {
 function New-PcHealthMenuItem($Row,[string]$Identity) {
     $statusColor=switch([string]$Row.Status){'PASS'{'Green'}'WARN'{'Yellow'}'REVIEW'{'Yellow'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
     [pscustomobject]@{
-        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);Detail=$Row.Detail;Data=$Row
+        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);SearchText=$Row.Detail;Data=$Row
         LabelParts=@(
             [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
             [pscustomobject]@{Text=' | ';Color='DarkGray'}
             [pscustomobject]@{Text=([string]$Row.Title);Color='White'}
         )
-        DetailParts=@([pscustomobject]@{Text=([string]$Row.Detail);Color='Gray'})
     }
 }
 function Start-PcHealthDashboard {
-    $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
+    $network=$false;$showAll=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
         $identities=@{}
-        $menu=@(foreach($row in $snapshot.Rows){
+        $visibleRows=if($showAll){@($snapshot.Rows)}else{@($snapshot.Rows | Where-Object Status -in @('WARN','REVIEW','UNAVAILABLE'))}
+        $menu=@(foreach($row in $visibleRows){
             $identity=$row.Target+'|'+$row.Title
             if(@($snapshot.Rows | Where-Object {($_.Target+'|'+$_.Title) -eq $identity}).Count -gt 1){$identity+='|'+$row.Detail}
             $base=$identity;$suffix=1
@@ -1710,11 +1713,14 @@ function Start-PcHealthDashboard {
             $identities[$identity]=$true
             New-PcHealthMenuItem $row $identity
         })
-        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
+        $counts=@{};foreach($status in @('WARN','REVIEW','UNAVAILABLE','INFO','PASS')){$counts[$status]=@($snapshot.Rows | Where-Object Status -eq $status).Count}
+        $view=if($showAll){'All results'}else{'Attention only'}
+        $description=("{0:g} | {1} | W {2}, R {3}, U {4}, info {5}, pass {6} | Live checks {7}" -f $snapshot.CollectedAt,$view,$counts.WARN,$counts.REVIEW,$counts.UNAVAILABLE,$counts.INFO,$counts.PASS,$(if($network){'on'}else{'off'}))
+        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Compact -EmptyMessage 'No findings need attention. Press A to view all results.' -Description $description -Commands @{A=('View: '+$(if($showAll){'all results'}else{'attention only'}));C='Run live network checks (no repair)'}
         switch($choice.Action){
             'Back'{return}
             'Refresh'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network}
-            'Command'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}
+            'Command'{if($choice.Command -eq 'A'){$showAll=-not $showAll;$state.SelectedId=''}else{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}}
             'Select'{Show-PcHealthFinding $choice.Item.Data}
         }
     }
@@ -2057,13 +2063,15 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.14.3',
+        [string]$Version='0.20.0',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=12,
         [switch]$Plain,
+        [switch]$Compact,
+        [string]$EmptyMessage='No matching items.',
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
@@ -2098,7 +2106,7 @@ function Show-PcMenu {
         Write-Host (Format-PcMenuText ("WINDOWS {0} | {1}" -f $Version,$Title) $width) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
-        if(-not $rows.Count){Write-Host 'No matching items.'}
+        if(-not $rows.Count){Write-Host $EmptyMessage}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
             $row=$rows[$i];$displayKey=$displayKeys[[string]$row.Id];$marker=if($i -eq $selected){'>'}else{' '}
             $kind=if($row.Kind){' ['+$row.Kind+']'}else{''}
@@ -2108,10 +2116,10 @@ function Show-PcMenu {
                 if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
                 Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$displayKey) $width $color
             }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$displayKey,$row.Label,$kind) $width) -ForegroundColor $color}
-            $detail=@($row.Detail | Select-Object -First $DetailLines)
+            $detail=if($Compact){@()}else{@($row.Detail | Select-Object -First $DetailLines)}
             if($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail){$detail=@($row.SelectedDetail | Select-Object -First 3)}
             if($row.DisabledReason){$detail=@('UNAVAILABLE: '+$row.DisabledReason)}
-            if(-not $detail.Count){$detail=@('')}
+            if(-not $Compact -and -not $detail.Count){$detail=@('')}
             for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
                 if($detailIndex -eq 0 -and $row.DetailParts -and -not $row.DisabledReason -and -not ($ExpandedPreview -and $i -eq $selected -and $row.SelectedDetail)){
                     Write-PcMenuSegments @($row.DetailParts) '    ' $width $color
@@ -2169,14 +2177,14 @@ function New-PcMenuItem {
     [pscustomobject]@{Id=$Key;Key=$Key;Label=$Label;Kind=$Kind;Detail=$Detail;DisabledReason=$DisabledReason}
 }
 function Read-PcCategoryMenu {
-    param([string]$Title,[object[]]$Items,[hashtable]$State,[string]$Description='')
+    param([string]$Title,[object[]]$Items,[hashtable]$State,[string[]]$Description=@())
     $keyboard=Test-PcMenuKeyboard;$selected=0
     for($i=0;$i -lt $Items.Count;$i++){if($Items[$i].Id -eq $State.SelectedId){$selected=$i;break}}
     while($true){
         $width=120
         if($keyboard){try{$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{};Clear-Host}
-        Write-Host ("`nWINDOWS 0.14.3 | "+$Title) -ForegroundColor Cyan
-        if($Description){Write-Host (Format-PcMenuText $Description $width) -ForegroundColor DarkGray}
+        Write-Host ("`nWINDOWS 0.20.0 | "+$Title) -ForegroundColor Cyan
+        foreach($line in $Description){if($line){Write-Host (Format-PcMenuText $line $width) -ForegroundColor DarkGray}}
         for($i=0;$i -lt $Items.Count;$i++){
             $item=$Items[$i]
             $color=if($keyboard -and $i -eq $selected){'Cyan'}elseif($item.DisabledReason){'DarkGray'}elseif($item.Kind -eq 'Change'){'Yellow'}else{'Gray'}
@@ -2224,8 +2232,73 @@ function Show-PcListDetails {
 }
 # END MENU ENGINE
 
+function Get-PcSystemSummary {
+    if($script:PcSystemSummary){return $script:PcSystemSummary}
+
+    $unavailable='Unavailable'
+    $username=$unavailable;$groups=$unavailable;$privateIp=$unavailable;$publicIp=$unavailable
+    $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable
+
+    try {
+        $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+        $username=[string]$identity.Name
+        $groupNames=@(foreach($sid in $identity.Groups){try{$sid.Translate([Security.Principal.NTAccount]).Value}catch{[string]$sid.Value}}) | Sort-Object -Unique
+        if($groupNames.Count){$groups=$groupNames -join ', '}
+    } catch {
+        if([Environment]::UserName){$username=[Environment]::UserName}
+    }
+    try {
+        $addresses=@(foreach($adapter in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()){
+            if($adapter.OperationalStatus -ne [Net.NetworkInformation.OperationalStatus]::Up -or $adapter.NetworkInterfaceType -eq [Net.NetworkInformation.NetworkInterfaceType]::Loopback){continue}
+            foreach($address in $adapter.GetIPProperties().UnicastAddresses){
+                $value=[string]$address.Address
+                if($address.Address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $value -notlike '127.*' -and $value -notlike '169.254.*'){$value}
+            }
+        }) | Sort-Object -Unique
+        if($addresses.Count){$privateIp=$addresses -join ', '}
+    } catch {}
+    try {
+        $response=Invoke-RestMethod -UseBasicParsing -Uri 'https://api.ipify.org?format=json' -TimeoutSec 3 -ErrorAction Stop
+        if($response.ip){$publicIp=[string]$response.ip}
+    } catch {}
+    try {
+        $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -OperationTimeoutSec 5 -ErrorAction Stop | Where-Object Size)
+        if($disks.Count){
+            $total=($disks | Measure-Object Size -Sum).Sum;$free=($disks | Measure-Object FreeSpace -Sum).Sum
+            $storage=('{0:N1} GiB free / {1:N1} GiB' -f ($free/1GB),($total/1GB))
+        }
+    } catch {}
+    try {
+        $processors=@(Get-CimInstance Win32_Processor -OperationTimeoutSec 5 -ErrorAction Stop)
+        if($processors.Count){$cpu=(@($processors.Name | ForEach-Object {$_.Trim()} | Sort-Object -Unique) -join ' + ')}
+    } catch {}
+    try {
+        $computer=Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec 5 -ErrorAction Stop
+        if($computer.TotalPhysicalMemory){$ram=('{0:N1} GiB' -f ($computer.TotalPhysicalMemory/1GB))}
+    } catch {}
+    try {
+        $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5 -ErrorAction Stop
+        $osVersion=('{0} {1} (build {2})' -f $os.Caption,$os.Version,$os.BuildNumber).Trim()
+    } catch {}
+
+    $script:PcSystemSummary=[pscustomobject]@{
+        Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
+        Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion
+    }
+    return $script:PcSystemSummary
+}
+
+function Format-PcSystemSummary($Summary) {
+    @(
+        "User: $($Summary.Username) | Groups: $($Summary.Groups)"
+        "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
+        "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
+        "OS: $($Summary.OsVersion)"
+    )
+}
+
 function Start-WindowsMenu {
-    $state=@{}
+    $state=@{};$systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
     while ($true) {
         $menu=@(
             New-PcMenuItem '9' 'Health dashboard' 'Menu'
@@ -2241,7 +2314,7 @@ function Start-WindowsMenu {
             New-PcMenuItem '11' 'Services'
             New-PcMenuItem '12' 'Windows repair centre'
         )
-        $answer=Read-PcCategoryMenu 'Windows' $menu $state
+        $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-NetworkMenu }

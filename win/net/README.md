@@ -1,4 +1,4 @@
-# Windows Toolkit 0.14.3
+# Windows Toolkit 0.20.0
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -20,6 +20,8 @@ irm https://tools.d0xd.com/win | iex
 ## Menu layout
 
 The root menu is **1 Network**, **2 Power and device health**, **3 Storage**, **4 Printing**, **5 Group Policy**, **6 Event Logs**, **7 Registry tweaks**, **8 Cleanup**, **9 Health dashboard**, **10 Startup/tasks**, **11 Services**, and **12 Windows repair centre**. M365 remains separate at `/m365`. The older `/win/net` endpoint is an alias for the unified Windows menu. Under **Network**:
+
+The root menu also shows a cached system summary: current username and security groups, hostname, private IPv4 addresses, public IP address, aggregate fixed-disk capacity/free space, CPU, physical RAM, and Windows version/build. Public-IP discovery makes one HTTPS request to `api.ipify.org` with a three-second timeout when the menu starts; a failed or blocked lookup is shown as unavailable and does not block use of the toolkit.
 
 | Main menu | Checks | Repairs |
 | --- | --- | --- |
@@ -236,7 +238,7 @@ Event browsing in 0.7.4 supports Up/Down in both the log picker and event list; 
 
 ## Windows health dashboard
 
-Menu **9: Health dashboard â€” start here** collects a read-only local snapshot, sorted by WARN, REVIEW, UNAVAILABLE, INFO and PASS. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership.
+Menu **9: Health dashboard â€” start here** collects a read-only local snapshot and initially shows only WARN, REVIEW and UNAVAILABLE findings. Press **A** to show all INFO and PASS results; open any row for its evidence and related tools. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership. NIC power policy and virtual adapters without a gateway are informational rather than health failures.
 
 Up/Down selects a finding; Enter shows evidence and offers its related checks/repair menu. N/P pages; R refreshes; B/Esc returns. Repairs retain existing admin/role requirements and yes/no confirmation; collection never invokes repair functions. Missing permissions/providers become UNAVAILABLE, not a pass. Trigger-start services and historic failures are REVIEW items; Balanced is informational. Unaddressed virtual/filter interfaces are grouped to avoid false fault floods. PASS applies only to the stated check, not the entire PC.
 
@@ -347,3 +349,10 @@ Navigation and action menus accept both arrow selection plus Enter and existing 
 ### Visible numeric input (0.14.3)
 
 Interactive shared menus display `Selection: _` beneath their controls. Typed digits appear immediately, Backspace edits them, and Enter submits the number. Enter with no digits activates the highlighted row. Esc cancels and returns. Each new prompt starts with an empty numeric buffer. This retains unambiguous selection of 1 versus 10/11/12; unsupported consoles continue to use visible Read-Host input.
+
+
+### System summary and focused health view (0.20.0)
+
+The Windows root menu displays cached identity, network, storage, CPU, memory and operating-system details before its actions. Public IP precedes the potentially long private-address list so it remains visible in narrow terminals; unavailable providers do not prevent the menu from opening.
+
+The Health dashboard opens in an attention-only view containing warnings, review items and unavailable checks. **A** toggles all results, including informational and passing rows. The header shows counts for every status, while detail text remains searchable and opens on demand. Normal NIC power-saving settings and gateway-less virtual adapters remain informational rather than creating routine attention findings.
