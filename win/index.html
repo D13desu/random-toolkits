@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.20.0
+# Random Toolkits | Windows Toolkit 0.20.1
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2122,7 +2122,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.20.0')
+    param([string]$Title,[string]$Version='0.20.1')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2189,7 +2189,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.20.0',
+        [string]$Version='0.20.1',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2368,31 +2368,52 @@ function Show-PcListDetails {
 }
 # END MENU ENGINE
 
+function Get-PcInternetPrivateIPv4 {
+    try {
+        $routes=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop | Where-Object {$_.State -ne 'Invalid'} | Sort-Object @{Expression={([int64]$_.RouteMetric)+([int64]$_.InterfaceMetric)}},InterfaceIndex)
+        foreach($route in $routes){
+            $addresses=@(Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction Stop | Where-Object {
+                $_.IPAddress -and -not $_.SkipAsSource -and $_.AddressState -notin @('Tentative','Duplicate','Invalid') -and $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+            } | Sort-Object @{Expression={if($_.AddressState -eq 'Preferred'){0}else{1}}},IPAddress)
+            if($addresses.Count){return [string]$addresses[0].IPAddress}
+        }
+    } catch {}
+
+    $socket=$null
+    try {
+        # A connected UDP socket asks the Windows routing stack for the selected source
+        # address without sending a packet.
+        $socket=New-Object Net.Sockets.Socket ([Net.Sockets.AddressFamily]::InterNetwork),([Net.Sockets.SocketType]::Dgram),([Net.Sockets.ProtocolType]::Udp)
+        $socket.Connect([Net.IPAddress]::Parse('1.1.1.1'),53)
+        $address=[string]$socket.LocalEndPoint.Address
+        if($address -and $address -notlike '127.*' -and $address -notlike '169.254.*'){return $address}
+    } catch {} finally {if($socket){$socket.Dispose()}}
+    return $null
+}
+
 function Get-PcSystemSummary {
     if($script:PcSystemSummary){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
     $username=$unavailable;$groups=$unavailable;$privateIp=$unavailable;$publicIp=$unavailable
     $hostname=[Environment]::MachineName;$storage=$unavailable;$cpu=$unavailable;$ram=$unavailable;$osVersion=$unavailable
+    $userSid=$unavailable;$authenticationType=$unavailable;$administrator=$unavailable;$groupNames=@()
+    $manufacturer=$unavailable;$model=$unavailable;$domain=$unavailable;$domainJoined=$unavailable
+    $cpuCores=$unavailable;$logicalProcessors=$unavailable;$diskDetails=@();$osArchitecture=$unavailable;$lastBoot=$unavailable;$uptime=$unavailable
 
     try {
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
         $username=[string]$identity.Name
+        $userSid=[string]$identity.User.Value
+        $authenticationType=[string]$identity.AuthenticationType
+        $principal=New-Object Security.Principal.WindowsPrincipal($identity)
+        $administrator=[string]($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
         $groupNames=@(foreach($sid in $identity.Groups){try{$sid.Translate([Security.Principal.NTAccount]).Value}catch{[string]$sid.Value}}) | Sort-Object -Unique
         if($groupNames.Count){$groups=$groupNames -join ', '}
     } catch {
         if([Environment]::UserName){$username=[Environment]::UserName}
     }
-    try {
-        $addresses=@(foreach($adapter in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()){
-            if($adapter.OperationalStatus -ne [Net.NetworkInformation.OperationalStatus]::Up -or $adapter.NetworkInterfaceType -eq [Net.NetworkInformation.NetworkInterfaceType]::Loopback){continue}
-            foreach($address in $adapter.GetIPProperties().UnicastAddresses){
-                $value=[string]$address.Address
-                if($address.Address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $value -notlike '127.*' -and $value -notlike '169.254.*'){$value}
-            }
-        }) | Sort-Object -Unique
-        if($addresses.Count){$privateIp=$addresses -join ', '}
-    } catch {}
+    try {$selectedAddress=Get-PcInternetPrivateIPv4;if($selectedAddress){$privateIp=$selectedAddress}} catch {}
     try {
         $response=Invoke-RestMethod -UseBasicParsing -Uri 'https://api.ipify.org?format=json' -TimeoutSec 3 -ErrorAction Stop
         if($response.ip){$publicIp=[string]$response.ip}
@@ -2402,26 +2423,82 @@ function Get-PcSystemSummary {
         if($disks.Count){
             $total=($disks | Measure-Object Size -Sum).Sum;$free=($disks | Measure-Object FreeSpace -Sum).Sum
             $storage=('{0:N1} GiB free / {1:N1} GiB' -f ($free/1GB),($total/1GB))
+            $diskDetails=@($disks | Sort-Object DeviceID | ForEach-Object {('{0} {1:N1} GiB free / {2:N1} GiB' -f $_.DeviceID,($_.FreeSpace/1GB),($_.Size/1GB))})
         }
     } catch {}
     try {
         $processors=@(Get-CimInstance Win32_Processor -OperationTimeoutSec 5 -ErrorAction Stop)
-        if($processors.Count){$cpu=(@($processors.Name | ForEach-Object {$_.Trim()} | Sort-Object -Unique) -join ' + ')}
+        if($processors.Count){
+            $cpu=(@($processors.Name | ForEach-Object {$_.Trim()} | Sort-Object -Unique) -join ' + ')
+            $cpuCores=[string](($processors | Measure-Object NumberOfCores -Sum).Sum)
+            $logicalProcessors=[string](($processors | Measure-Object NumberOfLogicalProcessors -Sum).Sum)
+        }
     } catch {}
     try {
         $computer=Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec 5 -ErrorAction Stop
         if($computer.TotalPhysicalMemory){$ram=('{0:N1} GiB' -f ($computer.TotalPhysicalMemory/1GB))}
+        if($computer.Manufacturer){$manufacturer=[string]$computer.Manufacturer}
+        if($computer.Model){$model=[string]$computer.Model}
+        if($computer.Domain){$domain=[string]$computer.Domain}
+        $domainJoined=[string][bool]$computer.PartOfDomain
     } catch {}
     try {
         $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5 -ErrorAction Stop
         $osVersion=('{0} {1} (build {2})' -f $os.Caption,$os.Version,$os.BuildNumber).Trim()
+        if($os.OSArchitecture){$osArchitecture=[string]$os.OSArchitecture}
+        if($os.LastBootUpTime){$lastBoot=([datetime]$os.LastBootUpTime).ToString('yyyy-MM-dd HH:mm:ss');$uptime=((Get-Date)-[datetime]$os.LastBootUpTime).ToString('d\.hh\:mm\:ss')}
     } catch {}
 
     $script:PcSystemSummary=[pscustomobject]@{
         Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
         Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion
+        UserSid=$userSid;AuthenticationType=$authenticationType;Administrator=$administrator;GroupNames=@($groupNames)
+        Manufacturer=$manufacturer;Model=$model;Domain=$domain;DomainJoined=$domainJoined
+        CpuCores=$cpuCores;LogicalProcessors=$logicalProcessors;DiskDetails=@($diskDetails)
+        OsArchitecture=$osArchitecture;LastBoot=$lastBoot;Uptime=$uptime
     }
     return $script:PcSystemSummary
+}
+
+function Show-PcSystemDetails($Summary) {
+    Write-Host "`nCOMPUTER AND USER DETAILS" -ForegroundColor Cyan
+    Write-Host "`nUSER" -ForegroundColor Cyan
+    Write-Host ('Name: '+$Summary.Username)
+    Write-Host ('SID: '+$Summary.UserSid)
+    Write-Host ('Authentication: '+$Summary.AuthenticationType)
+    Write-Host ('Administrator token: '+$Summary.Administrator)
+    Write-Host 'Groups:'
+    if(@($Summary.GroupNames).Count){foreach($group in $Summary.GroupNames){Write-Host ('  '+$group)}}else{Write-Host ('  '+$Summary.Groups)}
+
+    Write-Host "`nCOMPUTER" -ForegroundColor Cyan
+    Write-Host ('Hostname: '+$Summary.Hostname)
+    Write-Host ('Manufacturer: '+$Summary.Manufacturer)
+    Write-Host ('Model: '+$Summary.Model)
+    Write-Host ('Domain/workgroup: '+$Summary.Domain)
+    Write-Host ('Domain joined: '+$Summary.DomainJoined)
+
+    Write-Host "`nNETWORK" -ForegroundColor Cyan
+    Write-Host ('Internet-route private IPv4: '+$Summary.PrivateIp)
+    Write-Host ('Public IP: '+$Summary.PublicIp)
+
+    Write-Host "`nHARDWARE" -ForegroundColor Cyan
+    Write-Host ('CPU: '+$Summary.Cpu)
+    Write-Host ('Physical cores: '+$Summary.CpuCores)
+    Write-Host ('Logical processors: '+$Summary.LogicalProcessors)
+    Write-Host ('Physical RAM: '+$Summary.Ram)
+    Write-Host 'Fixed storage:'
+    if(@($Summary.DiskDetails).Count){foreach($disk in $Summary.DiskDetails){Write-Host ('  '+$disk)}}else{Write-Host ('  '+$Summary.Storage)}
+
+    Write-Host "`nWINDOWS" -ForegroundColor Cyan
+    Write-Host ('Version: '+$Summary.OsVersion)
+    Write-Host ('Architecture: '+$Summary.OsArchitecture)
+    Write-Host ('Last boot: '+$Summary.LastBoot)
+    Write-Host ('Uptime (days.hh:mm:ss): '+$Summary.Uptime)
+    while($true){
+        Write-Host "`nEnter / Esc / Backspace / B: back"
+        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
+        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+    }
 }
 
 function Format-PcSystemSummary($Summary) {
@@ -2450,6 +2527,7 @@ function Start-WindowsMenu {
             New-PcMenuItem '11' 'Services'
             New-PcMenuItem '12' 'Windows repair centre'
             New-PcMenuItem '13' 'Microsoft Sysinternals Live' 'Menu' 'Microsoft-hosted network-share shortcuts; no local download'
+            New-PcMenuItem '14' 'Computer and user details' 'Check' 'Full untruncated identity, hardware, network and Windows information'
         )
         $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
@@ -2467,6 +2545,7 @@ function Start-WindowsMenu {
             '11' { Start-PcServices }
             '12' { Start-PcWindowsRepair }
             '13' { Start-PcSysinternalsMenu }
+            '14' { Show-PcSystemDetails (Get-PcSystemSummary) }
             default { Write-Warning 'Choose a listed section.' }
         }
     }

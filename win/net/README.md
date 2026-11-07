@@ -1,4 +1,4 @@
-# Windows Toolkit 0.20.0
+# Windows Toolkit 0.20.1
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -340,7 +340,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.20.0`; submenus retain `WINDOWS 0.20.0 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.20.1`; submenus retain `WINDOWS 0.20.1 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -389,3 +389,10 @@ The MFT helper avoids full-path construction for ordinary single-name records, r
 ### Main-menu system summary (0.20.0)
 
 The Windows root menu displays cached identity, group membership, network addresses, aggregate fixed-storage capacity, CPU, physical memory and Windows version/build information above its actions. Public IP precedes the potentially long private-address list so it remains visible in narrow terminals. Unavailable providers do not prevent the menu from opening.
+
+
+### Internet-route address and full details (0.20.1)
+
+The root summary now shows only the private IPv4 address selected by Windows for its lowest-cost active default route. If NetTCPIP route data is unavailable, the toolkit asks the Windows routing stack which source address it would use for a public IPv4 destination; no UDP payload is sent.
+
+Root option **14 Computer and user details** shows the full username, SID, authentication type, administrator-token state, every security group, manufacturer/model, domain or workgroup, selected private and public IPs, CPU/core topology, RAM, each fixed disk, Windows architecture, boot time and uptime. Detail lines are written without the root menu's width clipping.
