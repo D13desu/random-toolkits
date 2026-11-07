@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Admin=$true
 function Get-NetworkAvailability {param($Entry) [pscustomobject]@{Available=$script:Admin;Reason='Requires administrator'}}
@@ -42,7 +42,7 @@ foreach($answer in @('F','fixture','Down','Select','R','B')){$script:Answers.Enq
 Start-PcServices
 $script:Answers.Enqueue('B');Start-PcWindowsRepair
 Assert ($script:Answers.Count -eq 0) 'Services navigation/filter/refresh and repair Back return cleanly'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN SYSTEM MAINTENANCE',2)[1] -split '# END SYSTEM MAINTENANCE',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/System-Maintenance.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/System-Maintenance.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded maintenance module matches source'

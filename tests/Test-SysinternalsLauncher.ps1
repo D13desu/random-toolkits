@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Sysinternals-Launcher.ps1')
+. (Join-Path $PSScriptRoot '../win/modules/Sysinternals-Launcher.ps1')
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message};Write-Output "PASS: $Message"}
 
 $catalog=@(Get-PcSysinternalsLiveCatalog)
@@ -28,8 +28,8 @@ Start-PcSysinternalsLiveTool tcpview
 Assert ($script:Started -eq '\\live.sysinternals.com\tools\tcpview64.exe') 'Tool launcher passes the Microsoft UNC path directly to Start-Process'
 $env:PROCESSOR_ARCHITECTURE=$savedArchitecture;$env:PROCESSOR_ARCHITEW6432=$savedWow
 
-$toolkit=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Sysinternals-Launcher.ps1') -Raw
+$toolkit=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Sysinternals-Launcher.ps1') -Raw
 $embedded=($toolkit -split '# BEGIN SYSINTERNALS LAUNCHER',2)[1] -split '# END SYSINTERNALS LAUNCHER',2
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded Sysinternals launcher matches maintained source'
 Assert ($toolkit -match "New-PcMenuItem '13' 'Microsoft Sysinternals Live'") 'Windows main menu exposes the Sysinternals Live section'

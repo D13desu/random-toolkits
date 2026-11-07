@@ -1,6 +1,6 @@
 param([switch]$KeyboardMode)
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 Assert ((@(Format-PcEventPreview "first`r`nsecond`tthird" 40) -join '') -eq 'first second third') 'Multiline body preview is readable without opening event'
 $preview=@(Format-PcEventPreview ('word '*100) 40)

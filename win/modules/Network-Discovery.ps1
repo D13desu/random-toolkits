@@ -1,4 +1,4 @@
-# Embedded into Network-Toolkit.ps1 for the single-download launcher.
+# Embedded into Windows-Toolkit.ps1 for the single-download launcher.
 function ConvertTo-DiscoveryMac([string]$Mac) {
     $value=$Mac.Trim()
     if($value -notmatch '^(?:[0-9A-Fa-f]{12}|(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2})$'){return ''}

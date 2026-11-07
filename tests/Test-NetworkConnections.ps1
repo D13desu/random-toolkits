@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -NoMenu
+. (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 Assert ((Format-PcSocketEndpoint '::1' 443) -eq '[::1]:443') 'IPv6 endpoints are unambiguous'
 Assert ((Format-PcSocketEndpoint '127.0.0.1' 80) -eq '127.0.0.1:80') 'IPv4 endpoints retain numeric ports'
@@ -44,7 +44,7 @@ $before=$script:Queries
 Start-PcNetworkConnections
 Assert ($script:Answers.Count -eq 0 -and $script:Queries -eq ($before+2)) 'Protocol/state filters, details, notes and refresh navigate without implicit rescans'
 Assert ('connections' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -EQ connectivity)).Entry.Id) 'Connections reachable in Connectivity menu'
-$source=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Toolkit.ps1') -Raw
+$source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN NETWORK CONNECTIONS',2)[1] -split '# END NETWORK CONNECTIONS',2
-$module=Get-Content (Join-Path $PSScriptRoot '../win/net/Network-Connections.ps1') -Raw
+$module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Network-Connections.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded connections module matches source'
