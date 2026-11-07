@@ -87,6 +87,32 @@ function Get-Item {
 $results = @(Test-AdShares 'dc.example.test')
 Assert-True ($results.Count -eq 2 -and $results[0].Status -eq 'PASS' -and $results[1].Status -eq 'WARN') 'Shares checked independently with access errors preserved'
 
+function whoami.exe { $script:LASTEXITCODE=0; 'Identity fixture' }
+function klist.exe { $script:LASTEXITCODE=0; 'Kerberos fixture: ' + ($args -join ' ') }
+$results = @(Get-AdIdentity)
+Assert-True ($results.Count -eq 3 -and @($results | Where-Object Status -eq 'PASS').Count -eq 3) 'Identity, Kerberos tickets and sessions are read-only native checks'
+
+function Test-NetworkTcp {
+    param($ComputerName,$RemotePort,$TimeoutMs)
+    $status=if($RemotePort -eq 636){'WARN'}else{'PASS'}
+    [pscustomobject]@{Target=$ComputerName;Port=$RemotePort;Status=$status;Milliseconds=5;Detail='Port fixture'}
+}
+$results = @(Test-AdDcPorts 'dc.example.test')
+Assert-True ($results.Count -eq 10 -and @($results | Where-Object {$_.Service -eq 'LDAPS' -and $_.Status -eq 'WARN'}).Count -eq 1) 'DC port matrix reports each AD service independently'
+
+function Invoke-AdLdapRootDseRequest {
+    [pscustomobject]@{Entries=@([pscustomobject]@{Attributes=@{
+        dnsHostName=@('dc.example.test')
+        defaultNamingContext=@('DC=example,DC=test')
+        supportedLDAPVersion=@('3')
+    }})}
+}
+$result = Get-AdRootDse 'dc.example.test'
+Assert-True ($result.Status -eq 'PASS' -and $result.defaultNamingContext -eq 'DC=example,DC=test' -and $result.supportedLDAPVersion -eq '3') 'LDAP RootDSE exposes naming context and server capabilities'
+
+$ids=@((Get-AdChecks).Id)
+Assert-True (@('ad-identity','ad-ports','ad-rootdse' | Where-Object {$_ -notin $ids}).Count -eq 0) 'New AD checks are registered'
+
 # Submenu navigation and recovery after a failed action.
 $script:FakeComputer.DomainRole = 1
 $script:Answers = New-Object 'System.Collections.Generic.Queue[string]'
