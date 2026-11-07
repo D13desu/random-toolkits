@@ -1687,7 +1687,9 @@ function Get-PcHealthProbes {
             $nics=@(Get-PcNicPower)
             if(-not $nics.Count){New-PcHealthFinding INFO 'NIC power settings' 'No physical adapters were reported.' power}
             foreach($nic in $nics){
-                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}elseif(@($nic.AllowComputerToTurnOffDevice,$nic.SelectiveSuspend,$nic.DeviceSleepOnDisconnect) -contains 'Enabled'){'REVIEW'}else{'INFO'}
+                # Power-saving support is a policy choice, not a health failure. Keep it
+                # available as context without putting normal laptop settings in Attention.
+                $status=if($nic.Status -eq 'UNAVAILABLE'){'UNAVAILABLE'}else{'INFO'}
                 New-PcHealthFinding $status ('NIC sleep: '+$nic.Adapter) ("Power off: $($nic.AllowComputerToTurnOffDevice); selective suspend: $($nic.SelectiveSuspend); disconnect sleep: $($nic.DeviceSleepOnDisconnect). $($nic.Detail)") power
             }
         }}
@@ -1700,7 +1702,9 @@ function Get-PcHealthProbes {
                 New-PcHealthFinding $status ("{0} active interfaces without IP addresses" -f $unaddressed.Count) ('Virtual/filter interfaces can legitimately lack addresses; they are not separate network failures. Interfaces: '+($unaddressed.Adapter -join ', ')) connectivity
             }
             foreach($adapter in $addressed){
-                $status=if(-not $adapter.Gateways -or -not $adapter.DNS){'REVIEW'}else{'INFO'}
+                $adapterIdentity=[string]$adapter.Adapter+' '+[string]$adapter.Description
+                $virtual=([string]$adapter.Type -eq 'Tunnel') -or ($adapterIdentity -match '(?i)\bvirtual\b|\bvmware\b|\bhyper-v\b|\bvethernet\b|\bvirtualbox\b|\bwireguard\b|\bwintun\b|\btap-windows\b|\bvpn\b')
+                $status=if((-not $adapter.Gateways -or -not $adapter.DNS) -and -not $virtual){'REVIEW'}else{'INFO'}
                 New-PcHealthFinding $status ('Network: '+$adapter.Adapter) ("Addresses: $($adapter.Addresses)`nGateways: $($adapter.Gateways)`nDNS servers: $($adapter.DNS)`nVirtual/VPN/local-only adapters may legitimately have no gateway or DNS. Open connectivity checks to test reachability.") connectivity
             }
         }}
@@ -1769,20 +1773,20 @@ function Show-PcHealthFinding($Finding) {
 function New-PcHealthMenuItem($Row,[string]$Identity) {
     $statusColor=switch([string]$Row.Status){'PASS'{'Green'}'WARN'{'Yellow'}'REVIEW'{'Yellow'}'UNAVAILABLE'{'DarkGray'}'INFO'{'Cyan'}default{'Gray'}}
     [pscustomobject]@{
-        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);Detail=$Row.Detail;Data=$Row
+        Id=$Identity;Label=($Row.Status+' | '+$Row.Title);SearchText=$Row.Detail;Data=$Row
         LabelParts=@(
             [pscustomobject]@{Text=([string]$Row.Status);Color=$statusColor}
             [pscustomobject]@{Text=' | ';Color='DarkGray'}
             [pscustomobject]@{Text=([string]$Row.Title);Color='White'}
         )
-        DetailParts=@([pscustomobject]@{Text=([string]$Row.Detail);Color='Gray'})
     }
 }
 function Start-PcHealthDashboard {
-    $network=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
+    $network=$false;$showAll=$false;$snapshot=Get-PcHealthDashboard;$state=@{}
     while($true){
         $identities=@{}
-        $menu=@(foreach($row in $snapshot.Rows){
+        $visibleRows=if($showAll){@($snapshot.Rows)}else{@($snapshot.Rows | Where-Object Status -in @('WARN','REVIEW','UNAVAILABLE'))}
+        $menu=@(foreach($row in $visibleRows){
             $identity=$row.Target+'|'+$row.Title
             if(@($snapshot.Rows | Where-Object {($_.Target+'|'+$_.Title) -eq $identity}).Count -gt 1){$identity+='|'+$row.Detail}
             $base=$identity;$suffix=1
@@ -1790,11 +1794,14 @@ function Start-PcHealthDashboard {
             $identities[$identity]=$true
             New-PcHealthMenuItem $row $identity
         })
-        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Description ("Snapshot: {0} | Live network checks: {1}. Not a full health certificate." -f $snapshot.CollectedAt,$network) -Commands @{C='Run live network checks (no repair)'}
+        $counts=@{};foreach($status in @('WARN','REVIEW','UNAVAILABLE','INFO','PASS')){$counts[$status]=@($snapshot.Rows | Where-Object Status -eq $status).Count}
+        $view=if($showAll){'All results'}else{'Attention only'}
+        $description=("{0:g} | {1} | W {2}, R {3}, U {4}, info {5}, pass {6} | Live checks {7}" -f $snapshot.CollectedAt,$view,$counts.WARN,$counts.REVIEW,$counts.UNAVAILABLE,$counts.INFO,$counts.PASS,$(if($network){'on'}else{'off'}))
+        $choice=Show-PcMenu -Title 'Windows > Health dashboard' -Items $menu -State $state -Filterable -Refreshable -Compact -EmptyMessage 'No results in this view. Clear the filter or press A to change views.' -Description $description -Commands @{A=('View: '+$(if($showAll){'all results'}else{'attention only'}));C='Run live network checks (no repair)'}
         switch($choice.Action){
             'Back'{return}
             'Refresh'{$snapshot=Get-PcHealthDashboard -IncludeNetwork:$network}
-            'Command'{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}
+            'Command'{if($choice.Command -eq 'A'){$showAll=-not $showAll;$state.SelectedId=''}else{$network=$true;$snapshot=Get-PcHealthDashboard -IncludeNetwork}}
             'Select'{Show-PcHealthFinding $choice.Item.Data}
         }
     }
@@ -2157,7 +2164,7 @@ function Clear-PcMenuRegion {
     }
 }
 function Write-PcMenuDisplayItem {
-    param($Row,[string]$DisplayKey,[bool]$Selected,[int]$Width,[int]$DetailLines,[switch]$ExpandedPreview)
+    param($Row,[string]$DisplayKey,[bool]$Selected,[int]$Width,[int]$DetailLines,[switch]$ExpandedPreview,[switch]$Compact)
     $marker=if($Selected){'>'}else{' '}
     $kind=if($Row.Kind){' ['+$Row.Kind+']'}else{''}
     $color=if($Row.DisabledReason){'DarkGray'}elseif($Selected){'Cyan'}else{'Gray'}
@@ -2166,10 +2173,10 @@ function Write-PcMenuDisplayItem {
         if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
         Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$DisplayKey) $Width $color
     }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$DisplayKey,$Row.Label,$kind) $Width) -ForegroundColor $color}
-    $detail=@($Row.Detail | Select-Object -First $DetailLines)
+    $detail=if($Compact){@()}else{@($Row.Detail | Select-Object -First $DetailLines)}
     if($ExpandedPreview -and $Selected -and $Row.SelectedDetail){$detail=@($Row.SelectedDetail | Select-Object -First 3)}
     if($Row.DisabledReason){$detail=@('UNAVAILABLE: '+$Row.DisabledReason)}
-    if(-not $detail.Count){$detail=@('')}
+    if(-not $Compact -and -not $detail.Count){$detail=@('')}
     for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
         if($detailIndex -eq 0 -and $Row.DetailParts -and -not $Row.DisabledReason -and -not ($ExpandedPreview -and $Selected -and $Row.SelectedDetail)){
             Write-PcMenuSegments @($Row.DetailParts) '    ' $Width $color
@@ -2189,6 +2196,8 @@ function Show-PcMenu {
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=100,
         [switch]$Plain,
+        [switch]$Compact,
+        [string]$EmptyMessage='No matching items.',
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
@@ -2214,9 +2223,9 @@ function Show-PcMenu {
         $selected=0
         for($i=0;$i -lt $rows.Count;$i++){if([string]$rows[$i].Id -eq $State.SelectedId){$selected=$i;break}}
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
-        $size=$PageSize;$width=100;$cursorControl=$false
+        $size=$PageSize;$width=100;$cursorControl=$false;$menuDetailLines=if($Compact){0}else{$DetailLines}
         if($keyboard){
-            try{$size=Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $DetailLines $PageSize;$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $menuDetailLines $PageSize;$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             $cursorControl=Test-PcMenuCursorControl
             Clear-Host
         }
@@ -2224,11 +2233,11 @@ function Show-PcMenu {
         Write-Host (Format-PcMenuText (Get-PcMenuHeading $Title $Version) $width) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
-        if(-not $rows.Count){Write-Host 'No matching items.'}
+        if(-not $rows.Count){Write-Host $EmptyMessage}
         $rowTops=@{};$rowHeights=@{}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
             if($cursorControl){$rowTops[$i]=Get-PcMenuCursorTop}
-            $rowHeights[$i]=Write-PcMenuDisplayItem $rows[$i] $displayKeys[[string]$rows[$i].Id] ($i -eq $selected) $width $DetailLines -ExpandedPreview:$ExpandedPreview
+            $rowHeights[$i]=Write-PcMenuDisplayItem $rows[$i] $displayKeys[[string]$rows[$i].Id] ($i -eq $selected) $width $menuDetailLines -ExpandedPreview:$ExpandedPreview -Compact:$Compact
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
@@ -2276,14 +2285,14 @@ function Show-PcMenu {
             $newPage=if($rows.Count){[int][math]::Floor($selected/[double]$size)}else{0}
             $layoutMatches=$false
             if($cursorControl -and -not $ExpandedPreview -and $navigated -and $newPage -eq $page){
-                try{$layoutMatches=([math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1) -eq $width -and (Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $DetailLines $PageSize) -eq $size)}catch{}
+                try{$layoutMatches=([math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1) -eq $width -and (Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $menuDetailLines $PageSize) -eq $size)}catch{}
             }
             if($layoutMatches){
                 try{
                     foreach($rowIndex in @($oldSelected,$selected | Select-Object -Unique)){
                         Clear-PcMenuRegion $rowTops[$rowIndex] $rowHeights[$rowIndex] $width
                         Set-PcMenuCursorPosition 0 $rowTops[$rowIndex]
-                        $null=Write-PcMenuDisplayItem $rows[$rowIndex] $displayKeys[[string]$rows[$rowIndex].Id] ($rowIndex -eq $selected) $width $DetailLines
+                        $null=Write-PcMenuDisplayItem $rows[$rowIndex] $displayKeys[[string]$rows[$rowIndex].Id] ($rowIndex -eq $selected) $width $menuDetailLines -Compact:$Compact
                     }
                     Clear-PcMenuRegion $promptTop 2 $width;Set-PcMenuCursorPosition 0 $promptTop
                     continue

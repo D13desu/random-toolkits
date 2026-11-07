@@ -238,7 +238,7 @@ Event browsing in 0.7.4 supports Up/Down in both the log picker and event list; 
 
 ## Windows health dashboard
 
-Menu **9: Health dashboard â€” start here** collects a read-only local snapshot, sorted by WARN, REVIEW, UNAVAILABLE, INFO and PASS. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership.
+Menu **9: Health dashboard â€” start here** collects a read-only local snapshot and initially shows only WARN, REVIEW and UNAVAILABLE findings. Press **A** to show all INFO and PASS results; open any row for its evidence and related tools. It covers fixed-drive free space (warning below 10%), Windows storage-provider health, two servicing reboot indicators, non-running automatic services, Application Error/1000 crashes over 24 hours, update-install failures (ID 20) over seven days, power plan, NIC sleep, active network configuration and AD membership. NIC power policy and virtual adapters without a gateway are informational rather than health failures.
 
 Up/Down selects a finding; Enter shows evidence and offers its related checks/repair menu. N/P pages; R refreshes; B/Esc returns. Repairs retain existing admin/role requirements and yes/no confirmation; collection never invokes repair functions. Missing permissions/providers become UNAVAILABLE, not a pass. Trigger-start services and historic failures are REVIEW items; Balanced is informational. Unaddressed virtual/filter interfaces are grouped to avoid false fault floods. PASS applies only to the stated check, not the entire PC.
 

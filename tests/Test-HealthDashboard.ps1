@@ -15,7 +15,7 @@ function Test-Path {param($LiteralPath,$ErrorAction) return $LiteralPath -like '
 function Get-PcEventRecords {param($LogName,$Hours,$Ids,$Provider,$Limit) if($LogName -eq 'Application'){[pscustomobject]@{Time='Fixture time';Message='Fixture crash'}}}
 function Get-PcPowerOverview {[pscustomobject]@{Device='Laptop';ActivePlan='Balanced';Assessment='Fixture plan'}}
 function Get-PcNicPower {[pscustomobject]@{Adapter='NIC';Status='Up';AllowComputerToTurnOffDevice='Enabled';SelectiveSuspend='Unsupported';DeviceSleepOnDisconnect='Disabled';Detail='Fixture'}}
-function Get-NetworkOverview {[pscustomobject]@{Adapter='NIC';State='Up';Type='Ethernet';Addresses='192.0.2.2';Gateways='192.0.2.1';DNS='192.0.2.1'};[pscustomobject]@{Adapter='Filter';State='Up';Type='Ethernet';Addresses='';Gateways='';DNS=''}}
+function Get-NetworkOverview {[pscustomobject]@{Adapter='NIC';Description='Fixture Ethernet';State='Up';Type='Ethernet';Addresses='192.0.2.2';Gateways='192.0.2.1';DNS='192.0.2.1'};[pscustomobject]@{Adapter='Filter';Description='Fixture filter';State='Up';Type='Ethernet';Addresses='';Gateways='';DNS=''};[pscustomobject]@{Adapter='vEthernet (Fixture)';Description='Hyper-V Virtual Ethernet Adapter';State='Up';Type='Ethernet';Addresses='172.20.0.1';Gateways='';DNS=''};[pscustomobject]@{Adapter='Quantum Ethernet';Description='Fixture physical adapter';State='Up';Type='Unknown';Addresses='192.0.2.3';Gateways='';DNS=''}}
 $script:Role='Workgroup';$script:TrustCalls=0
 function Get-AdContext {[pscustomobject]@{Computer='TEST';Role=$script:Role;Domain='localhost';Detail='Fixture role'}}
 function Test-AdSecureChannel {$script:TrustCalls++;[pscustomobject]@{Status='WARN';Detail='Fixture trust result'}}
@@ -28,6 +28,9 @@ Assert (($snapshot.Rows | Where-Object Title -like '*automatic services not runn
 Assert (($snapshot.Rows | Where-Object Title -like 'Application crash events*').Status -eq 'REVIEW') 'Historical crash does not claim an unresolved current failure'
 Assert ($snapshot.Rows[0].Status -eq 'WARN' -and $script:TrustCalls -eq 0) 'Findings prioritized and local collection performs no trust test'
 Assert (($snapshot.Rows | Where-Object Title -like '*active interfaces without IP addresses').Status -eq 'INFO') 'Unaddressed filter interfaces are grouped without false fault alerts'
+Assert (($snapshot.Rows | Where-Object Title -eq 'NIC sleep: NIC').Status -eq 'INFO') 'Supported NIC power saving is context, not a health warning'
+Assert (($snapshot.Rows | Where-Object Title -eq 'Network: vEthernet (Fixture)').Status -eq 'INFO') 'Virtual adapters without gateways remain informational'
+Assert (($snapshot.Rows | Where-Object Title -eq 'Network: Quantum Ethernet').Status -eq 'REVIEW') 'Unknown or coincidentally named physical adapters are not assumed virtual'
 function Get-PhysicalDisk {throw 'Fixture storage provider unavailable'}
 $failed=Get-PcHealthDashboard
 Assert (($failed.Rows | Where-Object Title -eq 'Storage health').Status -eq 'UNAVAILABLE' -and $failed.Rows.Count -gt 5) 'One unavailable provider does not abort remaining checks'
@@ -48,9 +51,10 @@ Assert ($script:Routes[0] -eq 'log:Application') 'Event findings open the matchi
 function Get-PcHealthDashboard {param([switch]$IncludeNetwork) [pscustomobject]@{CollectedAt=(Get-Date);Rows=@((New-PcHealthFinding INFO 'First' 'Details' storage),(New-PcHealthFinding REVIEW 'Second' 'Details' power))}}
 $healthColorItem=New-PcHealthMenuItem (New-PcHealthFinding REVIEW 'Colour fixture' 'Details' power) fixture
 Assert (($healthColorItem.LabelParts | Where-Object Text -EQ REVIEW).Color -eq 'Yellow') 'Health review status uses warning colour'
+Assert ($healthColorItem.SearchText -eq 'Details' -and -not $healthColorItem.Detail) 'Dashboard keeps details searchable without rendering them inline'
 function Test-PcMenuKeyboard {$false}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('Down','Select','1','R','C','B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('Down','Select','1','R','A','C','B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 Start-PcHealthDashboard
 Assert ($script:Answers.Count -eq 0 -and $script:Routes[-1] -eq 'power') 'Selection, linked tools, refresh, explicit live checks and Back work'
