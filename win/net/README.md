@@ -1,4 +1,4 @@
-# Windows Toolkit 0.20.2
+# Windows Toolkit 0.20.3
 
 Use **B** (or **0**) to return from a menu. Data-entry prompts show **B: back** to cancel the current action; blank input keeps its documented default. Disk explorers use **B** for parent folder, then drive selection, then Storage. During native/MFT scans, **B** cancels back to drives; **Q** stops and opens partial results. Completed one-shot checks return with Enter. Only the top-level Exit closes the Windows launcher.
 
@@ -340,7 +340,7 @@ Maintain `Network-Connections.ps1` and run `tests/Sync-NetworkConnections.ps1` t
 
 Root, section and action menus now use compact numbered selection (number/shortcut followed by Enter), showing every choice without paging or an arrow cursor. B/0 returns. Checks remain distinct from changes; unavailable actions retain their reasons and cannot run. Scrollable results such as Events, Connections, Services, Startup/tasks, Health and Discovery retain arrow navigation and filtering. Disk Usage retains its existing folder navigation. Selected result descriptions, including multiple preview lines, now use the same highlight colour as their heading. This supersedes the category-menu arrow behaviour introduced in 0.11.0.
 
-The root heading is `WINDOWS TOOLKIT 0.20.2`; submenus retain `WINDOWS 0.20.2 | ...` breadcrumbs so the current location remains visible.
+The root heading is `WINDOWS TOOLKIT 0.20.3`; submenus retain `WINDOWS 0.20.3 | ...` breadcrumbs so the current location remains visible.
 
 Data-heavy result browsers use a shared semantic palette: green for healthy/running/success, yellow for warnings and review states, red for confirmed errors, cyan for primary names and identifiers, magenta for numeric identifiers, white for primary values, gray for paths and secondary metadata, and dark gray for inactive or unavailable fields. Plain-text labels remain intact for filtering, redirected output and accessibility.
 
@@ -401,3 +401,8 @@ Root option **1 Computer and user details** shows the full username, SID, authen
 ### Compact identity header and details-first ordering (0.20.2)
 
 Security groups no longer appear in the compact root header. **1 Computer and user details** is the first displayed and initially selected root option. The remaining diagnostic sections follow sequentially through **13**, while destructive **Toolkit cleanup** is separated as **99**. Summary caches carry a schema version so rerunning an updated toolkit in the same PowerShell session automatically replaces older cached objects instead of showing stale addresses or blank newly added fields.
+
+
+### Details-screen return input (0.20.3)
+
+The Computer and user details screen reads return keys directly instead of invoking the numbered menu-selection prompt. Arrow or number keys are ignored, and Enter, Escape, Backspace or B returns once without appending repeated `Selection: _` prompts to the screen.

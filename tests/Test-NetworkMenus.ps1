@@ -36,6 +36,17 @@ $script:Output.Clear()
 foreach ($answer in @('1','B','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu
 Assert-True ($script:Answers.Count -eq 0 -and '  Extremely Long Group Name That Must Remain Fully Visible' -in $script:Output -and 'SID: S-1-5-21-fixture' -in $script:Output) 'Computer and user details show complete untruncated identity data'
+$returnPrompt='Enter / Esc / Backspace / B: back'
+$beforeReturnPrompts=@($script:Output | Where-Object {$_.Trim() -eq $returnPrompt}).Count
+$script:DetailKeys=New-Object 'System.Collections.Generic.Queue[object]'
+$script:DetailKeys.Enqueue([pscustomobject]@{Key='DownArrow';KeyChar=[char]0})
+$script:DetailKeys.Enqueue([pscustomobject]@{Key='Enter';KeyChar=[char]13})
+function Test-PcMenuKeyboard {$true}
+function Read-PcMenuKey {if(-not $script:DetailKeys.Count){throw 'Unexpected detail key request'};$script:DetailKeys.Dequeue()}
+Show-PcSystemDetails $detailFixture
+$afterReturnPrompts=@($script:Output | Where-Object {$_.Trim() -eq $returnPrompt}).Count
+Assert-True ($script:DetailKeys.Count -eq 0 -and $afterReturnPrompts -eq ($beforeReturnPrompts+1) -and -not @($script:Output | Where-Object {$_ -like 'Selection:*'}).Count) 'Details screen ignores navigation keys without duplicating its return prompt'
+function Test-PcMenuKeyboard {$false}
 $script:Output.Clear()
 foreach ($answer in @('3','2','n','','0','0')) { $script:Answers.Enqueue($answer) }
 Start-NetworkMenu

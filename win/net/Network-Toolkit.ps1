@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.20.2
+# Random Toolkits | Windows Toolkit 0.20.3
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -2122,7 +2122,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.20.2')
+    param([string]$Title,[string]$Version='0.20.3')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2189,7 +2189,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.20.2',
+        [string]$Version='0.20.3',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
@@ -2500,11 +2500,14 @@ function Show-PcSystemDetails($Summary) {
     Write-Host ('Architecture: '+$Summary.OsArchitecture)
     Write-Host ('Last boot: '+$Summary.LastBoot)
     Write-Host ('Uptime (days.hh:mm:ss): '+$Summary.Uptime)
-    while($true){
-        Write-Host "`nEnter / Esc / Backspace / B: back"
-        $answer=Read-PcMenuInput (Test-PcMenuKeyboard)
-        if($null -eq $answer -or $answer.Trim() -in @('','Select','Back','B','0')){return}
+    Write-Host "`nEnter / Esc / Backspace / B: back"
+    if(Test-PcMenuKeyboard){
+        while($true){
+            $answer=ConvertFrom-PcMenuKey (Read-PcMenuKey)
+            if($answer -in @('Select','Back','b','B')){return}
+        }
     }
+    $null=Read-Host 'Enter to return'
 }
 
 function Format-PcSystemSummary($Summary) {
