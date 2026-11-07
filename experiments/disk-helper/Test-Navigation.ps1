@@ -3,9 +3,9 @@ $root=Join-Path $env:TEMP ('helper-navigation-'+[guid]::NewGuid().ToString('N'))
 $null=[IO.Directory]::CreateDirectory((Join-Path $root 'child'))
 [IO.File]::WriteAllText((Join-Path $root 'child/file.txt'),'fixture')
 $global:HelperNavigationAnswers=New-Object 'System.Collections.Generic.Queue[string]'
-# First scan: enter child, back to root, inspect views, back to drives.
+# First scan: refresh, enter child, back to root, inspect views, back to drives.
 # Second scan: select the same fixture, return to drives, then caller.
-foreach($answer in @('@DOWN','@UP','@ENTER','b','H','@DOWN','@UP','@ENTER','','H','2','','H','3','','H','B','b',$root,'0','b')){$global:HelperNavigationAnswers.Enqueue($answer)}
+foreach($answer in @('r','@DOWN','@UP','@ENTER','b','H','@DOWN','@UP','@ENTER','','H','2','','H','3','','H','B','b',$root,'0','b')){$global:HelperNavigationAnswers.Enqueue($answer)}
 $global:HelperNavigationDrivePrompts=0
 function Read-Host {
  param($Prompt)
