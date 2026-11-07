@@ -82,7 +82,7 @@ function Clear-PcMenuRegion {
     }
 }
 function Write-PcMenuDisplayItem {
-    param($Row,[string]$DisplayKey,[bool]$Selected,[int]$Width,[int]$DetailLines,[switch]$ExpandedPreview)
+    param($Row,[string]$DisplayKey,[bool]$Selected,[int]$Width,[int]$DetailLines,[switch]$ExpandedPreview,[switch]$Compact)
     $marker=if($Selected){'>'}else{' '}
     $kind=if($Row.Kind){' ['+$Row.Kind+']'}else{''}
     $color=if($Row.DisabledReason){'DarkGray'}elseif($Selected){'Cyan'}else{'Gray'}
@@ -91,10 +91,10 @@ function Write-PcMenuDisplayItem {
         if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
         Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$DisplayKey) $Width $color
     }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$DisplayKey,$Row.Label,$kind) $Width) -ForegroundColor $color}
-    $detail=@($Row.Detail | Select-Object -First $DetailLines)
+    $detail=if($Compact){@()}else{@($Row.Detail | Select-Object -First $DetailLines)}
     if($ExpandedPreview -and $Selected -and $Row.SelectedDetail){$detail=@($Row.SelectedDetail | Select-Object -First 3)}
     if($Row.DisabledReason){$detail=@('UNAVAILABLE: '+$Row.DisabledReason)}
-    if(-not $detail.Count){$detail=@('')}
+    if(-not $Compact -and -not $detail.Count){$detail=@('')}
     for($detailIndex=0;$detailIndex -lt $detail.Count;$detailIndex++){
         if($detailIndex -eq 0 -and $Row.DetailParts -and -not $Row.DisabledReason -and -not ($ExpandedPreview -and $Selected -and $Row.SelectedDetail)){
             Write-PcMenuSegments @($Row.DetailParts) '    ' $Width $color
@@ -114,6 +114,8 @@ function Show-PcMenu {
         [switch]$Refreshable,
         [ValidateRange(1,100)][int]$PageSize=100,
         [switch]$Plain,
+        [switch]$Compact,
+        [string]$EmptyMessage='No matching items.',
         [hashtable]$Commands=@{},
         [ValidateRange(1,3)][int]$DetailLines=1,
         [switch]$ExpandedPreview
@@ -139,9 +141,9 @@ function Show-PcMenu {
         $selected=0
         for($i=0;$i -lt $rows.Count;$i++){if([string]$rows[$i].Id -eq $State.SelectedId){$selected=$i;break}}
         if($rows.Count){$State.SelectedId=[string]$rows[$selected].Id}
-        $size=$PageSize;$width=100;$cursorControl=$false
+        $size=$PageSize;$width=100;$cursorControl=$false;$menuDetailLines=if($Compact){0}else{$DetailLines}
         if($keyboard){
-            try{$size=Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $DetailLines $PageSize;$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
+            try{$size=Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $menuDetailLines $PageSize;$width=[math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1)}catch{}
             $cursorControl=Test-PcMenuCursorControl
             Clear-Host
         }
@@ -149,11 +151,11 @@ function Show-PcMenu {
         Write-Host (Format-PcMenuText (Get-PcMenuHeading $Title $Version) $width) -ForegroundColor Cyan
         if($Description){Write-Host (Format-PcMenuText $Description $width)}
         if($Filterable){Write-Host (Format-PcMenuText ('Filter: '+$State.Filter) $width)}
-        if(-not $rows.Count){Write-Host 'No matching items.'}
+        if(-not $rows.Count){Write-Host $EmptyMessage}
         $rowTops=@{};$rowHeights=@{}
         for($i=$page*$size;$i -lt [math]::Min($rows.Count,($page+1)*$size);$i++){
             if($cursorControl){$rowTops[$i]=Get-PcMenuCursorTop}
-            $rowHeights[$i]=Write-PcMenuDisplayItem $rows[$i] $displayKeys[[string]$rows[$i].Id] ($i -eq $selected) $width $DetailLines -ExpandedPreview:$ExpandedPreview
+            $rowHeights[$i]=Write-PcMenuDisplayItem $rows[$i] $displayKeys[[string]$rows[$i].Id] ($i -eq $selected) $width $menuDetailLines -ExpandedPreview:$ExpandedPreview -Compact:$Compact
         }
         Write-Host ("Page {0}/{1} | {2} items" -f ($page+1),[math]::Max(1,[math]::Ceiling($rows.Count/[double]$size)),$rows.Count)
         $footer=if($keyboard){'Arrows: select | Enter: open | Esc/Backspace: back'}else{'Number/Enter: open | B/0: back'}
@@ -201,14 +203,14 @@ function Show-PcMenu {
             $newPage=if($rows.Count){[int][math]::Floor($selected/[double]$size)}else{0}
             $layoutMatches=$false
             if($cursorControl -and -not $ExpandedPreview -and $navigated -and $newPage -eq $page){
-                try{$layoutMatches=([math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1) -eq $width -and (Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $DetailLines $PageSize) -eq $size)}catch{}
+                try{$layoutMatches=([math]::Max(20,$Host.UI.RawUI.WindowSize.Width-1) -eq $width -and (Get-PcMenuPageSize $Host.UI.RawUI.WindowSize.Height $menuDetailLines $PageSize) -eq $size)}catch{}
             }
             if($layoutMatches){
                 try{
                     foreach($rowIndex in @($oldSelected,$selected | Select-Object -Unique)){
                         Clear-PcMenuRegion $rowTops[$rowIndex] $rowHeights[$rowIndex] $width
                         Set-PcMenuCursorPosition 0 $rowTops[$rowIndex]
-                        $null=Write-PcMenuDisplayItem $rows[$rowIndex] $displayKeys[[string]$rows[$rowIndex].Id] ($rowIndex -eq $selected) $width $DetailLines
+                        $null=Write-PcMenuDisplayItem $rows[$rowIndex] $displayKeys[[string]$rows[$rowIndex].Id] ($rowIndex -eq $selected) $width $menuDetailLines -Compact:$Compact
                     }
                     Clear-PcMenuRegion $promptTop 2 $width;Set-PcMenuCursorPosition 0 $promptTop
                     continue
