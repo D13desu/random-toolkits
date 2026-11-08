@@ -59,7 +59,7 @@ push / pull request
 
 `experiments/` contains prototypes. Nothing there is published unless a build script explicitly copies or embeds it.
 
-Current modular blocks cover health, shared menus, network connections/discovery, registry tweaks, startup tasks, system maintenance, cleanup, and Sysinternals Live launchers. Their filenames and marker pairs are the definitive inventory.
+Current modular blocks cover health, certificate and TLS diagnostics, shared menus, network connections/discovery, registry tweaks, startup tasks, system maintenance, cleanup, and Sysinternals Live launchers. Their filenames and marker pairs are the definitive inventory.
 
 ## Source of truth: what to edit
 

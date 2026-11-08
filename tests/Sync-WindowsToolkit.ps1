@@ -6,6 +6,7 @@ $syncScripts=@(
     'Sync-NetworkConnections.ps1'
     'Sync-ToolkitCleanup.ps1'
     'Sync-HealthDashboard.ps1'
+    'Sync-CertificateTls.ps1'
     'Sync-StartupTasks.ps1'
     'Sync-SystemMaintenance.ps1'
     'Sync-SysinternalsLauncher.ps1'

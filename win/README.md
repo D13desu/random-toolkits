@@ -121,6 +121,15 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Optional confirmed search for applicable updates using the configured update service.
 - The toolkit does not accept licenses, download, install, hide, uninstall, or reboot for updates.
 
+### 16. Certificates and TLS
+
+- Local-machine and current-user certificate health for Personal and Web Hosting stores, including expiry, private-key presence, EKUs, algorithms, and key size.
+- SNI-aware remote TLS tests with the negotiated protocol and cipher, certificate identity, hostname policy result, Windows chain status, and separate TCP/TLS timings.
+- Certificate-chain validation from a store thumbprint or public `.cer`/`.crt` file, with optional online revocation checks.
+- HTTP.sys SSL binding audit that correlates certificate hashes with the Local Machine certificate store.
+- Readiness summary plus Schannel, CAPI2, and certificate-lifecycle diagnostics.
+- Diagnostics do not export private keys, change bindings, enable event channels, or alter Schannel configuration.
+
 ### 99. Toolkit cleanup
 
 - Preview and remove recognized toolkit temporary packages, reports, test fixtures, and download caches.
