@@ -62,7 +62,7 @@ Assert-True ($script:Answers.Count -eq 0 -and ($script:Output -join '|') -match 
 Assert-True ('DC hostname [automatic discovery]' -notin $script:Output) 'Unavailable repair is blocked before collecting inputs'
 Write-Output "Menu tests passed on PowerShell $($PSVersionTable.PSVersion)."
 
-foreach ($answer in @('2','1','b','b','3','b','4','b','5','b','6','b','7','b','8','1','2','b','b','2','b','b','14','b','15','b','0')) { $script:Answers.Enqueue($answer) }
+foreach ($answer in @('2','1','b','b','3','b','4','b','5','b','6','b','7','b','8','1','1','2','b','b','2','b','b','2','1','b','b','b','14','b','15','b','0')) { $script:Answers.Enqueue($answer) }
 Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:Answers.Count -eq 0) 'B returns from every Windows section and cancels registry input'
 foreach ($answer in @('1','b','b')) { $script:Answers.Enqueue($answer) }

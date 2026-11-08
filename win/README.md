@@ -70,8 +70,11 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 
 ### 8. Registry tweaks
 
-- Inspect, apply, or reset classic Outlook PST/OST size limits.
-- Inspect, apply, or reset the Remote Desktop redirection warning compatibility setting.
+- Separate end-user device and server menus to make registry scope explicit.
+- End-user devices: inspect, apply, or reset classic Outlook PST/OST size limits.
+- End-user devices: force outbound Remote Desktop client connections to TCP only, or reset automatic UDP/TCP selection.
+- End-user devices: inspect, apply, or reset the Remote Desktop redirection warning compatibility setting.
+- Servers: force inbound Remote Desktop Session Host connections to TCP only, or reset automatic UDP/TCP selection.
 - Changes create a `.reg` undo file before writing.
 
 ### 9. Health dashboard

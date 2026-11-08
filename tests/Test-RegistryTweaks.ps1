@@ -39,6 +39,15 @@ Invoke-PcRegistryTweak rdp
 Assert-True ($script:State.RedirectionWarningDialogVersion -eq 1) 'RDP compatibility value is one'
 Invoke-PcRegistryTweak rdp -Reset
 Assert-True (-not $script:State.ContainsKey('RedirectionWarningDialogVersion')) 'RDP reset deletes only override'
+Invoke-PcRegistryTweak rdpclientudp
+Assert-True ($script:State.fClientDisableUDP -eq 1) 'End-user RDP client can be forced to TCP only'
+Invoke-PcRegistryTweak rdpclientudp -Reset
+Assert-True (-not $script:State.ContainsKey('fClientDisableUDP')) 'Client transport reset restores automatic selection'
+Invoke-PcRegistryTweak rdpservertransport
+Assert-True ($script:State.SelectTransport -eq 1) 'RDP Session Host can be forced to TCP only'
+Assert-True ((Get-PcRegistryTweak rdpservertransport).Path -eq 'HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services') 'Server transport uses the Session Host policy key'
+Invoke-PcRegistryTweak rdpservertransport -Reset
+Assert-True (-not $script:State.ContainsKey('SelectTransport')) 'Server transport reset restores automatic selection'
 $script:Policy=$true
 $blocked=$false; try { Invoke-PcRegistryTweak outlook } catch { $blocked=$true }
 Assert-True $blocked 'Managed Outlook policy blocks preference change'

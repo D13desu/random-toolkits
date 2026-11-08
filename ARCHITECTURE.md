@@ -208,7 +208,7 @@ Start-PcEventBrowser 'Microsoft-Windows-Example/Operational'
 
 ### Add a registry tweak
 
-Registry code lives in `win/modules/Registry-Tweaks.ps1`. The current implementation has two hard-coded tweak IDs, `outlook` and `rdp`; adding a third means updating all places whose `ValidateSet` or `switch` assumes those two values.
+Registry code lives in `win/modules/Registry-Tweaks.ps1`. The current implementation has hard-coded tweak IDs for Outlook, the RDP client warning dialog, the RDP client transport, and the RDP Session Host transport. Adding another tweak means updating all places whose `ValidateSet` or `switch` enumerates those IDs and placing it under the appropriate end-user device or server menu.
 
 For every tweak, record:
 

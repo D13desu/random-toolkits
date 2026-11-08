@@ -18,11 +18,12 @@ function Read-PcInput {
 
 # BEGIN REGISTRY TWEAKS
 function Get-PcRegistryTweak {
-    param([ValidateSet('outlook','rdp')][string]$Id)
-    if ($Id -eq 'outlook') {
-        [pscustomobject]@{Path='HKCU:\Software\Microsoft\Office\16.0\Outlook\PST';RegPath='HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\Outlook\PST';Names=@('MaxLargeFileSize','WarnLargeFileSize');Admin=$false}
-    } else {
-        [pscustomobject]@{Path='HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';RegPath='HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';Names=@('RedirectionWarningDialogVersion');Admin=$true}
+    param([ValidateSet('outlook','rdp','rdpclientudp','rdpservertransport')][string]$Id)
+    switch ($Id) {
+        'outlook' { [pscustomobject]@{Path='HKCU:\Software\Microsoft\Office\16.0\Outlook\PST';RegPath='HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\Outlook\PST';Names=@('MaxLargeFileSize','WarnLargeFileSize');Admin=$false} }
+        'rdp' { [pscustomobject]@{Path='HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';RegPath='HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';Names=@('RedirectionWarningDialogVersion');Admin=$true} }
+        'rdpclientudp' { [pscustomobject]@{Path='HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';RegPath='HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows NT\Terminal Services\Client';Names=@('fClientDisableUDP');Admin=$true} }
+        'rdpservertransport' { [pscustomobject]@{Path='HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services';RegPath='HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows NT\Terminal Services';Names=@('SelectTransport');Admin=$true} }
     }
 }
 
@@ -39,7 +40,7 @@ function Get-PcRegistryValues {
 
 function Invoke-PcRegistryTweak {
     [CmdletBinding(SupportsShouldProcess=$true)]
-    param([ValidateSet('outlook','rdp')][string]$Id,
+    param([ValidateSet('outlook','rdp','rdpclientudp','rdpservertransport')][string]$Id,
         [ValidateRange(1,1000)][int]$SizeGB=100, [switch]$Reset)
     $tweak = Get-PcRegistryTweak $Id
     $availability = Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$tweak.Admin})
@@ -54,10 +55,26 @@ function Invoke-PcRegistryTweak {
         if (@($policyValues | Where-Object Exists).Count) { throw 'Outlook size policy is configured. Ask its administrator to change it; preferences may be overridden.' }
         $values = @(($SizeGB * 1024), ([int][math]::Floor($SizeGB * 1024 * 0.95)))
     } else {
-        Write-Host 'Machine-wide RDP file redirection warning: restore the older dialog for trusted connections only.'
-        Write-Host 'Reduces the newer per-resource consent protection. Does not disable NLA or certificate checks.'
-        Write-Host 'Temporary compatibility setting; a future Windows update may remove it. Prefer trusted, signed RDP files.'
-        $values = @(1)
+        switch ($Id) {
+            'rdp' {
+                Write-Host 'Machine-wide RDP file redirection warning: restore the older dialog for trusted connections only.'
+                Write-Host 'Reduces the newer per-resource consent protection. Does not disable NLA or certificate checks.'
+                Write-Host 'Temporary compatibility setting; a future Windows update may remove it. Prefer trusted, signed RDP files.'
+                $values = @(1)
+            }
+            'rdpclientudp' {
+                Write-Host 'Machine-wide RDP client transport: force outbound Remote Desktop connections to use TCP only.'
+                Write-Host 'Use for UDP-related compatibility or stability troubleshooting; TCP-only can reduce RDP performance.'
+                Write-Host 'This affects connections initiated by this device, not inbound connections to it.'
+                $values = @(1)
+            }
+            'rdpservertransport' {
+                Write-Host 'Machine-wide RDP Session Host transport: force inbound Remote Desktop connections to use TCP only.'
+                Write-Host 'Use for UDP-related compatibility or stability troubleshooting; TCP-only can reduce RDP performance.'
+                Write-Host 'This affects the server side of new RDP connections, not outbound connections from this device.'
+                $values = @(1)
+            }
+        }
     }
     $before = @(Get-PcRegistryValues $tweak)
     Write-Host $tweak.Path
@@ -98,17 +115,29 @@ function Invoke-PcRegistryTweak {
 }
 
 function Start-PcRegistryCategory {
-    param([ValidateSet('outlook','rdp')][string]$Id)
+    param([ValidateSet('outlook','rdp','rdpclientudp','rdpservertransport')][string]$Id)
     $state=@{}
     while ($true) {
-        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=($Id -eq 'rdp')})
+        $tweak=Get-PcRegistryTweak $Id
+        $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@();Admin=$tweak.Admin})
         $reason=if(-not $availability.Available){$availability.Reason}else{''}
-        if($Id -eq 'outlook'){
-            $title='Windows > Registry > Outlook'
-            $menu=@(New-PcMenuItem '1' 'Inspect current size overrides' 'Check';New-PcMenuItem '2' 'Set PST/OST size limit' 'Change' 'Current account; classic Outlook' $reason;New-PcMenuItem '3' 'Reset size overrides' 'Change' 'Restore defaults' $reason)
-        }else{
-            $title='Windows > Registry > Remote Desktop'
-            $menu=@(New-PcMenuItem '1' 'Inspect warning override' 'Check';New-PcMenuItem '2' 'Restore older RDP warning dialog' 'Change' 'Machine-wide; administrator' $reason;New-PcMenuItem '3' 'Reset RDP warning override' 'Change' 'Windows default; administrator' $reason)
+        switch($Id){
+            'outlook' {
+                $title='Windows > Registry > End-user devices > Outlook'
+                $menu=@(New-PcMenuItem '1' 'Inspect current size overrides' 'Check';New-PcMenuItem '2' 'Set PST/OST size limit' 'Change' 'Current account; classic Outlook' $reason;New-PcMenuItem '3' 'Reset size overrides' 'Change' 'Restore defaults' $reason)
+            }
+            'rdp' {
+                $title='Windows > Registry > End-user devices > RDP client > Warning dialog'
+                $menu=@(New-PcMenuItem '1' 'Inspect warning override' 'Check';New-PcMenuItem '2' 'Restore older RDP warning dialog' 'Change' 'Machine-wide; administrator' $reason;New-PcMenuItem '3' 'Reset RDP warning override' 'Change' 'Windows default; administrator' $reason)
+            }
+            'rdpclientudp' {
+                $title='Windows > Registry > End-user devices > RDP client > Transport'
+                $menu=@(New-PcMenuItem '1' 'Inspect client transport override' 'Check';New-PcMenuItem '2' 'Force outbound RDP to use TCP only' 'Change' 'Machine-wide; administrator' $reason;New-PcMenuItem '3' 'Reset client transport override' 'Change' 'Automatic UDP/TCP; administrator' $reason)
+            }
+            'rdpservertransport' {
+                $title='Windows > Registry > Servers > RDP Session Host > Transport'
+                $menu=@(New-PcMenuItem '1' 'Inspect Session Host transport override' 'Check';New-PcMenuItem '2' 'Force inbound RDP to use TCP only' 'Change' 'Machine-wide; administrator' $reason;New-PcMenuItem '3' 'Reset Session Host transport override' 'Change' 'Automatic UDP/TCP; administrator' $reason)
+            }
         }
         $answer=Read-PcCategoryMenu $title $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
@@ -122,7 +151,7 @@ function Start-PcRegistryCategory {
                         if ([string]::IsNullOrWhiteSpace($size)) { $size='100' }
                         if ($size -notmatch '^\d+$') { throw 'Enter a whole number of GB.' }
                         Invoke-PcRegistryTweak outlook -SizeGB ([int]$size)
-                    } else { Invoke-PcRegistryTweak rdp }
+                    } else { Invoke-PcRegistryTweak $Id }
                 }
                 '3' { Invoke-PcRegistryTweak $Id -Reset }
                 default { Write-Warning 'Choose a listed option.' }
@@ -132,15 +161,56 @@ function Start-PcRegistryCategory {
     }
 }
 
-function Start-PcRegistryMenu {
+function Start-PcRegistryRdpClientMenu {
     $state=@{}
     while ($true) {
-        $menu=@(New-PcMenuItem '1' 'Outlook' 'Menu' 'PST/OST file size limits';New-PcMenuItem '2' 'Remote Desktop' 'Menu' 'RDP warning dialog')
-        $answer=Read-PcCategoryMenu 'Windows > Registry tweaks' $menu $state
+        $menu=@(New-PcMenuItem '1' 'Transport protocol' 'Menu' 'Outbound RDP; TCP-only troubleshooting';New-PcMenuItem '2' 'Redirection warning dialog' 'Menu' 'RDP file consent compatibility')
+        $answer=Read-PcCategoryMenu 'Windows > Registry > End-user devices > Remote Desktop client' $menu $state
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        switch ($answer.Trim()) {
+            '1' { Start-PcRegistryCategory rdpclientudp }
+            '2' { Start-PcRegistryCategory rdp }
+            default { Write-Warning 'Choose a listed option.' }
+        }
+    }
+}
+
+function Start-PcRegistryEndUserMenu {
+    $state=@{}
+    while ($true) {
+        $menu=@(New-PcMenuItem '1' 'Outlook' 'Menu' 'PST/OST file size limits';New-PcMenuItem '2' 'Remote Desktop client' 'Menu' 'Transport and warning behavior')
+        $answer=Read-PcCategoryMenu 'Windows > Registry > End-user devices' $menu $state
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
             '1' { Start-PcRegistryCategory outlook }
-            '2' { Start-PcRegistryCategory rdp }
+            '2' { Start-PcRegistryRdpClientMenu }
+            default { Write-Warning 'Choose a listed option.' }
+        }
+    }
+}
+
+function Start-PcRegistryServerMenu {
+    $state=@{}
+    while ($true) {
+        $menu=@(New-PcMenuItem '1' 'Remote Desktop Session Host' 'Menu' 'Inbound RDP transport')
+        $answer=Read-PcCategoryMenu 'Windows > Registry > Servers' $menu $state
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        switch ($answer.Trim()) {
+            '1' { Start-PcRegistryCategory rdpservertransport }
+            default { Write-Warning 'Choose a listed option.' }
+        }
+    }
+}
+
+function Start-PcRegistryMenu {
+    $state=@{}
+    while ($true) {
+        $menu=@(New-PcMenuItem '1' 'End-user devices' 'Menu' 'Outlook and Remote Desktop client';New-PcMenuItem '2' 'Servers' 'Menu' 'Remote Desktop Session Host')
+        $answer=Read-PcCategoryMenu 'Windows > Registry tweaks' $menu $state
+        if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
+        switch ($answer.Trim()) {
+            '1' { Start-PcRegistryEndUserMenu }
+            '2' { Start-PcRegistryServerMenu }
             default { Write-Warning 'Choose a listed option.' }
         }
     }
