@@ -111,7 +111,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.26.0',
+        [string]$Version='0.26.1',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
