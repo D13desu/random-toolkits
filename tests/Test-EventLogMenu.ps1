@@ -1,6 +1,17 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -NoMenu
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
+$choices=@(Get-PcEventLogChoices)
+$expectedLogs=@(
+ 'ForwardedEvents','Windows PowerShell','Microsoft-Windows-PowerShell/Operational',
+ 'Microsoft-Windows-WLAN-AutoConfig/Operational','Microsoft-Windows-Wired-AutoConfig/Operational','Microsoft-Windows-NetworkProfile/Operational',
+ 'Microsoft-Windows-Hyper-V-VMMS/Admin','Microsoft-Windows-Hyper-V-Worker/Admin','Microsoft-Windows-Hyper-V-VmSwitch/Operational',
+ 'Microsoft-Windows-Hyper-V-Hypervisor/Admin','Microsoft-Windows-FailoverClustering/Operational',
+ 'Microsoft-Windows-TaskScheduler/Operational','Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',
+ 'Microsoft-Windows-CodeIntegrity/Operational','Microsoft-Windows-BitLocker-API/Operational'
+)
+Assert (@($expectedLogs | Where-Object {$_ -notin $choices.Log}).Count -eq 0) 'Event presets include PowerShell, network, Hyper-V and high-value troubleshooting channels'
+Assert (@($choices | Where-Object {[string]::IsNullOrWhiteSpace($_.Purpose)}).Count -eq 0) 'Every event preset explains its troubleshooting purpose'
 $script:Queries=New-Object 'Collections.Generic.List[object]'
 function Get-WinEvent {
  [CmdletBinding()]param($ListLog,$FilterHashtable,$MaxEvents)

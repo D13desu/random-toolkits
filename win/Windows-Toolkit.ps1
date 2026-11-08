@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.25.4
+# Random Toolkits | Windows Toolkit 0.25.5
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -496,24 +496,36 @@ function Start-PcEventBrowser {
 
 function Get-PcEventLogChoices {
     @(
-        [pscustomobject]@{Name='Application';Log='Application'}
-        [pscustomobject]@{Name='System';Log='System'}
-        [pscustomobject]@{Name='Security (may require elevated access)';Log='Security'}
-        [pscustomobject]@{Name='Setup';Log='Setup'}
-        [pscustomobject]@{Name='Forwarded Events';Log='ForwardedEvents'}
-        [pscustomobject]@{Name='Windows PowerShell';Log='Windows PowerShell'}
-        [pscustomobject]@{Name='PowerShell Operational';Log='Microsoft-Windows-PowerShell/Operational'}
-        [pscustomobject]@{Name='Microsoft Defender';Log='Microsoft-Windows-Windows Defender/Operational'}
-        [pscustomobject]@{Name='Windows Update';Log='Microsoft-Windows-WindowsUpdateClient/Operational'}
-        [pscustomobject]@{Name='Group Policy';Log='Microsoft-Windows-GroupPolicy/Operational'}
-        [pscustomobject]@{Name='Printing';Log='Microsoft-Windows-PrintService/Admin'}
+        [pscustomobject]@{Name='Application';Log='Application';Purpose='Application crashes and service-specific errors'}
+        [pscustomobject]@{Name='System';Log='System';Purpose='Drivers, hardware, services, storage and core networking'}
+        [pscustomobject]@{Name='Security (may require elevated access)';Log='Security';Purpose='Sign-in, audit and policy events'}
+        [pscustomobject]@{Name='Setup';Log='Setup';Purpose='Windows setup, roles and servicing'}
+        [pscustomobject]@{Name='Forwarded events (collector subscriptions)';Log='ForwardedEvents';Purpose='Events received by Windows Event Collector'}
+        [pscustomobject]@{Name='PowerShell - legacy Windows PowerShell log';Log='Windows PowerShell';Purpose='Windows PowerShell engine and provider events'}
+        [pscustomobject]@{Name='PowerShell - engine operational';Log='Microsoft-Windows-PowerShell/Operational';Purpose='PowerShell engine, remoting and script execution'}
+        [pscustomobject]@{Name='Network - WLAN AutoConfig operational';Log='Microsoft-Windows-WLAN-AutoConfig/Operational';Purpose='Wi-Fi association, roaming and authentication failures'}
+        [pscustomobject]@{Name='Network - Wired AutoConfig operational';Log='Microsoft-Windows-Wired-AutoConfig/Operational';Purpose='Wired 802.1X authentication and profile failures'}
+        [pscustomobject]@{Name='Network - connection profiles';Log='Microsoft-Windows-NetworkProfile/Operational';Purpose='Network identification and profile changes'}
+        [pscustomobject]@{Name='Hyper-V - VM management service';Log='Microsoft-Windows-Hyper-V-VMMS/Admin';Purpose='VM configuration, start, migration and management failures'}
+        [pscustomobject]@{Name='Hyper-V - VM worker';Log='Microsoft-Windows-Hyper-V-Worker/Admin';Purpose='Guest runtime, device and VM start failures'}
+        [pscustomobject]@{Name='Hyper-V - virtual switch';Log='Microsoft-Windows-Hyper-V-VmSwitch/Operational';Purpose='Virtual switch, port, VLAN and VM network failures'}
+        [pscustomobject]@{Name='Hyper-V - hypervisor';Log='Microsoft-Windows-Hyper-V-Hypervisor/Admin';Purpose='Hypervisor startup and platform failures'}
+        [pscustomobject]@{Name='Hyper-V - failover clustering';Log='Microsoft-Windows-FailoverClustering/Operational';Purpose='Cluster membership, failover and live-migration context'}
+        [pscustomobject]@{Name='Microsoft Defender';Log='Microsoft-Windows-Windows Defender/Operational';Purpose='Protection, scan, detection and remediation events'}
+        [pscustomobject]@{Name='Windows Update';Log='Microsoft-Windows-WindowsUpdateClient/Operational';Purpose='Update discovery, download and installation failures'}
+        [pscustomobject]@{Name='Group Policy';Log='Microsoft-Windows-GroupPolicy/Operational';Purpose='Policy discovery, processing and extension failures'}
+        [pscustomobject]@{Name='Printing';Log='Microsoft-Windows-PrintService/Admin';Purpose='Print service, driver and job failures'}
+        [pscustomobject]@{Name='Task Scheduler operational';Log='Microsoft-Windows-TaskScheduler/Operational';Purpose='Task triggers, launches, actions and result codes'}
+        [pscustomobject]@{Name='Remote Desktop sessions';Log='Microsoft-Windows-TerminalServices-LocalSessionManager/Operational';Purpose='RDP session creation, disconnect and reconnect events'}
+        [pscustomobject]@{Name='Code Integrity operational';Log='Microsoft-Windows-CodeIntegrity/Operational';Purpose='Blocked or invalid drivers and executable images'}
+        [pscustomobject]@{Name='BitLocker API operational';Log='Microsoft-Windows-BitLocker-API/Operational';Purpose='Encryption, TPM, protector and recovery failures'}
     )
 }
 function Start-PcEventLogMenu {
     $state=@{}
     while($true){
         $choices=@(Get-PcEventLogChoices)
-        $menu=@(for($i=0;$i -lt $choices.Count;$i++){New-PcMenuItem ([string]($i+1)) $choices[$i].Name 'Browse' $choices[$i].Log})
+        $menu=@(for($i=0;$i -lt $choices.Count;$i++){New-PcMenuItem ([string]($i+1)) $choices[$i].Name 'Browse' $choices[$i].Purpose})
         $menu+=New-PcMenuItem 'C' 'Custom log / advanced filters' 'Browse'
         $menu+=New-PcMenuItem 'L' 'List/search available logs' 'Check'
         $answer=Read-PcCategoryMenu 'Windows > Event Logs' $menu $state 'Presets show the latest 200 candidates from the last 24 hours. F changes filters inside the browser.'
@@ -2406,7 +2418,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.4')
+    param([string]$Title,[string]$Version='0.25.5')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2457,7 +2469,8 @@ function Write-PcMenuDisplayItem {
         if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
         Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$DisplayKey) $Width $color
     }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$DisplayKey,$Row.Label,$kind) $Width) -ForegroundColor $color}
-    $detail=if($Compact){@()}else{@($Row.Detail | Select-Object -First $DetailLines)}
+    $detail=@()
+    if(-not $Compact){$detail=@($Row.Detail | Select-Object -First $DetailLines)}
     if($ExpandedPreview -and $Selected -and $Row.SelectedDetail){$detail=@($Row.SelectedDetail | Select-Object -First 3)}
     if($Row.DisabledReason){$detail=@('UNAVAILABLE: '+$Row.DisabledReason)}
     if(-not $Compact -and -not $detail.Count){$detail=@('')}
@@ -2473,7 +2486,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.4',
+        [string]$Version='0.25.5',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,

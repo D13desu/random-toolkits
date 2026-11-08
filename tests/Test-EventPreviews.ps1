@@ -19,8 +19,16 @@ function Get-WinEvent {
 $script:Output=New-Object 'Collections.Generic.List[string]'
 function Write-Host {param($Object,$ForegroundColor) $script:Output.Add([string]$Object)}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('Last','First','Down','Down','Down','Down','Down','Up','Down','Select','X','M','B','P','B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
+$script:Answers.Enqueue('B')
+$previewItems=@(
+ [pscustomobject]@{Id='first';Label='First';Detail='First event message';SelectedDetail=@('First event message')},
+ [pscustomobject]@{Id='second';Label='Second';Detail='Complete unselected event message';SelectedDetail=@('Complete unselected event message')}
+)
+$null=Show-PcMenu -Title 'Preview regression' -Items $previewItems -State @{} -ExpandedPreview -Plain
+Assert ($script:Output -contains '    Complete unselected event message') 'Unselected one-line previews render the complete message instead of its first character'
+$script:Output.Clear()
+foreach($answer in @('Last','First','Down','Down','Down','Down','Down','Up','Down','Select','X','M','B','P','B')){$script:Answers.Enqueue($answer)}
 if($KeyboardMode){
  function Test-PcMenuKeyboard {$true}
  function Clear-Host {}

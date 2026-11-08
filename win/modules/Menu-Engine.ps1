@@ -43,7 +43,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.4')
+    param([string]$Title,[string]$Version='0.25.5')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -94,7 +94,8 @@ function Write-PcMenuDisplayItem {
         if($kind){$labelParts+=@([pscustomobject]@{Text=$kind;Color=$color})}
         Write-PcMenuSegments $labelParts ('{0} [{1}] ' -f $marker,$DisplayKey) $Width $color
     }else{Write-Host (Format-PcMenuText ('{0} [{1}] {2}{3}' -f $marker,$DisplayKey,$Row.Label,$kind) $Width) -ForegroundColor $color}
-    $detail=if($Compact){@()}else{@($Row.Detail | Select-Object -First $DetailLines)}
+    $detail=@()
+    if(-not $Compact){$detail=@($Row.Detail | Select-Object -First $DetailLines)}
     if($ExpandedPreview -and $Selected -and $Row.SelectedDetail){$detail=@($Row.SelectedDetail | Select-Object -First 3)}
     if($Row.DisabledReason){$detail=@('UNAVAILABLE: '+$Row.DisabledReason)}
     if(-not $Compact -and -not $detail.Count){$detail=@('')}
@@ -110,7 +111,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.4',
+        [string]$Version='0.25.5',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
