@@ -349,9 +349,21 @@ The build job runs on a fresh Ubuntu runner:
 5. PowerShell runs `./tests/Test-SysinternalsLauncher.ps1`.
 6. `actions/upload-pages-artifact@v3` uploads the repository working tree (`path: .`) after generation as the Pages artifact.
 
-Important: the current workflow does **not** run every `Test-*.ps1` file. A green Actions result proves the endpoints assembled and the three CI-safe module tests passed; it does not prove the complete Windows-only suite passed.
+The Ubuntu build retains a small cross-platform smoke-test set so assembly and portable modules fail quickly without waiting for a Windows runner.
 
 The build job has only `contents: read`, so it cannot push generated files back to the repository.
+
+### `windows-tests` job
+
+The Windows job runs `tests/Invoke-WindowsTests.ps1 -Suite Safe` on `windows-latest`, once with PowerShell 7 and once with Windows PowerShell 5.1. The runner starts every test in a fresh process of the same PowerShell edition so function overrides, global variables, and loaded C# types cannot leak between tests. It also fails when a new Windows `Test-*.ps1` file has not been assigned to the Safe, Live, or Artifact suite.
+
+The manifest deliberately excludes:
+
+- `Test-M365MenuEngine.ps1`, which belongs to the separate M365 toolkit;
+- `Test-MftAllocationLive.ps1`, `Test-MftLive.ps1`, and `Test-MftWofLive.ps1`, which are elevated or live-filesystem checks;
+- `Test-DiskHelperLauncher.ps1`, which requires a separately built package passed through `-PackagePath`.
+
+Run the excluded groups explicitly with `-Suite Live` or `-Suite Artifact`. Live JSON reports default to a `random-toolkits-test-reports` directory below TEMP; use `-ReportDirectory` to retain them elsewhere. `-Suite All` requires the disk-helper package path and also runs the live checks. Deployment waits for both `build` and `windows-tests`.
 
 ### `deploy` job
 
@@ -391,6 +403,18 @@ pwsh -NoProfile -File ./tests/Test-EventLogMenu.ps1
 pwsh -NoProfile -File ./tests/Test-RegistryTweaks.ps1
 pwsh -NoProfile -File ./tests/Test-NetworkMenus.ps1
 pwsh -NoProfile -File ./tests/Test-WindowsToolkit.ps1
+```
+
+Run the complete CI-safe Windows suite with:
+
+```powershell
+pwsh -NoProfile -File ./tests/Invoke-WindowsTests.ps1 -Suite Safe
+```
+
+List a suite without executing it:
+
+```powershell
+pwsh -NoProfile -File ./tests/Invoke-WindowsTests.ps1 -Suite Live -List
 ```
 
 Use Windows PowerShell 5.1 as well as PowerShell 7 when changing shared Windows code:

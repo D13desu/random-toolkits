@@ -44,9 +44,25 @@ jobs:
           path: .
           include-hidden-files: true
 
+  windows-tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        shell: [pwsh, powershell]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run safe Windows test suite on ${{ matrix.shell }}
+        shell: ${{ matrix.shell }}
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}
+        run: ./tests/Invoke-WindowsTests.ps1 -Suite Safe
+
   deploy:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, windows-tests]
     runs-on: ubuntu-latest
     permissions:
       pages: write
