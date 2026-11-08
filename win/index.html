@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.25.5
+# Random Toolkits | Windows Toolkit 0.25.6
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -496,49 +496,71 @@ function Start-PcEventBrowser {
 
 function Get-PcEventLogChoices {
     @(
-        [pscustomobject]@{Name='Application';Log='Application';Purpose='Application crashes and service-specific errors'}
-        [pscustomobject]@{Name='System';Log='System';Purpose='Drivers, hardware, services, storage and core networking'}
-        [pscustomobject]@{Name='Security (may require elevated access)';Log='Security';Purpose='Sign-in, audit and policy events'}
-        [pscustomobject]@{Name='Setup';Log='Setup';Purpose='Windows setup, roles and servicing'}
-        [pscustomobject]@{Name='Forwarded events (collector subscriptions)';Log='ForwardedEvents';Purpose='Events received by Windows Event Collector'}
-        [pscustomobject]@{Name='PowerShell - legacy Windows PowerShell log';Log='Windows PowerShell';Purpose='Windows PowerShell engine and provider events'}
-        [pscustomobject]@{Name='PowerShell - engine operational';Log='Microsoft-Windows-PowerShell/Operational';Purpose='PowerShell engine, remoting and script execution'}
-        [pscustomobject]@{Name='Network - WLAN AutoConfig operational';Log='Microsoft-Windows-WLAN-AutoConfig/Operational';Purpose='Wi-Fi association, roaming and authentication failures'}
-        [pscustomobject]@{Name='Network - Wired AutoConfig operational';Log='Microsoft-Windows-Wired-AutoConfig/Operational';Purpose='Wired 802.1X authentication and profile failures'}
-        [pscustomobject]@{Name='Network - connection profiles';Log='Microsoft-Windows-NetworkProfile/Operational';Purpose='Network identification and profile changes'}
-        [pscustomobject]@{Name='Hyper-V - VM management service';Log='Microsoft-Windows-Hyper-V-VMMS/Admin';Purpose='VM configuration, start, migration and management failures'}
-        [pscustomobject]@{Name='Hyper-V - VM worker';Log='Microsoft-Windows-Hyper-V-Worker/Admin';Purpose='Guest runtime, device and VM start failures'}
-        [pscustomobject]@{Name='Hyper-V - virtual switch';Log='Microsoft-Windows-Hyper-V-VmSwitch/Operational';Purpose='Virtual switch, port, VLAN and VM network failures'}
-        [pscustomobject]@{Name='Hyper-V - hypervisor';Log='Microsoft-Windows-Hyper-V-Hypervisor/Admin';Purpose='Hypervisor startup and platform failures'}
-        [pscustomobject]@{Name='Hyper-V - failover clustering';Log='Microsoft-Windows-FailoverClustering/Operational';Purpose='Cluster membership, failover and live-migration context'}
-        [pscustomobject]@{Name='Microsoft Defender';Log='Microsoft-Windows-Windows Defender/Operational';Purpose='Protection, scan, detection and remediation events'}
-        [pscustomobject]@{Name='Windows Update';Log='Microsoft-Windows-WindowsUpdateClient/Operational';Purpose='Update discovery, download and installation failures'}
-        [pscustomobject]@{Name='Group Policy';Log='Microsoft-Windows-GroupPolicy/Operational';Purpose='Policy discovery, processing and extension failures'}
-        [pscustomobject]@{Name='Printing';Log='Microsoft-Windows-PrintService/Admin';Purpose='Print service, driver and job failures'}
-        [pscustomobject]@{Name='Task Scheduler operational';Log='Microsoft-Windows-TaskScheduler/Operational';Purpose='Task triggers, launches, actions and result codes'}
-        [pscustomobject]@{Name='Remote Desktop sessions';Log='Microsoft-Windows-TerminalServices-LocalSessionManager/Operational';Purpose='RDP session creation, disconnect and reconnect events'}
-        [pscustomobject]@{Name='Code Integrity operational';Log='Microsoft-Windows-CodeIntegrity/Operational';Purpose='Blocked or invalid drivers and executable images'}
-        [pscustomobject]@{Name='BitLocker API operational';Log='Microsoft-Windows-BitLocker-API/Operational';Purpose='Encryption, TPM, protector and recovery failures'}
+        [pscustomobject]@{Name='Application';Log='Application';Purpose='Application crashes and service-specific errors';Directories=@('client','server')}
+        [pscustomobject]@{Name='System';Log='System';Purpose='Drivers, hardware, services, storage and core networking';Directories=@('client','server')}
+        [pscustomobject]@{Name='Security (may require elevated access)';Log='Security';Purpose='Sign-in, audit and policy events';Directories=@('server','security')}
+        [pscustomobject]@{Name='Setup';Log='Setup';Purpose='Windows setup, roles and servicing';Directories=@('client','server')}
+        [pscustomobject]@{Name='Forwarded events (collector subscriptions)';Log='ForwardedEvents';Purpose='Events received by Windows Event Collector';Directories=@('server')}
+        [pscustomobject]@{Name='Windows PowerShell (legacy)';Log='Windows PowerShell';Purpose='Windows PowerShell engine and provider events';Directories=@('automation')}
+        [pscustomobject]@{Name='PowerShell engine operational';Log='Microsoft-Windows-PowerShell/Operational';Purpose='PowerShell engine, remoting and script execution';Directories=@('automation')}
+        [pscustomobject]@{Name='WLAN AutoConfig operational';Log='Microsoft-Windows-WLAN-AutoConfig/Operational';Purpose='Wi-Fi association, roaming and authentication failures';Directories=@('client')}
+        [pscustomobject]@{Name='Wired AutoConfig operational';Log='Microsoft-Windows-Wired-AutoConfig/Operational';Purpose='Wired 802.1X authentication and profile failures';Directories=@('client')}
+        [pscustomobject]@{Name='Network connection profiles';Log='Microsoft-Windows-NetworkProfile/Operational';Purpose='Network identification and profile changes';Directories=@('client')}
+        [pscustomobject]@{Name='Hyper-V VM management service';Log='Microsoft-Windows-Hyper-V-VMMS/Admin';Purpose='VM configuration, start, migration and management failures';Directories=@('server')}
+        [pscustomobject]@{Name='Hyper-V VM worker';Log='Microsoft-Windows-Hyper-V-Worker/Admin';Purpose='Guest runtime, device and VM start failures';Directories=@('server')}
+        [pscustomobject]@{Name='Hyper-V virtual switch';Log='Microsoft-Windows-Hyper-V-VmSwitch/Operational';Purpose='Virtual switch, port, VLAN and VM network failures';Directories=@('server')}
+        [pscustomobject]@{Name='Hyper-V hypervisor';Log='Microsoft-Windows-Hyper-V-Hypervisor/Admin';Purpose='Hypervisor startup and platform failures';Directories=@('server')}
+        [pscustomobject]@{Name='Hyper-V failover clustering';Log='Microsoft-Windows-FailoverClustering/Operational';Purpose='Cluster membership, failover and live-migration context';Directories=@('server')}
+        [pscustomobject]@{Name='Microsoft Defender';Log='Microsoft-Windows-Windows Defender/Operational';Purpose='Protection, scan, detection and remediation events';Directories=@('client','security')}
+        [pscustomobject]@{Name='Windows Update';Log='Microsoft-Windows-WindowsUpdateClient/Operational';Purpose='Update discovery, download and installation failures';Directories=@('client','server')}
+        [pscustomobject]@{Name='Group Policy';Log='Microsoft-Windows-GroupPolicy/Operational';Purpose='Policy discovery, processing and extension failures';Directories=@('client','server')}
+        [pscustomobject]@{Name='Printing';Log='Microsoft-Windows-PrintService/Admin';Purpose='Print service, driver and job failures';Directories=@('client','server')}
+        [pscustomobject]@{Name='Task Scheduler operational';Log='Microsoft-Windows-TaskScheduler/Operational';Purpose='Task triggers, launches, actions and result codes';Directories=@('automation')}
+        [pscustomobject]@{Name='Remote Desktop sessions';Log='Microsoft-Windows-TerminalServices-LocalSessionManager/Operational';Purpose='RDP session creation, disconnect and reconnect events';Directories=@('client','server')}
+        [pscustomobject]@{Name='Code Integrity operational';Log='Microsoft-Windows-CodeIntegrity/Operational';Purpose='Blocked or invalid drivers and executable images';Directories=@('client','security')}
+        [pscustomobject]@{Name='BitLocker API operational';Log='Microsoft-Windows-BitLocker-API/Operational';Purpose='Encryption, TPM, protector and recovery failures';Directories=@('client','security')}
     )
 }
-function Start-PcEventLogMenu {
+function Get-PcEventLogDirectories {
+    @(
+        [pscustomobject]@{Key='1';Id='client';Name='End-user devices';Purpose='Workstation applications, networking, updates, printing and device protection'}
+        [pscustomobject]@{Key='2';Id='server';Name='Servers and infrastructure';Purpose='Windows Server, Event Collector, Hyper-V and failover clustering'}
+        [pscustomobject]@{Key='3';Id='automation';Name='Automation and scripting';Purpose='PowerShell engines and scheduled tasks'}
+        [pscustomobject]@{Key='4';Id='security';Name='Security and access';Purpose='Audit, Defender, Code Integrity and BitLocker'}
+    )
+}
+function Start-PcEventLogDirectory($Directory) {
     $state=@{}
     while($true){
-        $choices=@(Get-PcEventLogChoices)
+        $choices=@(Get-PcEventLogChoices | Where-Object {$_.Directories -contains $Directory.Id})
         $menu=@(for($i=0;$i -lt $choices.Count;$i++){New-PcMenuItem ([string]($i+1)) $choices[$i].Name 'Browse' $choices[$i].Purpose})
-        $menu+=New-PcMenuItem 'C' 'Custom log / advanced filters' 'Browse'
-        $menu+=New-PcMenuItem 'L' 'List/search available logs' 'Check'
-        $answer=Read-PcCategoryMenu 'Windows > Event Logs' $menu $state 'Presets show the latest 200 candidates from the last 24 hours. F changes filters inside the browser.'
+        $answer=Read-PcCategoryMenu ('Windows > Event Logs > '+$Directory.Name) $menu $state $Directory.Purpose
         if($answer -eq 'B'){return}
         try{
-            if($answer -eq 'C'){Start-PcEventBrowser;continue}
-            if($answer -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;Wait-PcMenuReturn;continue}
             $log=$choices[([int]$answer)-1].Log
             $info=Get-WinEvent -ListLog $log -ErrorAction Stop
             if(-not $info.IsEnabled){Write-Warning "$log is disabled. No logging settings were changed.";Wait-PcMenuReturn;continue}
             Start-PcEventBrowser -DefaultLog $log -Quick
         }catch [OperationCanceledException]{continue}
         catch{Write-Warning ("Unable to read this log: {0}. Some logs need elevated access or are not installed on this PC." -f $_.Exception.Message);Wait-PcMenuReturn}
+    }
+}
+function Start-PcEventLogMenu {
+    $state=@{}
+    while($true){
+        $directories=@(Get-PcEventLogDirectories)
+        $menu=@(foreach($directory in $directories){New-PcMenuItem $directory.Key $directory.Name 'Menu' $directory.Purpose})
+        $menu+=New-PcMenuItem 'C' 'Custom log / advanced filters' 'Browse'
+        $menu+=New-PcMenuItem 'L' 'List/search available logs' 'Check'
+        $answer=Read-PcCategoryMenu 'Windows > Event Logs' $menu $state 'Choose a troubleshooting directory. Presets show the latest 200 candidates from the last 24 hours.'
+        if($answer -eq 'B'){return}
+        try{
+            if($answer -eq 'C'){Start-PcEventBrowser;continue}
+            if($answer -eq 'L'){Get-PcEventLogs | Format-Table -AutoSize | Out-Host;Wait-PcMenuReturn;continue}
+            $directory=$directories | Where-Object Key -EQ $answer | Select-Object -First 1
+            if($directory){Start-PcEventLogDirectory $directory}
+        }catch [OperationCanceledException]{continue}
+        catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
     }
 }
 
@@ -2418,7 +2440,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.5')
+    param([string]$Title,[string]$Version='0.25.6')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -2486,7 +2508,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.5',
+        [string]$Version='0.25.6',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
