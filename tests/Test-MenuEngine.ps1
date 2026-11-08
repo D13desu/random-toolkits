@@ -1,4 +1,11 @@
 $ErrorActionPreference='Stop'
+
+# Load the authoritative version before importing menu functions.
+$script:PcToolkitVersion=(Get-Content -LiteralPath (Join-Path $PSScriptRoot '../win/VERSION') -Raw).Trim()
+if($script:PcToolkitVersion -notmatch '^\d+\.\d+\.\d+$'){
+    throw "Invalid Windows Toolkit version: $script:PcToolkitVersion"
+}
+
 . (Join-Path $PSScriptRoot '../win/modules/Menu-Engine.ps1')
 function Assert($ok,$message){if(-not $ok){throw $message};Write-Output "PASS: $message"}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
@@ -35,8 +42,8 @@ Assert $blocked 'Duplicate IDs are rejected'
 Feed @('','yes');Assert (-not (Confirm-PcMenuChange 'Fixture')) 'Changes default to No';Assert (Confirm-PcMenuChange 'Fixture') 'Explicit yes confirms'
 Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters cannot inject terminal commands'
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
-Assert ((Get-PcMenuHeading Windows) -eq 'WINDOWS TOOLKIT 0.26.1') 'Root menu uses the toolkit product heading without a redundant breadcrumb'
-Assert ((Get-PcMenuHeading 'Windows > Network') -eq 'WINDOWS TOOLKIT 0.26.1 | Windows > Network') 'Submenus retain their navigation breadcrumb'
+Assert ((Get-PcMenuHeading Windows) -eq "WINDOWS TOOLKIT $script:PcToolkitVersion") 'Root menu uses the toolkit product heading without a redundant breadcrumb'
+Assert ((Get-PcMenuHeading 'Windows > Network') -eq "WINDOWS TOOLKIT $script:PcToolkitVersion | Windows > Network") 'Submenus retain their navigation breadcrumb'
 Assert ((Get-PcMainSummaryColor 'User: fixture') -eq 'White' -and (Get-PcMainSummaryColor 'OS: fixture') -eq 'White') 'Identity and OS summary lines use high-contrast white'
 Assert ((Get-PcMainSummaryColor 'Host: fixture') -eq 'Cyan' -and (Get-PcMainSummaryColor 'Storage: fixture') -eq 'Green' -and (Get-PcMainSummaryColor 'Security: fixture') -eq 'Magenta') 'Network, hardware, and security summary lines use distinct colors'
 $script:Output.Clear();Feed @('B')

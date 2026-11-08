@@ -1,4 +1,5 @@
-# Random Toolkits | Windows Toolkit 0.26.1
+# Random Toolkits | Windows Toolkit 0.26.2
+
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
 param(
@@ -8,6 +9,7 @@ param(
     [ValidateRange(1,65535)][int]$Port = 443,
     [string]$DomainController
 )
+$script:PcToolkitVersion='0.26.2'
 
 function Read-PcInput {
     param([string]$Prompt)
@@ -2572,7 +2574,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.26.1')
+    param([string]$Title,[string]$Version=$script:PcToolkitVersion)
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS TOOLKIT $Version | $Title"
 }
@@ -2640,7 +2642,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.26.1',
+        [string]$Version=$script:PcToolkitVersion,
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,
