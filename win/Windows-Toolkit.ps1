@@ -1469,6 +1469,53 @@ function Get-DiscoveryTargets([string]$Scope) {
     if($first -eq 0 -or $last -ge 3758096384){throw 'Unspecified, multicast and reserved broadcast targets are not supported.'}
     for($n=$first;$n -le $last;$n++){ConvertFrom-DiscoveryNumber $n}
 }
+function Get-DiscoveryInterfaceScopes([object[]]$Addresses) {
+    $rows=New-Object 'Collections.Generic.List[object]'
+    foreach($address in $Addresses){
+        try{
+            $ip=[string]$address.IPAddress;$value=ConvertTo-DiscoveryNumber $ip;$prefix=[int]$address.PrefixLength
+            if($value -eq 0 -or $value -ge 3758096384 -or $ip -like '127.*' -or $prefix -lt 0 -or $prefix -gt 32){continue}
+            if($address.PSObject.Properties['AddressState'] -and [string]$address.AddressState -notin @('Preferred','Deprecated')){continue}
+            # A /22 is the largest range accepted by the scanner. For broader connected
+            # networks, scan the /22 window containing this interface instead of failing.
+            $scanPrefix=[math]::Max(22,$prefix);[uint64]$size=[math]::Pow(2,32-$scanPrefix)
+            [uint64]$network=[math]::Floor($value/[double]$size)*$size
+            $scope=(ConvertFrom-DiscoveryNumber $network)+'/'+$scanPrefix
+            $count=@(Get-DiscoveryTargets $scope).Count
+            $note=if($ip -like '169.254.*'){'link-local; excluded from A'}elseif($prefix -lt 22){"subnet /$prefix; capped to /22"}else{'connected subnet'}
+            $rows.Add([pscustomobject]@{Number=0;Interface=[string]$address.InterfaceAlias;Address=$ip;PrefixLength=$prefix;AutoScope=$scope;Addresses=$count;Routable=($ip -notlike '169.254.*');Note=$note})
+        }catch{Write-Verbose ("Ignoring unusable interface address: "+$_.Exception.Message)}
+    }
+    $sorted=@($rows.ToArray() | Sort-Object @{Expression='Routable';Descending=$true},Interface,Address)
+    for($index=0;$index -lt $sorted.Count;$index++){$sorted[$index].Number=$index+1}
+    return $sorted
+}
+function Select-DiscoveryScopes([object[]]$Interfaces) {
+    if(-not $Interfaces.Count){
+        Write-Warning 'No usable local IPv4 interfaces were detected.'
+        return @((Read-PcInput 'Target CIDR, single IPv4 or startIPv4-endIPv4 (max 1024 addresses)'))
+    }
+    Write-Host ''
+    $Interfaces | Select-Object @{n='#';e={$_.Number}},Interface,Address,@{n='Prefix';e={'/'+$_.PrefixLength}},AutoScope,Addresses,Note | Format-Table -AutoSize | Out-Host
+    $answer=Read-PcInput 'Interface number(s), A: all routable interfaces, or M: manual target'
+    if($answer.Trim() -eq 'M'){
+        return @((Read-PcInput 'Target CIDR, single IPv4 or startIPv4-endIPv4 (max 1024 addresses)'))
+    }
+    $selected=@()
+    if($answer.Trim() -eq 'A'){$selected=@($Interfaces | Where-Object Routable)}
+    else{
+        foreach($token in $answer.Split(',')){
+            $number=0
+            if(-not [int]::TryParse($token.Trim(),[ref]$number)){throw 'Choose A, M, or comma-separated interface numbers.'}
+            $match=@($Interfaces | Where-Object Number -eq $number)
+            if($match.Count -ne 1){throw "Interface number $number is not available."}
+            $selected+=$match[0]
+        }
+    }
+    $scopes=@($selected | Select-Object -ExpandProperty AutoScope -Unique)
+    if(-not $scopes.Count){throw 'No routable IPv4 interfaces are available. Choose M for a manual target.'}
+    return $scopes
+}
 function Get-DiscoveryPorts([string]$Text) {
     $ports=@($Text.Split(',') | ForEach-Object {
         $port=0;if(-not [int]::TryParse($_.Trim(),[ref]$port) -or $port -lt 1 -or $port -gt 65535){throw 'Ports must be comma-separated integers from 1 to 65535.'};$port
@@ -1528,6 +1575,21 @@ function Invoke-NetworkDiscovery {
     }
     [pscustomobject]@{Scope=$Scope;Requested=$targets.Count;Completed=$rows.Count;Cancelled=$cancelled;Rows=@($rows.ToArray() | Sort-Object {ConvertTo-DiscoveryNumber $_.Address})}
 }
+function Invoke-NetworkDiscoveryScopes {
+    param([Parameter(Mandatory=$true)][string[]]$Scopes,[int[]]$Ports=@(22,80,443,445,3389,9100),
+        [ValidateRange(100,2000)][int]$TimeoutMs=400,[ValidateRange(1,64)][int]$Concurrency=32)
+    $requested=0
+    foreach($scope in $Scopes){$requested+=@(Get-DiscoveryTargets $scope).Count}
+    $rows=New-Object 'Collections.Generic.List[object]';$completed=0;$cancelled=$false
+    foreach($scope in $Scopes){
+        $targets=@(Get-DiscoveryTargets $scope)
+        Write-Host ("Scanning {0} through {1}: {2} addresses; TCP ports {3}. B stops the scan." -f $targets[0],$targets[-1],$targets.Count,($Ports -join ','))
+        $scan=Invoke-NetworkDiscovery -Scope $scope -Ports $Ports -TimeoutMs $TimeoutMs -Concurrency $Concurrency
+        foreach($row in $scan.Rows){$rows.Add($row)};$completed+=$scan.Completed
+        if($scan.Cancelled){$cancelled=$true;break}
+    }
+    [pscustomobject]@{Scope=($Scopes -join '; ');Scopes=@($Scopes);Requested=$requested;Completed=$completed;Cancelled=$cancelled;Rows=@($rows.ToArray() | Sort-Object {ConvertTo-DiscoveryNumber $_.Address})}
+}
 function New-NetworkDiscoveryMenuItem($Row,[switch]$ProbeView) {
     $open=if([string]::IsNullOrWhiteSpace([string]$Row.OpenTCP)){'none'}else{[string]$Row.OpenTCP}
     $labelParts=@(
@@ -1557,9 +1619,10 @@ function New-NetworkDiscoveryMenuItem($Row,[switch]$ProbeView) {
 }
 function Start-NetworkDiscovery {
     Write-Host 'NETWORK DISCOVERY | IPv4 ICMP + TCP connect | No administrator required' -ForegroundColor Cyan
-    if(Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue){Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {$_.IPAddress -notlike '127.*'} | Select-Object InterfaceAlias,IPAddress,PrefixLength | Format-Table -AutoSize | Out-Host}
-    $scope=Read-PcInput 'Target CIDR, single IPv4 or startIPv4-endIPv4 (max 1024 addresses)'
-    $targets=@(Get-DiscoveryTargets $scope)
+    $interfaces=@()
+    if(Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue){$interfaces=@(Get-DiscoveryInterfaceScopes @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue))}
+    $scopes=@(Select-DiscoveryScopes $interfaces)
+    foreach($scope in $scopes){$null=@(Get-DiscoveryTargets $scope)}
     $text=Read-PcInput 'TCP ports [22,80,443,445,3389,9100; maximum 16]'
     if([string]::IsNullOrWhiteSpace($text)){$text='22,80,443,445,3389,9100'}
     $ports=@(Get-DiscoveryPorts $text)
@@ -1567,8 +1630,7 @@ function Start-NetworkDiscovery {
     if(-not [string]::IsNullOrWhiteSpace($answer)){
         if(-not [int]::TryParse($answer,[ref]$timeout) -or $timeout -lt 100 -or $timeout -gt 2000){throw 'Timeout must be 100-2000 milliseconds.'}
     }
-    Write-Host ("Scanning {0} through {1}: {2} addresses; TCP ports {3}. B stops the scan." -f $targets[0],$targets[-1],$targets.Count,($ports -join ','))
-    $result=Invoke-NetworkDiscovery -Scope $scope -Ports $ports -TimeoutMs $timeout
+    $result=Invoke-NetworkDiscoveryScopes -Scopes $scopes -Ports $ports -TimeoutMs $timeout
     $neighbors=@()
     try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable; MAC addresses will be omitted.'}
     $database=Get-DiscoveryOuiDatabase
@@ -1583,15 +1645,15 @@ function Start-NetworkDiscovery {
             'Back'{return}
             'Select'{Show-PcListDetails $choice.Item.Data 'Device observations'}
             'Refresh'{
-                Write-Host "Rescan the same scope: $scope; ports: $($ports -join ', ')"
-                $result=Invoke-NetworkDiscovery -Scope $scope -Ports $ports -TimeoutMs $timeout
+                Write-Host "Rescan the same scope(s): $($scopes -join ', '); ports: $($ports -join ', ')"
+                $result=Invoke-NetworkDiscoveryScopes -Scopes $scopes -Ports $ports -TimeoutMs $timeout
                 $neighbors=@();try{if(Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue){$neighbors=@(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop)}}catch{Write-Warning 'Neighbor cache unavailable.'}
                 Add-DiscoveryMacInfo $result.Rows $database $neighbors
             }
             'Command'{switch($choice.Command){
                 'A'{$showAll=-not $showAll}
                 'D'{$probeView=-not $probeView}
-                'L'{Show-PcListDetails ([pscustomobject]@{Scope=$scope;Completed=$result.Completed;Requested=$result.Requested;Cancelled=$result.Cancelled;IEEEStatus=$database.Status;RetrievedUTC=$database.RetrievedUtc;Notes='No response does not mean offline. Open ports do not identify services/device type. Closed means refused. MACs are exact-IP neighbor-cache observations, possibly stale/proxied. Routed targets usually have no MAC. Local/randomized MACs have no vendor attribution; vendor is the registered assignee, not verified identity.'}) 'Scan notes'}
+                'L'{Show-PcListDetails ([pscustomobject]@{Scope=$result.Scope;Completed=$result.Completed;Requested=$result.Requested;Cancelled=$result.Cancelled;IEEEStatus=$database.Status;RetrievedUTC=$database.RetrievedUtc;Notes='No response does not mean offline. Open ports do not identify services/device type. Closed means refused. MACs are exact-IP neighbor-cache observations, possibly stale/proxied. Routed targets usually have no MAC. Local/randomized MACs have no vendor attribution; vendor is the registered assignee, not verified identity.'}) 'Scan notes'}
                 'M'{try{Show-PcListDetails (Resolve-DiscoveryOui (Read-PcInput 'MAC address') $database) 'MAC lookup'}catch [OperationCanceledException]{}}
                 'E'{
                     try{$path=Read-PcInput 'New CSV file path';if(Test-Path -LiteralPath $path){throw 'Choose a new filename; existing files are not overwritten.'};$result.Rows | Select-Object *,@{n='ScanScope';e={$result.Scope}},@{n='ScanCancelled';e={$result.Cancelled}},@{n='AddressesRequested';e={$result.Requested}},@{n='AddressesCompleted';e={$result.Completed}} | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop;Write-Host "Saved: $path";Wait-PcMenuReturn}

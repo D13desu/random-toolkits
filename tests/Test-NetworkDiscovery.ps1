@@ -6,6 +6,16 @@ Assert ((@(Get-DiscoveryTargets '192.168.1.0/31') -join ',') -eq '192.168.1.0,19
 Assert (@(Get-DiscoveryTargets '127.0.0.1/32').Count -eq 1) '/32 accepts a single host'
 Assert (@(Get-DiscoveryTargets '192.168.1.254-192.168.2.1').Count -eq 4) 'Ranges cross octet boundaries'
 foreach($scope in @('10.0.0.0/8','1.2.3.999','127.1','1.2.3.4-1.2.3.1','224.0.0.1','0.0.0.0','1.2.3.4;whoami')){$failed=$false;try{Get-DiscoveryTargets $scope | Out-Null}catch{$failed=$true};Assert $failed "Reject invalid scope $scope"}
+$interfaces=@(Get-DiscoveryInterfaceScopes @(
+ [pscustomobject]@{InterfaceAlias='Wide LAN';IPAddress='10.20.30.40';PrefixLength=16;AddressState='Preferred'},
+ [pscustomobject]@{InterfaceAlias='LAN';IPAddress='192.168.13.13';PrefixLength=24;AddressState='Preferred'},
+ [pscustomobject]@{InterfaceAlias='Fallback';IPAddress='169.254.8.9';PrefixLength=16;AddressState='Preferred'},
+ [pscustomobject]@{InterfaceAlias='Bad';IPAddress='192.0.2.4';PrefixLength=24;AddressState='Tentative'}
+))
+Assert (($interfaces.Number -join ',') -eq '1,2,3') 'Usable interfaces receive consecutive display numbers'
+Assert (($interfaces | Where-Object Address -eq '192.168.13.13').AutoScope -eq '192.168.13.0/24') 'Interface address derives its connected subnet'
+Assert (($interfaces | Where-Object Address -eq '10.20.30.40').AutoScope -eq '10.20.28.0/22') 'Broad interface subnet is capped to the containing /22 window'
+Assert (-not ($interfaces | Where-Object Address -eq '169.254.8.9').Routable) 'Link-local interface is excluded from automatic all-interface scans'
 Assert ((@(Get-DiscoveryPorts '80,443,80') -join ',') -eq '80,443') 'Port deduplication'
 foreach($ports in @('0','65536','80;whoami',((1..17)-join ','))){$failed=$false;try{Get-DiscoveryPorts $ports | Out-Null}catch{$failed=$true};Assert $failed 'Reject invalid/oversized port list'}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start()
@@ -31,13 +41,15 @@ Assert (($discoveryColorItem.DetailParts | Where-Object Text -EQ Success).Color 
 $script:ExportPath=Join-Path $env:TEMP ('discovery-test-'+[guid]::NewGuid().ToString('N')+'.csv')
 function Get-DiscoveryOuiDatabase {[pscustomobject]@{Entries=@{};RetrievedUtc='';Status='Test offline'}}
 function Invoke-NetworkDiscovery {
- param($Scope,$Ports,$TimeoutMs)
+ param($Scope,$Ports,$TimeoutMs,$Concurrency)
  [pscustomobject]@{Scope=$Scope;Requested=2;Completed=1;Cancelled=$true;Rows=@([pscustomobject]@{Address='127.0.0.1';Responded=$true;Ping='Success';LatencyMs=0;OpenTCP='';ClosedTCP='';NoResponseTCP='1';ErrorTCP=''})}
 }
+$script:TestInterfaces=@([pscustomobject]@{IPAddress='192.168.13.13';InterfaceAlias='Ethernet';PrefixLength=24;AddressState='Preferred'})
+function Get-NetIPAddress {param($AddressFamily,$ErrorAction) $script:TestInterfaces}
 $script:Answers=New-Object 'Collections.Generic.Queue[string]'
-foreach($answer in @('127.0.0.1','1','100','F','127.0.0.1','Select','Back','R','A','N','P','E',$script:ExportPath,'B')){$script:Answers.Enqueue($answer)}
+foreach($answer in @('M','127.0.0.1','1','100','F','127.0.0.1','Select','Back','R','A','N','P','E',$script:ExportPath,'B')){$script:Answers.Enqueue($answer)}
 function Read-Host {param($Prompt) if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
 Start-NetworkDiscovery
 $csv=@(Import-Csv -LiteralPath $script:ExportPath)
-Assert ($script:Answers.Count -eq 0 -and $csv.Count -eq 1 -and $csv[0].ScanCancelled -eq 'True' -and $csv[0].AddressesRequested -eq '2') 'Filtered navigation, details, rescan and CSV retain partial-scan context'
+Assert ($script:Answers.Count -eq 0 -and $csv.Count -eq 1 -and $csv[0].ScanCancelled -eq 'True' -and $csv[0].AddressesRequested -eq '1') 'Filtered navigation, details, rescan and CSV retain partial-scan context'
 Remove-Item -LiteralPath $script:ExportPath
