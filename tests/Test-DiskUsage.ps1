@@ -43,7 +43,9 @@ for ($i=0; $i -lt 5; $i++) { $longPath=Join-Path $longPath ('directory-'+('x'*50
 $null=[IO.Directory]::CreateDirectory(('\\?\'+$longPath))
 [IO.File]::WriteAllBytes(('\\?\'+$longPath+'\unicode-'+[char]0x00f1+'.bin'),[byte[]]::new(33))
 $longScan=Measure-DiskTree -LiteralPath $longRoot -Engine Native
-Assert-True ($longScan.Files -eq 1 -and $longScan.Nodes[$longRoot].Bytes -eq 33) 'Native scanner supports Unicode and paths beyond MAX_PATH'
+$longRootBytes=if($longScan.Nodes.ContainsKey($longRoot)){$longScan.Nodes[$longRoot].Bytes}else{-1}
+$longIssues=($longScan.Issues | ForEach-Object {"$($_.Path): $($_.Reason)"}) -join ' | '
+Assert-True ($longScan.Files -eq 1 -and $longRootBytes -eq 33) "Native scanner supports Unicode and paths beyond MAX_PATH (files=$($longScan.Files), bytes=$longRootBytes, issues=$longIssues)"
 Assert-True (@(Get-DiskChildren $longScan $longPath)[0].Bytes -eq 33) 'Long-path file listing uses native metadata'
 function Initialize-DiskScanner { throw 'Simulated Add-Type restriction' }
 $auto=Measure-DiskTree -LiteralPath $root

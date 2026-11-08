@@ -23,6 +23,8 @@ $cache=Join-Path $script:CleanupRoots.Data 'oui';Write-OldFile (Join-Path $cache
 $items=@(Get-ToolkitCleanupCandidates Both)
 Assert (@($items | Where-Object Eligible).Count -eq 3) 'Only recognized temporary data and cache are eligible'
 $item=$items | Where-Object Path -eq $package
+$currentPackage=Get-ToolkitCleanupCandidates Both | Where-Object Path -eq $package
+Assert ($currentPackage.Eligible) "Package remains eligible for removal after preview: $($currentPackage.Reason)"
 Remove-ToolkitCleanupCandidate $item Both
 Assert (-not (Test-Path $package)) 'Validated tree removed without recursive filesystem deletion'
 Assert ((Test-Path $unrelated) -and (Test-Path $backup) -and (Test-Path $saved)) 'Unrelated files, undo files and M365 reports preserved'

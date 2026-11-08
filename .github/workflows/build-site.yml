@@ -58,6 +58,7 @@ jobs:
         run: ./tests/Invoke-WindowsTests.ps1 -Suite Safe
 
       - name: Run safe Windows test suite on Windows PowerShell 5.1
+        if: always()
         shell: powershell
         env:
           LOCALAPPDATA: ${{ runner.temp }}
