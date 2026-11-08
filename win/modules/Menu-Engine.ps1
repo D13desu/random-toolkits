@@ -43,7 +43,7 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.25.3')
+    param([string]$Title,[string]$Version='0.25.4')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
     return "WINDOWS $Version | $Title"
 }
@@ -110,7 +110,7 @@ function Show-PcMenu {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [object[]]$Items=@(),
-        [string]$Version='0.25.3',
+        [string]$Version='0.25.4',
         [string]$Description='',
         [hashtable]$State=@{},
         [switch]$Filterable,

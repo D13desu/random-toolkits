@@ -1,6 +1,8 @@
-# Disk Usage 1.3.0
+# Disk Usage 1.3.1
 
 The preferred C# disk explorer with a PowerShell interface. The executable owns scanning, aggregation, the MFT tree, sorting, diagnostics and cached navigation. PowerShell receives progress and at most one page of rows per request.
+
+Version 1.3.1 extends the live `MODIFIED` value to include local hours and minutes (`YYYY-MM-DD HH:mm`) while preserving the existing on-demand metadata lookup and compact scan cache.
 
 Version 1.2.0 speeds up ordinary single-name MFT records by avoiding unnecessary full-path construction and reports a reconciled volume total. Alongside attributable file data it measures non-DATA NTFS attributes, resident data stored inside the MFT, Windows reserved space and the volume storage reserve. Metadata and reservations remain volume-wide rather than being assigned to folders; unknown allocations and any residual stay explicit.
 
@@ -8,7 +10,7 @@ Version 1.3.0 adds `L` for live changes and `R` for refresh. In an interactive C
 
 Live mode deliberately leaves the page/header totals, page membership, sorting, newly created top-level rows and volume reconciliation at their scan values. Visible directory logical sizes can update, but their ON DISK allocation remains cached until refresh. `R` starts a fresh helper process, releases the old cache, rescans the same root with the same engine and returns to the current folder when it still exists. Line-input or redirected hosts retain `R`; automatic `L` polling requires an interactive ConsoleHost.
 
-Version 1.1.0 adds a live `MODIFIED` date for each visible file and directory and the containing volume's space available to the current user. Timestamps are queried only for the current page rather than stored for every scan record, preserving the compact cache and its large-volume memory profile. Because dates and available space are live while sizes are cached, they can reflect filesystem activity after the scan.
+Version 1.1.0 adds live `MODIFIED` metadata for each visible file and directory and the containing volume's space available to the current user. Timestamps are queried only for the current page rather than stored for every scan record, preserving the compact cache and its large-volume memory profile. Because timestamps and available space are live while sizes are cached, they can reflect filesystem activity after the scan.
 
 ## Run the packaged disk explorer
 

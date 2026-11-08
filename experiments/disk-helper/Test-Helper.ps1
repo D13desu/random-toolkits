@@ -28,7 +28,7 @@ try {
     Assert ($null -eq (Invoke-DiskHelper $session @{command='profile'}).scan) 'Native scans do not fabricate MFT phase measurements'
     $first=Invoke-DiskHelper $session @{command='list';limit=20}
     Assert ($first.total -eq 48 -and @($first.rows).Count -eq 20 -and $first.rows[0].Name -eq 'nested') 'Paged listing sorts largest entries first'
-    Assert ($first.rows[0].Modified -eq '2020-02-03') 'Paged listing includes the current modified date'
+    Assert ($first.rows[0].Modified -eq '2020-02-03 12:00') 'Paged listing includes the current modified date and time'
     $report.PageResponseBytes=$session.LastResponseBytes
     $second=Invoke-DiskHelper $session @{command='list';offset=20;limit=20}
     Assert ($first.rows[-1].Path -ne $second.rows[0].Path) 'Paging advances without duplicating the boundary row'
