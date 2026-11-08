@@ -36,7 +36,7 @@ $script:Answers.Enqueue('0')
 Get-Content -Raw (Join-Path $PSScriptRoot '../win/disk/index.html') | Invoke-Expression
 Assert-True ($script:Answers.Count -eq 0) 'Standalone IEX launcher opens and exits'
 $fallback=Measure-DiskTree -LiteralPath $root -Engine PowerShell
-Assert-True ($fallback.Files -eq $scan.Files -and $fallback.Nodes[$root].Bytes -eq $scan.Nodes[$root].Bytes -and $fallback.IssueCount -eq $scan.IssueCount) 'Native and fallback agree on totals and exclusions'
+Assert-True ($fallback.Files -eq $scan.Files -and $fallback.Nodes[$fallback.Root].Bytes -eq $scan.Nodes[$scan.Root].Bytes -and $fallback.IssueCount -eq $scan.IssueCount) 'Native and fallback agree on totals and exclusions'
 $longRoot=Join-Path $env:TEMP ('toolkit-long-test-'+[guid]::NewGuid().ToString('N'))
 $longPath=$longRoot
 for ($i=0; $i -lt 5; $i++) { $longPath=Join-Path $longPath ('directory-'+('x'*50)) }
@@ -51,6 +51,6 @@ for($i=0;$i -lt 5;$i++){$scannedLongPath=$longScan.Nodes[$scannedLongPath].Child
 Assert-True (@(Get-DiskChildren $longScan $scannedLongPath)[0].Bytes -eq 33) 'Long-path file listing uses native metadata'
 function Initialize-DiskScanner { throw 'Simulated Add-Type restriction' }
 $auto=Measure-DiskTree -LiteralPath $root
-Assert-True ($auto.Nodes[$root].Bytes -eq 3089 -and @(Get-DiskChildren $auto $root).Count -eq 3) 'Restricted compilation falls back to working PowerShell scanner'
+Assert-True ($auto.Nodes[$auto.Root].Bytes -eq 3089 -and @(Get-DiskChildren $auto $auto.Root).Count -eq 3) 'Restricted compilation falls back to working PowerShell scanner'
 # Leave this small isolated fixture in TEMP; no recursive deletion through a junction.
 Write-Output "Disk tests passed on PowerShell $($PSVersionTable.PSVersion). Fixture: $root"
