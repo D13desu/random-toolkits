@@ -1699,7 +1699,7 @@ function Get-PcNetworkConnections {
         elseif($processes.ContainsKey([string]$ownerId)){
             $process=$processes[[string]$ownerId];$reused=$false
             if($socket.CreationTime -is [datetime] -and $process.CreationDate -is [datetime] -and $socket.CreationTime.Year -ge 2000){
-                $reused=$process.CreationDate.ToUniversalTime() -gt $socket.CreationTime.ToUniversalTime()
+                $reused=($process.CreationDate.ToUniversalTime() - $socket.CreationTime.ToUniversalTime()).TotalSeconds -gt 2
             }
             if($reused){$name='PID reused / exited';$ownership='Current process started after this endpoint; ownership withheld.'}
             else{$name=[string]$process.Name;$path=[string]$process.ExecutablePath}
@@ -2572,9 +2572,9 @@ function Format-PcMenuText {
     return $clean.Substring(0,$length)+'...'
 }
 function Get-PcMenuHeading {
-    param([string]$Title,[string]$Version='0.26.0')
+    param([string]$Title,[string]$Version='0.26.1')
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
-    return "WINDOWS $Version | $Title"
+    return "WINDOWS TOOLKIT $Version | $Title"
 }
 function Get-PcMenuPageSize {
     param([int]$WindowHeight,[ValidateRange(1,3)][int]$DetailLines=1,[ValidateRange(1,100)][int]$Maximum=100)

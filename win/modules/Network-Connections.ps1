@@ -31,7 +31,7 @@ function Get-PcNetworkConnections {
         elseif($processes.ContainsKey([string]$ownerId)){
             $process=$processes[[string]$ownerId];$reused=$false
             if($socket.CreationTime -is [datetime] -and $process.CreationDate -is [datetime] -and $socket.CreationTime.Year -ge 2000){
-                $reused=$process.CreationDate.ToUniversalTime() -gt $socket.CreationTime.ToUniversalTime()
+                $reused=($process.CreationDate.ToUniversalTime() - $socket.CreationTime.ToUniversalTime()).TotalSeconds -gt 2
             }
             if($reused){$name='PID reused / exited';$ownership='Current process started after this endpoint; ownership withheld.'}
             else{$name=[string]$process.Name;$path=[string]$process.ExecutablePath}
