@@ -2,6 +2,8 @@
 
 Personal system administration, investigation, and troubleshooting tools.
 
+Maintainers: see [Architecture and maintenance](ARCHITECTURE.md) for the source-of-truth map, extension recipes, build process, and GitHub Actions walkthrough.
+
 ## Toolkits
 
 | Toolkit | Purpose | Requirements |
