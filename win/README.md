@@ -64,7 +64,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 
 ### 7. Event Logs
 
-- Presets for common Windows, PowerShell, Defender, Update, Group Policy, and printing logs.
+- Presets for common Windows, PowerShell, Wi-Fi/wired networking, Hyper-V, clustering, Defender, Update, Group Policy, printing, scheduled-task, Remote Desktop, Code Integrity, and BitLocker logs.
 - Custom log selection, time/event/severity/provider/message filters, paging, full messages, and XML details.
 
 ### 8. Registry tweaks
