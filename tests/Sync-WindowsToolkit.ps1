@@ -42,6 +42,7 @@ $syncScripts=@(
     'Sync-SystemMaintenance.ps1'
     'Sync-SysinternalsLauncher.ps1'
     'Sync-MenuEngine.ps1'
+    'Sync-SqlSnippets.ps1'
     'Sync-RegistryTweaks.ps1'
 )
 

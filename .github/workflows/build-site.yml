@@ -34,6 +34,10 @@ jobs:
         shell: pwsh
         run: ./tests/Test-SysinternalsLauncher.ps1
 
+      - name: Test SQL Server snippets
+        shell: pwsh
+        run: ./tests/Test-SqlSnippets.ps1
+
       - name: Test certificate and TLS diagnostics
         shell: pwsh
         run: ./tests/Test-CertificateTls.ps1
