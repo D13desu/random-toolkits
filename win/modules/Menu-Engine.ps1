@@ -45,6 +45,7 @@ function Format-PcMenuText {
 function Get-PcMenuHeading {
     param([string]$Title,[string]$Version=$script:PcToolkitVersion)
     if($Title -eq 'Windows'){return "WINDOWS TOOLKIT $Version"}
+    if($Title.StartsWith('Windows > ')){$Title=$Title.Substring(10)}
     return "WINDOWS TOOLKIT $Version | $Title"
 }
 function Get-PcMenuPageSize {
