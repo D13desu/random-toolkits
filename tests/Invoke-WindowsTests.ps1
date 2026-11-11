@@ -29,6 +29,7 @@ $safeTests = @(
     'Test-PowerToolkit.ps1'
     'Test-RegistryTweaks.ps1'
     'Test-SecurityUpdates.ps1'
+    'Test-SqlSnippets.ps1'
     'Test-StartupTasks.ps1'
     'Test-SysinternalsLauncher.ps1'
     'Test-SystemMaintenance.ps1'

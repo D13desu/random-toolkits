@@ -59,7 +59,7 @@ push / pull request
 
 `experiments/` contains prototypes. Nothing there is published unless a build script explicitly copies or embeds it.
 
-Current modular blocks cover health, certificate and TLS diagnostics, shared menus, network connections/discovery, registry tweaks, startup tasks, system maintenance, cleanup, and Sysinternals Live launchers. Their filenames and marker pairs are the definitive inventory.
+Current modular blocks cover health, certificate and TLS diagnostics, shared menus, network connections/discovery, registry tweaks, startup tasks, system maintenance, cleanup, SQL Server snippets, and Sysinternals Live launchers. Their filenames and marker pairs are the definitive inventory.
 
 ## Source of truth: what to edit
 
@@ -305,6 +305,7 @@ Keep numbering stable when possible; users may build habits or documentation aro
 
 - `Sync-DiskMft.ps1` embeds `MftScanner.cs` between C# markers in `Disk-Usage.ps1`, then creates `win/disk/index.html`.
 - Each feature sync script replaces one marked block in `Windows-Toolkit.ps1` from its module.
+- `Sync-SqlSnippets.ps1` first regenerates the `Get-PcSqlSnippetRegistry` data section inside `win/modules/Sql-Snippets.ps1` from `win/sql/snippets.ps1` and the per-snippet `.sql` files, then injects the module between its markers.
 - Each sync also copies the current assembled launcher to `win/index.html`; the final copy contains all preceding replacements.
 - The orchestrator compares SHA-256 hashes of both published endpoints with their source files and fails on a mismatch.
 

@@ -130,6 +130,14 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Readiness summary plus Schannel, CAPI2, and certificate-lifecycle diagnostics.
 - Diagnostics do not export private keys, change bindings, enable event channels, or alter Schannel configuration.
 
+### 17. SQL Server Snippets
+
+- A browsable library of copy-only T-SQL queries for troubleshooting SQL Server client environments, grouped into Users & Security, Database Health, Performance, Maintenance, Connections & Sessions, and Troubleshooting.
+- Each snippet shows its type (read-only or modification), description, parameters, and the generated query; modification queries carry a warning.
+- Queries are generated, displayed, and copied to the clipboard; the toolkit never connects to a server, executes SQL, or requests SQL Server credentials.
+- Parameters substitute safely: identifiers are bracket-escaped and string literals are N-quoted and escaped.
+- See [win/sql/README.md](sql/README.md) for how to add a snippet.
+
 ### 99. Toolkit cleanup
 
 - Preview and remove recognized toolkit temporary packages, reports, test fixtures, and download caches.
