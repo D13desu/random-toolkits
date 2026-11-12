@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.28.1
+# Random Toolkits | Windows Toolkit 0.28.2
 
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
@@ -9,7 +9,7 @@ param(
     [ValidateRange(1,65535)][int]$Port = 443,
     [string]$DomainController
 )
-$script:PcToolkitVersion='0.28.1'
+$script:PcToolkitVersion='0.28.2'
 
 function Read-PcInput {
     param([string]$Prompt)
@@ -2546,6 +2546,9 @@ function ConvertFrom-PcMenuKey($Key) {
     return [string]$Key.KeyChar
 }
 function Read-PcMenuKey { return [Console]::ReadKey($true) }
+function Test-PcMenuQuitKey($Key) {
+    return ($Key.Key -eq [ConsoleKey]::C -and ($Key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
+}
 function Write-PcMenuSelection([string]$Digits) {
     Write-Host ("`rSelection: {0,-10}" -f ($Digits+'_')) -NoNewline -ForegroundColor Cyan
 }
@@ -2556,6 +2559,7 @@ function Read-PcMenuInput([bool]$Keyboard) {
     try {
         while($true){
             $key=Read-PcMenuKey
+            if(Test-PcMenuQuitKey $key){throw [OperationCanceledException]::new('Windows Toolkit quit requested.')}
             if($key.Key -eq 'Backspace' -and $digits.Length){$digits=$digits.Substring(0,$digits.Length-1);Write-PcMenuSelection $digits;continue}
             $value=ConvertFrom-PcMenuKey $key
             if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};Write-PcMenuSelection $digits;continue}
@@ -2910,11 +2914,19 @@ function Get-PcDeviceJoinHeader {
         if(-not $command){return $result}
         $text=& $command.Source /status 2>$null | Out-String
         $status=ConvertFrom-PcDsRegStatus $text
-        $result.Entra=if($status.AzureAdJoined -eq 'YES'){'Joined'}elseif($status.WorkplaceJoined -eq 'YES'){'Registered'}elseif($status.AzureAdJoined -eq 'NO' -and $status.WorkplaceJoined -eq 'NO'){'No'}else{'Unavailable'}
-        $result.Prt=if($status.AzureAdPrt -eq 'YES'){'Yes'}elseif($status.AzureAdPrt -eq 'NO'){'No'}else{'Unavailable'}
-        $result.DeviceAuth=$status.DeviceAuthStatus
+        $result=ConvertTo-PcDeviceJoinHeader $status
     }catch{}
     return $result
+}
+
+function ConvertTo-PcDeviceJoinHeader($Status) {
+    # WorkplaceJoined is user-scoped registration and must not be presented as
+    # Microsoft Entra device membership.
+    [pscustomobject]@{
+        Entra=if($Status.AzureAdJoined -eq 'YES'){'Joined'}elseif($Status.AzureAdJoined -eq 'NO'){'No'}else{'Unavailable'}
+        Prt=if($Status.AzureAdPrt -eq 'YES'){'Yes'}elseif($Status.AzureAdPrt -eq 'NO'){'No'}else{'Unavailable'}
+        DeviceAuth=$Status.DeviceAuthStatus
+    }
 }
 
 function Get-PcNetworkPathHeader {
@@ -3001,7 +3013,7 @@ function Get-PcProtectionHeader {
     [pscustomobject]@{Firewall=$firewall;BitLocker=$bitLocker;SecureBoot=$secureBoot;Tpm=$tpm;Vbs=$vbs}
 }
 
-function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.28.1') {
+function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.28.2') {
     return ($null -ne $Summary -and [string]$Summary.SchemaVersion -eq $SchemaVersion)
 }
 
@@ -3013,7 +3025,7 @@ function Format-PcUptime([timespan]$Value) {
 }
 
 function Get-PcSystemSummary {
-    $schemaVersion='0.28.1'
+    $schemaVersion='0.28.2'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
@@ -5057,4 +5069,9 @@ if ($PSVersionTable.PSVersion -lt [version]'5.0') { throw 'Windows PowerShell 5.
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This toolkit requires Windows.' }
 if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }
 elseif ($Check) { Invoke-NetworkCheck $Check $Target $Port }
-elseif (-not $NoMenu) { Start-WindowsMenu }
+elseif (-not $NoMenu) {
+    try { Start-WindowsMenu }
+    catch [OperationCanceledException] {
+        if($_.Exception.Message -ne 'Windows Toolkit quit requested.'){throw}
+    }
+}

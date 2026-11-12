@@ -15,6 +15,9 @@ function ConvertFrom-PcMenuKey($Key) {
     return [string]$Key.KeyChar
 }
 function Read-PcMenuKey { return [Console]::ReadKey($true) }
+function Test-PcMenuQuitKey($Key) {
+    return ($Key.Key -eq [ConsoleKey]::C -and ($Key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
+}
 function Write-PcMenuSelection([string]$Digits) {
     Write-Host ("`rSelection: {0,-10}" -f ($Digits+'_')) -NoNewline -ForegroundColor Cyan
 }
@@ -25,6 +28,7 @@ function Read-PcMenuInput([bool]$Keyboard) {
     try {
         while($true){
             $key=Read-PcMenuKey
+            if(Test-PcMenuQuitKey $key){throw [OperationCanceledException]::new('Windows Toolkit quit requested.')}
             if($key.Key -eq 'Backspace' -and $digits.Length){$digits=$digits.Substring(0,$digits.Length-1);Write-PcMenuSelection $digits;continue}
             $value=ConvertFrom-PcMenuKey $key
             if($value -match '^\d$'){if($digits.Length -lt 9){$digits+=$value};Write-PcMenuSelection $digits;continue}

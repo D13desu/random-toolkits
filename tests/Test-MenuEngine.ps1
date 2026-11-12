@@ -104,6 +104,10 @@ $script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]27,[ConsoleKey]::Escape,$fal
 Assert ((Read-PcMenuInput $true) -eq 'Back') 'Escape cancels pending numeric input'
 $script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]13,[ConsoleKey]::Enter,$false,$false,$false))
 Assert ((Read-PcMenuInput $true) -eq 'Select') 'Pending digits do not leak into subsequent prompts'
+$script:RawKeys.Enqueue([ConsoleKeyInfo]::new([char]3,[ConsoleKey]::C,$false,$false,$true))
+$quitRaised=$false
+try{$null=Read-PcMenuInput $true}catch [OperationCanceledException]{$quitRaised=$_.Exception.Message -eq 'Windows Toolkit quit requested.'}
+Assert $quitRaised 'Ctrl+C quits immediately when the console supplies it as a key event'
 
 $script:IncrementalAnswers=New-Object 'Collections.Generic.Queue[string]'
 foreach($answer in @('Down','Up','B')){$script:IncrementalAnswers.Enqueue($answer)}

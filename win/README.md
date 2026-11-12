@@ -14,7 +14,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 
 - Use arrow keys and Enter, or type a menu number.
 - Use **B**, **Esc**, or **0** to go back.
-- The main menu stays open when a back control is pressed; use **Ctrl+C** to quit the toolkit.
+- The main menu stays open when a back control is pressed; use **Ctrl+C** to quit the toolkit immediately.
 - Main-menu identity, network, hardware, OS, and security summary lines use distinct high-contrast colors.
 - Lists may offer **F** to filter, **R** to refresh, and **N/P** to change pages.
 - Unavailable tools remain visible with their missing requirement.
@@ -29,7 +29,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Internet-route private IPv4 and public IP summary.
 - Main header device uptime, formatted as days/hours/minutes for quick restart context.
 - Main header security summary with active Defender product/signature versions, or registered third-party antivirus names when Defender is passive.
-- Main header elevation/runtime, AD or workgroup and Microsoft Entra state, active route adapter, gateway, link speed, VPN indication, resource percentages, restart state, firewall, BitLocker, Secure Boot, TPM, and VBS summaries.
+- Main header elevation/runtime, AD or workgroup and Microsoft Entra device-join state (excluding user workplace registration), active route adapter, gateway, link speed, VPN indication, resource percentages, restart state, firewall, BitLocker, Secure Boot, TPM, and VBS summaries.
 
 ### 2. Network
 
