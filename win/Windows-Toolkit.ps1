@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.28.0
+# Random Toolkits | Windows Toolkit 0.28.1
 
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
@@ -9,7 +9,7 @@ param(
     [ValidateRange(1,65535)][int]$Port = 443,
     [string]$DomainController
 )
-$script:PcToolkitVersion='0.28.0'
+$script:PcToolkitVersion='0.28.1'
 
 function Read-PcInput {
     param([string]$Prompt)
@@ -2768,9 +2768,10 @@ function New-PcMenuItem {
 }
 function Get-PcMainSummaryColor([string]$Text) {
     switch -Regex ($Text){
-        '^Host:'{return 'Cyan'}
+        '^(Device|Network):'{return 'Cyan'}
         '^Storage:'{return 'Green'}
-        '^Security:'{return 'Magenta'}
+        '^Resources:'{return 'Yellow'}
+        '^(Security|Protection):'{return 'Magenta'}
         default{return 'White'}
     }
 }
@@ -2887,7 +2888,120 @@ function Get-PcSecurityHeader {
     return 'Unavailable'
 }
 
-function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.25.0') {
+function ConvertFrom-PcDsRegStatus {
+    param([AllowEmptyString()][string]$Text)
+    $readValue={param([string]$Name)
+        $match=[regex]::Match($Text,('(?im)^\s*'+[regex]::Escape($Name)+'\s*:\s*([^\r\n]+)'))
+        if($match.Success){return $match.Groups[1].Value.Trim()}
+        return 'Unavailable'
+    }
+    [pscustomobject]@{
+        AzureAdJoined=& $readValue 'AzureAdJoined'
+        WorkplaceJoined=& $readValue 'WorkplaceJoined'
+        AzureAdPrt=& $readValue 'AzureAdPrt'
+        DeviceAuthStatus=& $readValue 'DeviceAuthStatus'
+    }
+}
+
+function Get-PcDeviceJoinHeader {
+    $result=[pscustomobject]@{Entra='Unavailable';Prt='Unavailable';DeviceAuth='Unavailable'}
+    try{
+        $command=Get-Command dsregcmd.exe -ErrorAction SilentlyContinue
+        if(-not $command){return $result}
+        $text=& $command.Source /status 2>$null | Out-String
+        $status=ConvertFrom-PcDsRegStatus $text
+        $result.Entra=if($status.AzureAdJoined -eq 'YES'){'Joined'}elseif($status.WorkplaceJoined -eq 'YES'){'Registered'}elseif($status.AzureAdJoined -eq 'NO' -and $status.WorkplaceJoined -eq 'NO'){'No'}else{'Unavailable'}
+        $result.Prt=if($status.AzureAdPrt -eq 'YES'){'Yes'}elseif($status.AzureAdPrt -eq 'NO'){'No'}else{'Unavailable'}
+        $result.DeviceAuth=$status.DeviceAuthStatus
+    }catch{}
+    return $result
+}
+
+function Get-PcNetworkPathHeader {
+    $result=[ordered]@{Adapter='Unavailable';LinkSpeed='Unavailable';Gateway='Unavailable';Dns='Unavailable';Vpn='Unavailable';Proxy='Unavailable'}
+    try{
+        $routes=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop | Where-Object {$_.State -ne 'Invalid'} | Sort-Object @{Expression={([int64]$_.RouteMetric)+([int64]$_.InterfaceMetric)}},InterfaceIndex)
+        if($routes.Count){
+            $index=[int]$routes[0].InterfaceIndex
+            $adapter=Get-NetAdapter -InterfaceIndex $index -ErrorAction Stop
+            if($adapter.Name){$result.Adapter=[string]$adapter.Name}
+            if($adapter.LinkSpeed){$result.LinkSpeed=[string]$adapter.LinkSpeed}
+            $description=([string]$adapter.Name+' '+[string]$adapter.InterfaceDescription)
+            $result.Vpn=if($description -match '(?i)\b(VPN|WireGuard|OpenVPN|AnyConnect|GlobalProtect|Fortinet|TAP|TUN)\b'){'Yes'}else{'No'}
+            try{
+                $config=Get-NetIPConfiguration -InterfaceIndex $index -ErrorAction Stop
+                if($config.IPv4DefaultGateway.NextHop){$result.Gateway=[string]$config.IPv4DefaultGateway.NextHop}
+                $dns=@($config.DnsServer.ServerAddresses | Where-Object {$_})
+                if($dns.Count){$result.Dns=$dns -join ','}
+            }catch{}
+        }
+    }catch{}
+    if($result.Adapter -eq 'Unavailable'){
+        try{
+            $privateIp=Get-PcInternetPrivateIPv4
+            $interfaces=@([Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object {$_.OperationalStatus -eq [Net.NetworkInformation.OperationalStatus]::Up})
+            $selected=$interfaces | Where-Object {
+                $properties=$_.GetIPProperties()
+                @($properties.UnicastAddresses | Where-Object {[string]$_.Address -eq $privateIp}).Count -gt 0
+            } | Select-Object -First 1
+            if(-not $selected){$selected=$interfaces | Where-Object {@($_.GetIPProperties().GatewayAddresses | Where-Object {$_.Address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork}).Count} | Select-Object -First 1}
+            if($selected){
+                $properties=$selected.GetIPProperties()
+                $result.Adapter=[string]$selected.Name
+                if([int64]$selected.Speed -gt 0){$result.LinkSpeed=if($selected.Speed -ge 1000000000){'{0:N1} Gbps' -f ($selected.Speed/1000000000)}else{'{0:N0} Mbps' -f ($selected.Speed/1000000)}}
+                $gateway=@($properties.GatewayAddresses | Where-Object {$_.Address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork} | Select-Object -First 1)
+                if($gateway.Count){$result.Gateway=[string]$gateway[0].Address}
+                $dns=@($properties.DnsAddresses | Where-Object {$_.AddressFamily -in @([Net.Sockets.AddressFamily]::InterNetwork,[Net.Sockets.AddressFamily]::InterNetworkV6)} | ForEach-Object {[string]$_})
+                if($dns.Count){$result.Dns=$dns -join ','}
+                $description=([string]$selected.Name+' '+[string]$selected.Description)
+                $result.Vpn=if($selected.NetworkInterfaceType -in @([Net.NetworkInformation.NetworkInterfaceType]::Ppp,[Net.NetworkInformation.NetworkInterfaceType]::Tunnel) -or $description -match '(?i)\b(VPN|WireGuard|OpenVPN|AnyConnect|GlobalProtect|Fortinet|TAP|TUN)\b'){'Yes'}else{'No'}
+            }
+        }catch{}
+    }
+    try{
+        $proxy=Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction Stop
+        $result.Proxy=if([int]$proxy.ProxyEnable -eq 1){if($proxy.ProxyServer){'On ('+[string]$proxy.ProxyServer+')'}else{'On'}}else{'Off'}
+    }catch{}
+    [pscustomobject]$result
+}
+
+function Get-PcRestartHeader {
+    try{
+        $pending=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
+            (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
+        $rename=(Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+        if($pending -or $rename){return 'Yes'}
+        return 'No'
+    }catch{return 'Unavailable'}
+}
+
+function Get-PcProtectionHeader {
+    $firewall='Unavailable';$bitLocker='Unavailable';$secureBoot='Unavailable';$tpm='Unavailable';$vbs='Unavailable'
+    try{
+        if(Get-Command Get-NetFirewallProfile -ErrorAction SilentlyContinue){
+            $profiles=@(Get-NetFirewallProfile -ErrorAction Stop)
+            $disabled=@($profiles | Where-Object {-not $_.Enabled})
+            if($profiles.Count){$firewall=if($disabled.Count){'Review ('+(@($disabled.Name) -join ',')+' off)'}else{'On'}}
+        }
+    }catch{}
+    try{
+        if(Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue){
+            $volume=Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
+            $bitLocker=if([string]$volume.ProtectionStatus -eq 'On'){'On'}elseif($null -ne $volume.ProtectionStatus){'Off'}else{'Unavailable'}
+        }
+    }catch{}
+    try{$secureBoot=if(Confirm-SecureBootUEFI -ErrorAction Stop){'On'}else{'Off'}}catch{}
+    try{
+        if(Get-Command Get-Tpm -ErrorAction SilentlyContinue){$chip=Get-Tpm -ErrorAction Stop;$tpm=if($chip.TpmPresent){if($chip.TpmReady){'Ready'}else{'Not ready'}}else{'Not present'}}
+    }catch{}
+    try{
+        $guard=Get-CimInstance -Namespace 'root/Microsoft/Windows/DeviceGuard' -ClassName Win32_DeviceGuard -OperationTimeoutSec 3 -ErrorAction Stop
+        $vbs=switch([int]$guard.VirtualizationBasedSecurityStatus){2{'Running'}1{'Enabled'}0{'Off'}default{'Unknown'}}
+    }catch{}
+    [pscustomobject]@{Firewall=$firewall;BitLocker=$bitLocker;SecureBoot=$secureBoot;Tpm=$tpm;Vbs=$vbs}
+}
+
+function Test-PcSystemSummaryCache($Summary,[string]$SchemaVersion='0.28.1') {
     return ($null -ne $Summary -and [string]$Summary.SchemaVersion -eq $SchemaVersion)
 }
 
@@ -2899,7 +3013,7 @@ function Format-PcUptime([timespan]$Value) {
 }
 
 function Get-PcSystemSummary {
-    $schemaVersion='0.25.0'
+    $schemaVersion='0.28.1'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
     $unavailable='Unavailable'
@@ -2908,6 +3022,9 @@ function Get-PcSystemSummary {
     $userSid=$unavailable;$authenticationType=$unavailable;$administrator=$unavailable;$groupNames=@()
     $manufacturer=$unavailable;$model=$unavailable;$domain=$unavailable;$domainJoined=$unavailable
     $cpuCores=$unavailable;$logicalProcessors=$unavailable;$diskDetails=@();$osArchitecture=$unavailable;$lastBoot=$unavailable;$lastBootTime=$null;$uptime=$unavailable
+    $runtime=('PowerShell '+$PSVersionTable.PSVersion+' '+$(if([Environment]::Is64BitProcess){'x64'}else{'x86'}))
+    $storageFreePercent=$unavailable;$cpuLoad=$unavailable;$ramUsage=$unavailable;$restartPending=$unavailable
+    $joinSummary=$unavailable;$entra='Unavailable';$prt='Unavailable';$networkPath=$null;$protection=$null
 
     try {
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -2930,7 +3047,8 @@ function Get-PcSystemSummary {
         $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -OperationTimeoutSec 5 -ErrorAction Stop | Where-Object Size)
         if($disks.Count){
             $total=($disks | Measure-Object Size -Sum).Sum;$free=($disks | Measure-Object FreeSpace -Sum).Sum
-            $storage=('{0:N1} GiB free / {1:N1} GiB' -f ($free/1GB),($total/1GB))
+            $storageFreePercent=('{0:N1}%' -f (100*$free/$total))
+            $storage=('{0:N1} GiB free / {1:N1} GiB ({2})' -f ($free/1GB),($total/1GB),$storageFreePercent)
             $diskDetails=@($disks | Sort-Object DeviceID | ForEach-Object {('{0} {1:N1} GiB free / {2:N1} GiB' -f $_.DeviceID,($_.FreeSpace/1GB),($_.Size/1GB))})
         }
     } catch {}
@@ -2940,6 +3058,8 @@ function Get-PcSystemSummary {
             $cpu=(@($processors.Name | ForEach-Object {$_.Trim()} | Sort-Object -Unique) -join ' + ')
             $cpuCores=[string](($processors | Measure-Object NumberOfCores -Sum).Sum)
             $logicalProcessors=[string](($processors | Measure-Object NumberOfLogicalProcessors -Sum).Sum)
+            $loads=@($processors.LoadPercentage | Where-Object {$null -ne $_})
+            if($loads.Count){$cpuLoad=('{0:N0}%' -f (($loads | Measure-Object -Average).Average))}
         }
     } catch {}
     try {
@@ -2949,14 +3069,23 @@ function Get-PcSystemSummary {
         if($computer.Model){$model=[string]$computer.Model}
         if($computer.Domain){$domain=[string]$computer.Domain}
         $domainJoined=[string][bool]$computer.PartOfDomain
+        $joinSummary=if($computer.PartOfDomain){'AD: '+$domain}else{'Workgroup: '+$domain}
     } catch {}
     try {
         $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5 -ErrorAction Stop
         $osVersion=('{0} {1} (build {2})' -f $os.Caption,$os.Version,$os.BuildNumber).Trim()
         if($os.OSArchitecture){$osArchitecture=[string]$os.OSArchitecture}
+        if($os.TotalVisibleMemorySize){
+            $usedKb=[double]$os.TotalVisibleMemorySize-[double]$os.FreePhysicalMemory
+            $ramUsage=('{0:N1} / {1:N1} GiB used ({2:N1}%)' -f ($usedKb/1MB),([double]$os.TotalVisibleMemorySize/1MB),(100*$usedKb/[double]$os.TotalVisibleMemorySize))
+        }
         if($os.LastBootUpTime){$lastBootTime=[datetime]$os.LastBootUpTime;$lastBoot=$lastBootTime.ToString('yyyy-MM-dd HH:mm:ss');$uptime=Format-PcUptime ((Get-Date)-$lastBootTime)}
     } catch {}
     try{$securitySummary=Get-PcSecurityHeader}catch{}
+    try{$join=Get-PcDeviceJoinHeader;$entra=$join.Entra;$prt=$join.Prt}catch{}
+    try{$networkPath=Get-PcNetworkPathHeader}catch{}
+    try{$restartPending=Get-PcRestartHeader}catch{}
+    try{$protection=Get-PcProtectionHeader}catch{}
 
     $script:PcSystemSummary=[pscustomobject]@{
         SchemaVersion=$schemaVersion
@@ -2966,6 +3095,8 @@ function Get-PcSystemSummary {
         Manufacturer=$manufacturer;Model=$model;Domain=$domain;DomainJoined=$domainJoined
         CpuCores=$cpuCores;LogicalProcessors=$logicalProcessors;DiskDetails=@($diskDetails)
         OsArchitecture=$osArchitecture;LastBoot=$lastBoot;LastBootTime=$lastBootTime;Uptime=$uptime
+        Runtime=$runtime;StorageFreePercent=$storageFreePercent;CpuLoad=$cpuLoad;RamUsage=$ramUsage;RestartPending=$restartPending
+        JoinSummary=$joinSummary;Entra=$entra;Prt=$prt;NetworkPath=$networkPath;Protection=$protection
     }
     return $script:PcSystemSummary
 }
@@ -2987,16 +3118,29 @@ function Show-PcSystemDetails($Summary) {
     Write-Host ('Model: '+$Summary.Model)
     Write-Host ('Domain/workgroup: '+$Summary.Domain)
     Write-Host ('Domain joined: '+$Summary.DomainJoined)
+    Write-Host ('Join summary: '+$Summary.JoinSummary)
+    Write-Host ('Microsoft Entra: '+$Summary.Entra)
+    Write-Host ('Primary Refresh Token: '+$Summary.Prt)
 
     Write-Host "`nNETWORK" -ForegroundColor Cyan
     Write-Host ('Internet-route private IPv4: '+$Summary.PrivateIp)
     Write-Host ('Public IP: '+$Summary.PublicIp)
+    if($Summary.NetworkPath){
+        Write-Host ('Active adapter: '+$Summary.NetworkPath.Adapter)
+        Write-Host ('Link speed: '+$Summary.NetworkPath.LinkSpeed)
+        Write-Host ('Default gateway: '+$Summary.NetworkPath.Gateway)
+        Write-Host ('DNS servers: '+$Summary.NetworkPath.Dns)
+        Write-Host ('VPN detected: '+$Summary.NetworkPath.Vpn)
+        Write-Host ('User proxy: '+$Summary.NetworkPath.Proxy)
+    }
 
     Write-Host "`nHARDWARE" -ForegroundColor Cyan
     Write-Host ('CPU: '+$Summary.Cpu)
     Write-Host ('Physical cores: '+$Summary.CpuCores)
     Write-Host ('Logical processors: '+$Summary.LogicalProcessors)
     Write-Host ('Physical RAM: '+$Summary.Ram)
+    Write-Host ('Current CPU load: '+$Summary.CpuLoad)
+    Write-Host ('Current RAM: '+$Summary.RamUsage)
     Write-Host 'Fixed storage:'
     if(@($Summary.DiskDetails).Count){foreach($disk in $Summary.DiskDetails){Write-Host ('  '+$disk)}}else{Write-Host ('  '+$Summary.Storage)}
 
@@ -3005,6 +3149,16 @@ function Show-PcSystemDetails($Summary) {
     Write-Host ('Architecture: '+$Summary.OsArchitecture)
     Write-Host ('Last boot: '+$Summary.LastBoot)
     Write-Host ('Uptime: '+(Get-PcSummaryUptime $Summary))
+    Write-Host ('Restart pending: '+$Summary.RestartPending)
+    Write-Host ('PowerShell runtime: '+$Summary.Runtime)
+    if($Summary.Protection){
+        Write-Host "`nPROTECTION" -ForegroundColor Cyan
+        Write-Host ('Firewall: '+$Summary.Protection.Firewall)
+        Write-Host ('BitLocker OS volume: '+$Summary.Protection.BitLocker)
+        Write-Host ('Secure Boot: '+$Summary.Protection.SecureBoot)
+        Write-Host ('TPM: '+$Summary.Protection.Tpm)
+        Write-Host ('VBS: '+$Summary.Protection.Vbs)
+    }
     Write-Host "`nEnter / Esc / Backspace / B: back"
     if(Test-PcMenuKeyboard){
         while($true){
@@ -3022,12 +3176,20 @@ function Get-PcSummaryUptime($Summary) {
 
 function Format-PcSystemSummary($Summary) {
     $uptime=Get-PcSummaryUptime $Summary
+    $admin=if([string]$Summary.Administrator -eq 'True'){'Yes'}elseif([string]$Summary.Administrator -eq 'False'){'No'}else{[string]$Summary.Administrator}
+    $network=$Summary.NetworkPath
+    $networkText=if($network){"$($network.Adapter) | $($network.LinkSpeed) | Private: $($Summary.PrivateIp) | Gateway: $($network.Gateway) | VPN: $($network.Vpn) | Public: $($Summary.PublicIp)"}else{"Private: $($Summary.PrivateIp) | Public: $($Summary.PublicIp)"}
+    $protection=$Summary.Protection
+    $protectionText=if($protection){"Firewall: $($protection.Firewall) | BitLocker: $($protection.BitLocker) | Secure Boot: $($protection.SecureBoot) | TPM: $($protection.Tpm) | VBS: $($protection.Vbs)"}else{'Unavailable'}
     @(
-        "User: $($Summary.Username)"
-        "Host: $($Summary.Hostname) | Public IP: $($Summary.PublicIp) | Private IP: $($Summary.PrivateIp)"
+        "Identity: $($Summary.Username) | Admin: $admin | $($Summary.Runtime)"
+        "Device: $($Summary.Hostname) | $($Summary.JoinSummary) | Entra: $($Summary.Entra) | PRT: $($Summary.Prt)"
+        "Network: $networkText"
         "Storage: $($Summary.Storage) | CPU: $($Summary.Cpu) | RAM: $($Summary.Ram)"
-        "OS: $($Summary.OsVersion) | Uptime: $uptime"
+        "Resources: CPU $($Summary.CpuLoad) | RAM $($Summary.RamUsage)"
+        "OS: $($Summary.OsVersion) | Uptime: $uptime | Restart pending: $($Summary.RestartPending)"
         "Security: $($Summary.SecuritySummary)"
+        "Protection: $protectionText"
     )
 }
 

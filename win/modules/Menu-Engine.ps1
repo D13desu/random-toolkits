@@ -237,9 +237,10 @@ function New-PcMenuItem {
 }
 function Get-PcMainSummaryColor([string]$Text) {
     switch -Regex ($Text){
-        '^Host:'{return 'Cyan'}
+        '^(Device|Network):'{return 'Cyan'}
         '^Storage:'{return 'Green'}
-        '^Security:'{return 'Magenta'}
+        '^Resources:'{return 'Yellow'}
+        '^(Security|Protection):'{return 'Magenta'}
         default{return 'White'}
     }
 }

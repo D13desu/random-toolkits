@@ -29,6 +29,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Internet-route private IPv4 and public IP summary.
 - Main header device uptime, formatted as days/hours/minutes for quick restart context.
 - Main header security summary with active Defender product/signature versions, or registered third-party antivirus names when Defender is passive.
+- Main header elevation/runtime, AD or workgroup and Microsoft Entra state, active route adapter, gateway, link speed, VPN indication, resource percentages, restart state, firewall, BitLocker, Secure Boot, TPM, and VBS summaries.
 
 ### 2. Network
 

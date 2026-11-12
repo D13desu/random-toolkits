@@ -44,8 +44,8 @@ Assert ((Format-PcMenuText ("a`nb"+[char]27) 20) -eq 'a b ') 'Control characters
 Assert ((Format-PcMenuText ('x'*80) 20).Length -eq 20) 'Long rows are bounded'
 Assert ((Get-PcMenuHeading Windows) -eq "WINDOWS TOOLKIT $script:PcToolkitVersion") 'Root menu uses the toolkit product heading without a redundant breadcrumb'
 Assert ((Get-PcMenuHeading 'Windows > Network') -eq "WINDOWS TOOLKIT $script:PcToolkitVersion | Network") 'Submenu headings drop the redundant Windows root segment already covered by the toolkit name'
-Assert ((Get-PcMainSummaryColor 'User: fixture') -eq 'White' -and (Get-PcMainSummaryColor 'OS: fixture') -eq 'White') 'Identity and OS summary lines use high-contrast white'
-Assert ((Get-PcMainSummaryColor 'Host: fixture') -eq 'Cyan' -and (Get-PcMainSummaryColor 'Storage: fixture') -eq 'Green' -and (Get-PcMainSummaryColor 'Security: fixture') -eq 'Magenta') 'Network, hardware, and security summary lines use distinct colors'
+Assert ((Get-PcMainSummaryColor 'Identity: fixture') -eq 'White' -and (Get-PcMainSummaryColor 'OS: fixture') -eq 'White') 'Identity and OS summary lines use high-contrast white'
+Assert ((Get-PcMainSummaryColor 'Device: fixture') -eq 'Cyan' -and (Get-PcMainSummaryColor 'Network: fixture') -eq 'Cyan' -and (Get-PcMainSummaryColor 'Storage: fixture') -eq 'Green' -and (Get-PcMainSummaryColor 'Resources: fixture') -eq 'Yellow' -and (Get-PcMainSummaryColor 'Protection: fixture') -eq 'Magenta') 'Device, network, resource, and protection summary lines use distinct colors'
 $script:Output.Clear();Feed @('B')
 $null=Read-PcCategoryMenu 'Windows > Concise' @((New-PcMenuItem '1' 'Legacy tool' 'Check' 'PowerShell 5.1+ | descriptive text'),(New-PcMenuItem '2' 'Modern tool' 'Check' 'PowerShell 7.4+ | Administrator'),(New-PcMenuItem '3' 'Cleanup' 'Change' 'Preview and remove files')) @{}
 $categoryText=$script:Output -join '|'
