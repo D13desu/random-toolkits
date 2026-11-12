@@ -35,6 +35,10 @@ foreach ($snippet in $snippets) {
 
     if ([string]::IsNullOrWhiteSpace([string]$snippet.Title)) { throw "Snippet $id has no Title." }
     if ([string]::IsNullOrWhiteSpace([string]$snippet.Description)) { throw "Snippet $id has no Description." }
+    foreach ($field in @('Scope', 'Permissions', 'Compatibility', 'Cost')) {
+        if ([string]::IsNullOrWhiteSpace([string]$snippet.$field)) { throw "Snippet $id has no $field metadata." }
+    }
+    if ([string]$snippet.Cost -notin @('Light', 'Moderate', 'Heavy')) { throw "Snippet $id has invalid Cost '$($snippet.Cost)'." }
     $category = [string]$snippet.Category
     if ($category -notin $knownCategories) { throw "Snippet $id has unknown Category '$category'." }
     $type = [string]$snippet.Type
@@ -42,7 +46,13 @@ foreach ($snippet in $snippets) {
 
     $sqlFile = [string]$snippet.SqlFile
     if ([string]::IsNullOrWhiteSpace($sqlFile)) { throw "Snippet $id has no SqlFile." }
+    $expectedSqlFile = "$category/$id.sql"
+    if ($sqlFile.Replace('\', '/') -cne $expectedSqlFile) { throw "Snippet $id SqlFile must be '$expectedSqlFile'." }
     $sqlPath = Join-Path $sqlRoot $sqlFile
+    $resolvedSqlPath = [IO.Path]::GetFullPath($sqlPath)
+    if (-not $resolvedSqlPath.StartsWith(([IO.Path]::GetFullPath($sqlRoot) + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Snippet $id SQL file escapes win/sql: $sqlFile"
+    }
     if (-not [IO.File]::Exists($sqlPath)) { throw "Snippet $id references missing SQL file: $sqlFile" }
 
     $parameters = @($snippet.Parameters)
@@ -53,7 +63,8 @@ foreach ($snippet in $snippets) {
         if ($paramNames.ContainsKey($name)) { throw "Snippet $id has duplicate parameter '$name'." }
         $paramNames[$name] = $true
         $kind = if ($parameter.Kind) { [string]$parameter.Kind } else { 'Identifier' }
-        if ($kind -notin @('Identifier', 'Literal', 'Raw')) { throw "Snippet $id parameter '$name' has invalid Kind '$kind'." }
+        if ($kind -notin @('Identifier', 'Literal', 'Integer', 'Decimal', 'Enum')) { throw "Snippet $id parameter '$name' has invalid Kind '$kind'." }
+        if ($kind -eq 'Enum' -and @($parameter.AllowedValues).Count -eq 0) { throw "Snippet $id enum parameter '$name' has no AllowedValues." }
     }
 
     $sql = [IO.File]::ReadAllText($sqlPath)
@@ -67,7 +78,19 @@ foreach ($snippet in $snippets) {
     foreach ($paramName in $paramNames.Keys) {
         if (-not $tokenSet.ContainsKey($paramName)) { throw "Snippet $id declares parameter '$paramName' that does not appear in the SQL." }
     }
+    $unresolved = [regex]::Matches($sql, '\{\{.*?\}\}')
+    foreach ($token in $unresolved) {
+        if ($token.Value -notmatch '^\{\{[A-Za-z][A-Za-z0-9]*\}\}$') { throw "Snippet $id has malformed parameter token '$($token.Value)'." }
+    }
+    $withoutValidTokens = [regex]::Replace($sql, '\{\{[A-Za-z][A-Za-z0-9]*\}\}', '')
+    if ($withoutValidTokens.Contains('{{') -or $withoutValidTokens.Contains('}}')) { throw "Snippet $id has an incomplete or malformed parameter token." }
 }
+
+$registeredFiles = @($snippets | ForEach-Object { ([string]$_.SqlFile).Replace('\', '/') })
+$orphanedFiles = @(Get-ChildItem -LiteralPath $sqlRoot -Recurse -Filter '*.sql' -File | ForEach-Object {
+    $_.FullName.Substring(([IO.Path]::GetFullPath($sqlRoot)).Length + 1).Replace('\', '/')
+} | Where-Object { $_ -notin $registeredFiles })
+if ($orphanedFiles.Count) { throw "Unregistered SQL files: $($orphanedFiles -join ', ')" }
 
 # --- Generate the data section ---
 $dataLines = New-Object 'Collections.Generic.List[string]'
@@ -81,6 +104,10 @@ for ($i = 0; $i -lt $snippets.Count; $i++) {
     $dataLines.Add('            Category=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Category)))
     $dataLines.Add('            Description=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Description)))
     $dataLines.Add('            Type=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Type)))
+    $dataLines.Add('            Scope=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Scope)))
+    $dataLines.Add('            Permissions=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Permissions)))
+    $dataLines.Add('            Compatibility=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Compatibility)))
+    $dataLines.Add('            Cost=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$snippet.Cost)))
     $docs = if ($snippet.Docs) { [string]$snippet.Docs } else { '' }
     $dataLines.Add('            Docs=' + (ConvertTo-PcSqlSingleQuotedLiteral $docs))
     $parameterStrings = @()
@@ -88,7 +115,18 @@ for ($i = 0; $i -lt $snippets.Count; $i++) {
         $name = [string]$parameter.Name
         $default = if ($null -eq $parameter.Default) { '' } else { [string]$parameter.Default }
         $kind = if ($parameter.Kind) { [string]$parameter.Kind } else { 'Identifier' }
-        $parameterStrings += '[pscustomobject]@{Name=' + (ConvertTo-PcSqlSingleQuotedLiteral $name) + ';Default=' + (ConvertTo-PcSqlSingleQuotedLiteral $default) + ';Kind=' + (ConvertTo-PcSqlSingleQuotedLiteral $kind) + '}'
+        $parts = @(
+            'Name=' + (ConvertTo-PcSqlSingleQuotedLiteral $name)
+            'Default=' + (ConvertTo-PcSqlSingleQuotedLiteral $default)
+            'Kind=' + (ConvertTo-PcSqlSingleQuotedLiteral $kind)
+        )
+        if ($null -ne $parameter.Min) { $parts += 'Min=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$parameter.Min)) }
+        if ($null -ne $parameter.Max) { $parts += 'Max=' + (ConvertTo-PcSqlSingleQuotedLiteral ([string]$parameter.Max)) }
+        if ($null -ne $parameter.AllowedValues -and @($parameter.AllowedValues).Count -gt 0) {
+            $allowed = @($parameter.AllowedValues | ForEach-Object { ConvertTo-PcSqlSingleQuotedLiteral ([string]$_) })
+            $parts += 'AllowedValues=@(' + ($allowed -join ',') + ')'
+        }
+        $parameterStrings += '[pscustomobject]@{' + ($parts -join ';') + '}'
     }
     $dataLines.Add('            Parameters=@(' + ($parameterStrings -join ',') + ')')
     $dataLines.Add("            Sql=@'")

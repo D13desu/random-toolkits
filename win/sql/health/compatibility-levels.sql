@@ -9,6 +9,7 @@ SELECT name                       AS DatabaseName,
             WHEN 140 THEN 'SQL Server 2017'
             WHEN 150 THEN 'SQL Server 2019'
             WHEN 160 THEN 'SQL Server 2022'
+            WHEN 170 THEN 'SQL Server 2025'
             ELSE 'Unknown / custom'
        END                        AS CompatibilityLevelName
 FROM   sys.databases

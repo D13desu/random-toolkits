@@ -1,4 +1,4 @@
-# Random Toolkits | Windows Toolkit 0.27.1
+# Random Toolkits | Windows Toolkit 0.28.0
 
 # Self-contained: local execution and irm ... | iex use the same source.
 [CmdletBinding()]
@@ -9,7 +9,7 @@ param(
     [ValidateRange(1,65535)][int]$Port = 443,
     [string]$DomainController
 )
-$script:PcToolkitVersion='0.27.1'
+$script:PcToolkitVersion='0.28.0'
 
 function Read-PcInput {
     param([string]$Prompt)
@@ -3346,12 +3346,34 @@ function ConvertTo-PcSqlLiteral {
 
 function ConvertTo-PcSqlParameterValue {
     param([object]$Parameter, [AllowNull()][string]$Value)
-    if ($null -eq $Value) { $Value = '' }
     $kind = if ($Parameter.Kind) { [string]$Parameter.Kind } else { 'Identifier' }
     switch ($kind) {
-        'Literal'    { return ConvertTo-PcSqlLiteral $Value }
-        'Raw'        { return $Value }
-        default      { return ConvertTo-PcSqlIdentifier $Value }
+        'Literal' { return ConvertTo-PcSqlLiteral $Value }
+        'Integer' {
+            if ($Value -notmatch '^-?\d+$') { throw "$($Parameter.Name) must be a whole number." }
+            $number = 0L
+            if (-not [long]::TryParse($Value, [ref]$number)) { throw "$($Parameter.Name) is outside the supported integer range." }
+            if ($null -ne $Parameter.Min -and $number -lt [long]$Parameter.Min) { throw "$($Parameter.Name) must be at least $($Parameter.Min)." }
+            if ($null -ne $Parameter.Max -and $number -gt [long]$Parameter.Max) { throw "$($Parameter.Name) must be at most $($Parameter.Max)." }
+            return $number.ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        'Decimal' {
+            if ($Value -notmatch '^-?(?:\d+(?:\.\d+)?|\.\d+)$') { throw "$($Parameter.Name) must be a decimal number using a period as the decimal separator." }
+            $number = [decimal]::Parse($Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ($null -ne $Parameter.Min -and $number -lt [decimal]$Parameter.Min) { throw "$($Parameter.Name) must be at least $($Parameter.Min)." }
+            if ($null -ne $Parameter.Max -and $number -gt [decimal]$Parameter.Max) { throw "$($Parameter.Name) must be at most $($Parameter.Max)." }
+            return $number.ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        'Enum' {
+            $allowed = @($Parameter.AllowedValues | ForEach-Object { [string]$_ })
+            $match = $allowed | Where-Object { $_ -eq $Value } | Select-Object -First 1
+            if ($null -eq $match) { throw "$($Parameter.Name) must be one of: $($allowed -join ', ')." }
+            return $match
+        }
+        default {
+            if ([string]::IsNullOrWhiteSpace($Value)) { throw "$($Parameter.Name) cannot be empty." }
+            return ConvertTo-PcSqlIdentifier $Value
+        }
     }
 }
 
@@ -3362,7 +3384,7 @@ function Expand-PcSqlSnippet {
     foreach ($parameter in @($Snippet.Parameters)) {
         $name = [string]$parameter.Name
         $value = if ($Values -and $Values.ContainsKey($name)) { $Values[$name] } else { $parameter.Default }
-        $sql = $sql.Replace('{{' + $name + '}}', (ConvertTo-PcSqlParameterValue $parameter ([string]$value)))
+        $sql = $sql.Replace('{{' + $name + '}}', (ConvertTo-PcSqlParameterValue $parameter $value))
     }
     return $sql
 }
@@ -3384,8 +3406,17 @@ function Read-PcSqlSnippetParameters {
         $name = [string]$parameter.Name
         $current = if ($Values -and $Values.ContainsKey($name)) { $Values[$name] } else { $parameter.Default }
         if ($null -eq $current) { $current = '' }
-        $answer = Read-Host ("  {0} [{1}] (Enter: keep)" -f $name, $current)
-        if ($null -ne $answer -and $answer.Trim() -ne '') { $Values[$name] = $answer.Trim() }
+        while ($true) {
+            $answer = Read-Host ("  {0} [{1}] (Enter: keep)" -f $name, $current)
+            if ($null -eq $answer -or $answer.Trim() -eq '') { break }
+            $candidate = $answer.Trim()
+            try {
+                $null = ConvertTo-PcSqlParameterValue $parameter $candidate
+                $Values[$name] = $candidate
+                break
+            }
+            catch { Write-Warning $_.Exception.Message }
+        }
     }
     return $Values
 }
@@ -3438,6 +3469,10 @@ function Show-PcSqlSnippet {
         Write-Host ''
         $typeColor = if ($Snippet.Type -eq 'MODIFICATION') { 'Yellow' } else { 'Green' }
         Write-Host ('Type: ' + $Snippet.Type) -ForegroundColor $typeColor
+        if ($Snippet.Scope) { Write-Host ('Scope: ' + $Snippet.Scope) }
+        if ($Snippet.Permissions) { Write-Host ('Permissions: ' + $Snippet.Permissions) }
+        if ($Snippet.Compatibility) { Write-Host ('Compatibility: ' + $Snippet.Compatibility) }
+        if ($Snippet.Cost) { Write-Host ('Cost: ' + $Snippet.Cost) }
         if ($Snippet.Type -eq 'MODIFICATION') {
             Write-Host 'WARNING: This query modifies data or metadata. Review it carefully and run it only against the intended target.' -ForegroundColor Yellow
         }
@@ -3526,6 +3561,10 @@ function Get-PcSqlSnippetRegistry {
             Category='users'
             Description='Lists database users whose SID has no matching server login.'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='Database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/sql-server/failover-clusters/troubleshoot-orphaned-users-sql-server'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
@@ -3558,6 +3597,10 @@ GO
             Category='users'
             Description='Remaps an existing database user to a server login.'
             Type='MODIFICATION'
+            Scope='Database'
+            Permissions='ALTER ANY USER plus access to the target login'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/t-sql/statements/alter-user-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'},[pscustomobject]@{Name='User';Default='YourUser';Kind='Identifier'},[pscustomobject]@{Name='Login';Default='YourLogin';Kind='Identifier'})
             Sql=@'
@@ -3578,6 +3621,10 @@ GO
             Category='users'
             Description='Database users joined to their matching server login by SID.'
             Type='READ-ONLY'
+            Scope='Database and server'
+            Permissions='Database metadata visibility and login metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-database-principals-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
@@ -3602,14 +3649,19 @@ GO
         },
         [pscustomobject]@{
             Id='db-permissions'
-            Title='List database permissions'
+            Title='List explicit database permissions'
             Category='users'
-            Description='Effective database permissions granted to principals.'
+            Description='Explicit database permissions granted or denied to principals; fixed-role permissions are not included.'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='VIEW SECURITY DEFINITION (SQL Server 2022+) or sufficient metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-database-permissions-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
--- Effective database permissions granted to principals.
+-- Explicit database permissions granted or denied to principals.
+-- Permissions inherited from fixed database roles are not represented here.
 USE {{Database}};
 GO
 
@@ -3633,6 +3685,10 @@ GO
             Category='users'
             Description='Fixed and user-defined server roles and their members (server-scoped).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Server principal metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-server-role-members-transact-sql'
             Parameters=@()
             Sql=@'
@@ -3657,6 +3713,10 @@ GO
             Category='health'
             Description='Status, recovery model, compatibility level, and size for every database.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Database and file metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-databases-transact-sql'
             Parameters=@()
             Sql=@'
@@ -3682,6 +3742,10 @@ GO
             Category='health'
             Description='Full allocation and consistency check (DBCC CHECKDB). Resource intensive.'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='Permissions required by DBCC CHECKDB'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Heavy'
             Docs='https://learn.microsoft.com/en-us/sql/t-sql/database-console-commands/dbcc-checkdb-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Literal'})
             Sql=@'
@@ -3699,6 +3763,10 @@ GO
             Category='health'
             Description='Transaction log file size and used space for the current database.'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='VIEW DATABASE STATE or sufficient database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-database-files-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
@@ -3722,6 +3790,10 @@ GO
             Category='health'
             Description='Compatibility level of every database with its friendly SQL Server name.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/t-sql/statements/alter-database-transact-sql-compatibility-level'
             Parameters=@()
             Sql=@'
@@ -3736,6 +3808,7 @@ SELECT name                       AS DatabaseName,
             WHEN 140 THEN 'SQL Server 2017'
             WHEN 150 THEN 'SQL Server 2019'
             WHEN 160 THEN 'SQL Server 2022'
+            WHEN 170 THEN 'SQL Server 2025'
             ELSE 'Unknown / custom'
        END                        AS CompatibilityLevelName
 FROM   sys.databases
@@ -3750,6 +3823,10 @@ GO
             Category='health'
             Description='Recovery model and current log reuse wait for every database.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/recovery-models-sql-server'
             Parameters=@()
             Sql=@'
@@ -3764,11 +3841,54 @@ GO
 '@
         },
         [pscustomobject]@{
+            Id='database-free-space'
+            Title='Database file and volume free space'
+            Category='health'
+            Description='File allocation, unallocated space, growth settings, and hosting-volume capacity for one database.'
+            Type='READ-ONLY'
+            Scope='Database and host volume'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
+            Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-os-volume-stats-transact-sql'
+            Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
+            Sql=@'
+-- File allocation, unallocated space, growth settings, and volume capacity.
+USE {{Database}};
+GO
+
+SELECT DB_NAME()                                        AS DatabaseName,
+       df.file_id                                       AS FileId,
+       df.name                                          AS LogicalFileName,
+       df.type_desc                                     AS FileType,
+       df.physical_name                                 AS PhysicalName,
+       CAST(df.size * 8 / 1024.0 AS decimal(18,2))      AS FileSizeMB,
+       CAST(FILEPROPERTY(df.name, 'SpaceUsed') * 8 / 1024.0 AS decimal(18,2)) AS UsedMB,
+       CAST((df.size - FILEPROPERTY(df.name, 'SpaceUsed')) * 8 / 1024.0 AS decimal(18,2)) AS UnallocatedMB,
+       CASE WHEN df.is_percent_growth = 1
+            THEN CONVERT(varchar(20), df.growth) + '%'
+            ELSE CONVERT(varchar(20), df.growth * 8 / 1024) + ' MB'
+       END                                              AS GrowthSetting,
+       vs.volume_mount_point                            AS VolumeMountPoint,
+       CAST(vs.total_bytes / 1048576.0 AS decimal(18,2)) AS VolumeSizeMB,
+       CAST(vs.available_bytes / 1048576.0 AS decimal(18,2)) AS VolumeFreeMB
+FROM   sys.database_files AS df
+       CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+ORDER  BY df.type, df.file_id;
+GO
+
+'@
+        },
+        [pscustomobject]@{
             Id='currently-executing'
             Title='Currently executing queries'
             Category='performance'
             Description='All requests currently executing on the instance (server-scoped).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-requests-transact-sql'
             Parameters=@()
             Sql=@'
@@ -3804,12 +3924,16 @@ GO
             Category='performance'
             Description='Requests blocked by another session, with both sides logins and hosts.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-requests-transact-sql'
             Parameters=@()
             Sql=@'
--- Requests blocked by another session, with both sides' logins and hosts.
+-- Requests blocked by another session, including sleeping head blockers.
 SELECT blocked.session_id                  AS BlockedSession,
-       blocking.session_id                 AS BlockingSession,
+       blocked.blocking_session_id         AS BlockingSession,
        blocked.wait_type                   AS WaitType,
        blocked.wait_time                   AS WaitMs,
        blocked.wait_resource               AS WaitResource,
@@ -3817,15 +3941,100 @@ SELECT blocked.session_id                  AS BlockedSession,
        blocked_sess.login_name             AS BlockedLogin,
        blocking_sess.login_name            AS BlockingLogin,
        blocked_sess.host_name              AS BlockedHost,
-       blocking_sess.host_name             AS BlockingHost
+       blocking_sess.host_name             AS BlockingHost,
+       blocking_sess.status                AS BlockingSessionStatus,
+       blocking_sess.open_transaction_count AS BlockingOpenTransactions,
+       blocking_sess.last_request_end_time AS BlockingLastRequestEnd,
+       input_buffer.event_info             AS BlockingLastCommand
 FROM   sys.dm_exec_requests AS blocked
-       JOIN sys.dm_exec_requests AS blocking
-            ON blocking.session_id = blocked.blocking_session_id
        JOIN sys.dm_exec_sessions AS blocked_sess
             ON blocked_sess.session_id = blocked.session_id
        JOIN sys.dm_exec_sessions AS blocking_sess
-            ON blocking_sess.session_id = blocking.session_id
+            ON blocking_sess.session_id = blocked.blocking_session_id
+       OUTER APPLY sys.dm_exec_input_buffer(blocked.blocking_session_id, NULL) AS input_buffer
+WHERE  blocked.blocking_session_id > 0
 ORDER  BY blocked.wait_time DESC;
+GO
+
+'@
+        },
+        [pscustomobject]@{
+            Id='blocking-chain'
+            Title='Blocking chains and head blockers'
+            Category='performance'
+            Description='Expands blocking chains from each head blocker, including sleeping sessions.'
+            Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
+            Docs='https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/understand-resolve-blocking'
+            Parameters=@()
+            Sql=@'
+-- Expands blocking chains from each head blocker, including sleeping sessions.
+WITH waits AS
+(
+    SELECT session_id,
+           blocking_session_id,
+           wait_type,
+           wait_time,
+           wait_resource,
+           database_id
+    FROM   sys.dm_exec_requests
+    WHERE  blocking_session_id > 0
+),
+heads AS
+(
+    SELECT DISTINCT w.blocking_session_id AS HeadBlocker
+    FROM   waits AS w
+    WHERE  NOT EXISTS
+           (
+               SELECT 1
+               FROM   waits AS parent
+               WHERE  parent.session_id = w.blocking_session_id
+           )
+),
+chain AS
+(
+    SELECT h.HeadBlocker,
+           h.HeadBlocker AS SessionId,
+           CAST(NULL AS smallint) AS BlockedBy,
+           0 AS Depth,
+           CAST('>' + CONVERT(varchar(11), h.HeadBlocker) + '>' AS varchar(max)) AS Visited
+    FROM   heads AS h
+
+    UNION ALL
+
+    SELECT c.HeadBlocker,
+           w.session_id,
+           w.blocking_session_id,
+           c.Depth + 1,
+           CAST(c.Visited + CONVERT(varchar(11), w.session_id) + '>' AS varchar(max))
+    FROM   chain AS c
+           JOIN waits AS w
+                ON w.blocking_session_id = c.SessionId
+    WHERE  c.Visited NOT LIKE '%>' + CONVERT(varchar(11), w.session_id) + '>%'
+)
+SELECT c.HeadBlocker,
+       c.Depth,
+       c.SessionId,
+       c.BlockedBy,
+       s.status                   AS SessionStatus,
+       s.open_transaction_count  AS OpenTransactions,
+       s.login_name              AS LoginName,
+       s.host_name               AS HostName,
+       s.program_name            AS ProgramName,
+       DB_NAME(w.database_id)    AS DatabaseName,
+       w.wait_type               AS WaitType,
+       w.wait_time               AS WaitMs,
+       w.wait_resource           AS WaitResource,
+       input_buffer.event_info   AS LastCommand
+FROM   chain AS c
+       LEFT JOIN waits AS w ON w.session_id = c.SessionId
+       LEFT JOIN sys.dm_exec_sessions AS s ON s.session_id = c.SessionId
+       OUTER APPLY sys.dm_exec_input_buffer(c.SessionId, NULL) AS input_buffer
+ORDER  BY c.HeadBlocker, c.Depth, c.SessionId
+OPTION (MAXRECURSION 100);
 GO
 
 '@
@@ -3836,8 +4045,12 @@ GO
             Category='performance'
             Description='Queries running longer than the configured threshold (default 5 minutes).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-requests-transact-sql'
-            Parameters=@([pscustomobject]@{Name='ThresholdMinutes';Default='5';Kind='Raw'})
+            Parameters=@([pscustomobject]@{Name='ThresholdMinutes';Default='5';Kind='Integer';Min='1';Max='10080'})
             Sql=@'
 -- Queries running longer than the configured threshold (default 5 minutes).
 SELECT r.session_id                   AS SessionId,
@@ -3870,6 +4083,10 @@ GO
             Category='performance'
             Description='Index fragmentation above 5% with at least 100 pages (LIMITED scan).'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='VIEW DATABASE STATE or sufficient database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Moderate'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-db-index-physical-stats-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
@@ -3899,6 +4116,10 @@ GO
             Category='performance'
             Description='Missing index suggestions ranked by estimated query-cost impact.'
             Type='READ-ONLY'
+            Scope='Database'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-db-missing-index-details-transact-sql'
             Parameters=@([pscustomobject]@{Name='Database';Default='YourDatabase';Kind='Identifier'})
             Sql=@'
@@ -3909,6 +4130,9 @@ GO
 SELECT migs.avg_total_user_cost                       AS AvgQueryCost,
        migs.avg_user_impact                           AS AvgImpactPercent,
        migs.user_seeks + migs.user_scans              AS Reads,
+       CONVERT(decimal(28,1), migs.avg_total_user_cost * migs.avg_user_impact *
+               (migs.user_seeks + migs.user_scans))   AS ImprovementMeasure,
+       migs.last_user_seek                             AS LastUserSeek,
        mid.statement                                  AS [Table],
        mid.equality_columns                           AS EqualityColumns,
        mid.inequality_columns                         AS InequalityColumns,
@@ -3919,7 +4143,8 @@ FROM   sys.dm_db_missing_index_details AS mid
        JOIN sys.dm_db_missing_index_group_stats AS migs
             ON migs.group_handle = mig.index_group_handle
 WHERE  mid.database_id = DB_ID()
-ORDER  BY migs.avg_total_user_cost * migs.avg_user_impact DESC;
+ORDER  BY migs.avg_total_user_cost * migs.avg_user_impact *
+          (migs.user_seeks + migs.user_scans) DESC;
 GO
 
 '@
@@ -3930,8 +4155,12 @@ GO
             Category='maintenance'
             Description='Backup history for the last N days (default 7) from msdb.'
             Type='READ-ONLY'
+            Scope='Server / msdb'
+            Permissions='Read access to msdb backup and SQL Agent history'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-tables/backupset-transact-sql'
-            Parameters=@([pscustomobject]@{Name='Days';Default='7';Kind='Raw'})
+            Parameters=@([pscustomobject]@{Name='Days';Default='7';Kind='Integer';Min='1';Max='3650'})
             Sql=@'
 -- Backup history for the last N days (default 7) from msdb.
 SELECT s.database_name                                  AS DatabaseName,
@@ -3962,6 +4191,10 @@ GO
             Category='maintenance'
             Description='Most recent successful full, differential, and log backup per database.'
             Type='READ-ONLY'
+            Scope='Server / msdb'
+            Permissions='Read access to msdb backup and SQL Agent history'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-tables/backupset-transact-sql'
             Parameters=@()
             Sql=@'
@@ -3986,6 +4219,10 @@ GO
             Category='maintenance'
             Description='Recent SQL Server Agent job failures from msdb history.'
             Type='READ-ONLY'
+            Scope='Server / msdb'
+            Permissions='Read access to msdb backup and SQL Agent history'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-tables/dbo-sysjobhistory-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4013,6 +4250,10 @@ GO
             Category='maintenance'
             Description='Per-file size, growth setting, and max size for every database.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Database and file metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-master-files-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4038,11 +4279,60 @@ GO
 '@
         },
         [pscustomobject]@{
+            Id='backup-compliance'
+            Title='Backup threshold compliance'
+            Category='maintenance'
+            Description='Flags online databases whose latest full, differential, or log backup exceeds configurable thresholds.'
+            Type='READ-ONLY'
+            Scope='Server / msdb'
+            Permissions='Read access to msdb backup and SQL Agent history'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
+            Docs='https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/backup-overview-sql-server'
+            Parameters=@([pscustomobject]@{Name='FullDays';Default='7';Kind='Integer';Min='1';Max='3650'},[pscustomobject]@{Name='DifferentialDays';Default='1';Kind='Integer';Min='1';Max='3650'},[pscustomobject]@{Name='LogMinutes';Default='60';Kind='Integer';Min='1';Max='525600'})
+            Sql=@'
+-- Backup recency compared with configurable operational thresholds.
+-- Thresholds are reference values; align them with the organization's RPO policy.
+WITH latest AS
+(
+    SELECT database_name,
+           MAX(CASE WHEN type = 'D' AND is_copy_only = 0 THEN backup_finish_date END) AS LastFull,
+           MAX(CASE WHEN type = 'I' THEN backup_finish_date END) AS LastDifferential,
+           MAX(CASE WHEN type = 'L' THEN backup_finish_date END) AS LastLog
+    FROM   msdb.dbo.backupset
+    GROUP  BY database_name
+)
+SELECT d.name                                          AS DatabaseName,
+       d.recovery_model_desc                           AS RecoveryModel,
+       b.LastFull,
+       CASE WHEN b.LastFull >= DATEADD(DAY, -{{FullDays}}, GETDATE())
+            THEN 'OK' ELSE 'OVERDUE' END               AS FullBackupStatus,
+       b.LastDifferential,
+       CASE WHEN b.LastDifferential >= DATEADD(DAY, -{{DifferentialDays}}, GETDATE())
+            THEN 'OK' ELSE 'OVERDUE' END               AS DifferentialBackupStatus,
+       b.LastLog,
+       CASE WHEN d.recovery_model_desc = 'SIMPLE' THEN 'N/A (SIMPLE)'
+            WHEN b.LastLog >= DATEADD(MINUTE, -{{LogMinutes}}, GETDATE()) THEN 'OK'
+            ELSE 'OVERDUE' END                         AS LogBackupStatus
+FROM   sys.databases AS d
+       LEFT JOIN latest AS b ON b.database_name = d.name
+WHERE  d.database_id <> 2
+  AND  d.state = 0
+ORDER  BY d.name;
+GO
+
+'@
+        },
+        [pscustomobject]@{
             Id='active-connections'
             Title='Active connections'
             Category='connections'
             Description='Active user connections to the instance (server-scoped).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-sessions-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4069,6 +4359,10 @@ GO
             Category='connections'
             Description='Count of sessions per database, split by running and sleeping state.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-sessions-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4091,6 +4385,10 @@ GO
             Category='connections'
             Description='User sessions that are sleeping, ordered by oldest activity first.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-sessions-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4117,6 +4415,10 @@ GO
             Category='connections'
             Description='Open transactions, their owning session, age, and type (server-scoped).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-active-transactions-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4148,11 +4450,57 @@ GO
 '@
         },
         [pscustomobject]@{
+            Id='long-running-transactions'
+            Title='Long-running open transactions'
+            Category='connections'
+            Description='Open user transactions older than a configurable threshold, with session and last-command context.'
+            Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
+            Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-active-transactions-transact-sql'
+            Parameters=@([pscustomobject]@{Name='ThresholdMinutes';Default='5';Kind='Integer';Min='1';Max='10080'})
+            Sql=@'
+-- Open user transactions older than the configured threshold.
+SELECT st.session_id                                  AS SessionId,
+       s.login_name                                   AS LoginName,
+       s.host_name                                    AS HostName,
+       s.program_name                                 AS ProgramName,
+       s.status                                       AS SessionStatus,
+       s.open_transaction_count                       AS SessionOpenTransactions,
+       at.transaction_id                              AS TransactionId,
+       at.name                                        AS TransactionName,
+       at.transaction_begin_time                      AS BeginTime,
+       DATEDIFF(MINUTE, at.transaction_begin_time, GETDATE()) AS AgeMinutes,
+       r.status                                       AS RequestStatus,
+       r.command                                      AS RequestCommand,
+       input_buffer.event_info                        AS LastCommand
+FROM   sys.dm_tran_active_transactions AS at
+       JOIN sys.dm_tran_session_transactions AS st
+            ON st.transaction_id = at.transaction_id
+       JOIN sys.dm_exec_sessions AS s
+            ON s.session_id = st.session_id
+       LEFT JOIN sys.dm_exec_requests AS r
+            ON r.session_id = st.session_id
+       OUTER APPLY sys.dm_exec_input_buffer(st.session_id, NULL) AS input_buffer
+WHERE  s.is_user_process = 1
+  AND  at.transaction_begin_time <= DATEADD(MINUTE, -{{ThresholdMinutes}}, GETDATE())
+ORDER  BY at.transaction_begin_time ASC;
+GO
+
+'@
+        },
+        [pscustomobject]@{
             Id='version-edition'
             Title='SQL Server version and edition'
             Category='troubleshooting'
             Description='SQL Server version, edition, and high-availability properties.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Public server metadata access'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/t-sql/functions/serverproperty-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4177,6 +4525,10 @@ GO
             Category='troubleshooting'
             Description='All sp_configure settings with their current, minimum, and maximum values.'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Server configuration metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-configurations-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4200,6 +4552,10 @@ GO
             Category='troubleshooting'
             Description='Cumulative wait statistics since the instance started (benign waits excluded).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-os-wait-stats-transact-sql'
             Parameters=@()
             Sql=@'
@@ -4246,24 +4602,46 @@ GO
             Id='tempdb-usage'
             Title='TempDB usage'
             Category='troubleshooting'
-            Description='tempdb allocation by session, ordered by the largest consumers.'
+            Description='Net completed-task and active-task tempdb allocation by session, ordered by the largest consumers.'
             Type='READ-ONLY'
+            Scope='Server / tempdb'
+            Permissions='VIEW SERVER STATE (SQL Server 2022+: VIEW SERVER PERFORMANCE STATE)'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-db-session-space-usage-transact-sql'
             Parameters=@()
             Sql=@'
--- tempdb allocation by session, ordered by the largest consumers.
-SELECT su.session_id                              AS SessionId,
-       s.login_name                               AS LoginName,
-       su.user_objects_alloc_page_count           AS UserObjectsAllocPages,
-       su.user_objects_dealloc_page_count         AS UserObjectsDeallocPages,
-       su.internal_objects_alloc_page_count       AS InternalObjectsAllocPages,
-       su.internal_objects_dealloc_page_count     AS InternalObjectsDeallocPages,
-       CAST((su.user_objects_alloc_page_count + su.internal_objects_alloc_page_count) * 8 / 1024.0 AS decimal(18,2)) AS AllocatedMB
-FROM   sys.dm_db_session_space_usage AS su
-       JOIN sys.dm_exec_sessions AS s
-            ON s.session_id = su.session_id
-WHERE  su.database_id = 2
-ORDER  BY AllocatedMB DESC;
+-- Net tempdb allocation by session. Session counters cover completed tasks;
+-- task counters add allocations belonging to requests that are still active.
+WITH completed AS
+(
+    SELECT session_id,
+           (user_objects_alloc_page_count - user_objects_dealloc_page_count) +
+           (internal_objects_alloc_page_count - internal_objects_dealloc_page_count) AS NetPages
+    FROM   sys.dm_db_session_space_usage
+    WHERE  database_id = 2
+),
+active AS
+(
+    SELECT session_id,
+           SUM((user_objects_alloc_page_count - user_objects_dealloc_page_count) +
+               (internal_objects_alloc_page_count - internal_objects_dealloc_page_count)) AS NetPages
+    FROM   sys.dm_db_task_space_usage
+    WHERE  database_id = 2
+    GROUP  BY session_id
+)
+SELECT s.session_id                                      AS SessionId,
+       s.login_name                                      AS LoginName,
+       s.host_name                                       AS HostName,
+       s.program_name                                    AS ProgramName,
+       COALESCE(c.NetPages, 0)                           AS CompletedTaskNetPages,
+       COALESCE(a.NetPages, 0)                           AS ActiveTaskNetPages,
+       CAST((COALESCE(c.NetPages, 0) + COALESCE(a.NetPages, 0)) * 8 / 1024.0 AS decimal(18,2)) AS NetAllocatedMB
+FROM   sys.dm_exec_sessions AS s
+       LEFT JOIN completed AS c ON c.session_id = s.session_id
+       LEFT JOIN active AS a ON a.session_id = s.session_id
+WHERE  COALESCE(c.NetPages, 0) + COALESCE(a.NetPages, 0) <> 0
+ORDER  BY NetAllocatedMB DESC;
 GO
 
 '@
@@ -4274,6 +4652,10 @@ GO
             Category='troubleshooting'
             Description='Databases stuck in RECOVERY_PENDING state (state = 3).'
             Type='READ-ONLY'
+            Scope='Server'
+            Permissions='Database metadata visibility'
+            Compatibility='SQL Server 2016-2025'
+            Cost='Light'
             Docs='https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-databases-transact-sql'
             Parameters=@()
             Sql=@'

@@ -1,4 +1,5 @@
--- Effective database permissions granted to principals.
+-- Explicit database permissions granted or denied to principals.
+-- Permissions inherited from fixed database roles are not represented here.
 USE {{Database}};
 GO
 

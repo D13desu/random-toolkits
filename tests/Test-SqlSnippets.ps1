@@ -11,14 +11,21 @@ function Assert($ok, $message) {
     Write-Output "PASS: $message"
 }
 
+function AssertThrows([scriptblock]$Action, [string]$message) {
+    $threw = $false
+    try { & $Action } catch { $threw = $true }
+    Assert $threw $message
+}
+
 # --- Registry integrity (independent of the sync-time validation) ---
 $registry = @(. (Join-Path $PSScriptRoot '../win/sql/snippets.ps1'))
-Assert ($registry.Count -eq 28) 'Registry declares 28 snippets'
+Assert ($registry.Count -eq 32) 'Registry declares 32 snippets'
 $ids = @($registry | ForEach-Object { [string]$_.Id })
 Assert (($ids | Select-Object -Unique).Count -eq $ids.Count) 'Snippet identifiers are unique'
 Assert (@($registry | Where-Object { [string]$_.Type -notin @('READ-ONLY', 'MODIFICATION') }).Count -eq 0) 'Every snippet type is READ-ONLY or MODIFICATION'
 $known = @('users', 'health', 'performance', 'maintenance', 'connections', 'troubleshooting')
 Assert (@($registry | Where-Object { [string]$_.Category -notin $known }).Count -eq 0) 'Every snippet uses a known category'
+Assert (@($registry | Where-Object { -not $_.Scope -or -not $_.Permissions -or -not $_.Compatibility -or -not $_.Cost }).Count -eq 0) 'Every snippet has operational metadata'
 
 $missingFile = 0
 $undeclared = 0
@@ -45,8 +52,18 @@ $identParam = [pscustomobject]@{ Name = 'Db'; Default = 'x'; Kind = 'Identifier'
 Assert ((ConvertTo-PcSqlParameterValue $identParam 'a]b') -eq '[a]]b]') 'Identifier parameter is bracket-escaped'
 $literalParam = [pscustomobject]@{ Name = 'Pattern'; Default = ''; Kind = 'Literal' }
 Assert ((ConvertTo-PcSqlParameterValue $literalParam "O'Reilly") -eq "N'O''Reilly'") 'Literal parameter is escaped and N-quoted'
-$rawParam = [pscustomobject]@{ Name = 'N'; Default = '5'; Kind = 'Raw' }
-Assert ((ConvertTo-PcSqlParameterValue $rawParam '7') -eq '7') 'Raw parameter is substituted unquoted'
+$integerParam = [pscustomobject]@{ Name = 'N'; Default = '5'; Kind = 'Integer'; Min = '1'; Max = '10' }
+Assert ((ConvertTo-PcSqlParameterValue $integerParam '7') -eq '7') 'Integer parameter is substituted unquoted'
+AssertThrows { ConvertTo-PcSqlParameterValue $integerParam '7; DROP TABLE x' } 'Integer parameter rejects SQL text'
+AssertThrows { ConvertTo-PcSqlParameterValue $integerParam '0' } 'Integer parameter enforces its minimum'
+AssertThrows { ConvertTo-PcSqlParameterValue $integerParam '11' } 'Integer parameter enforces its maximum'
+$decimalParam = [pscustomobject]@{ Name = 'Ratio'; Default = '1.5'; Kind = 'Decimal'; Min = '0'; Max = '2' }
+Assert ((ConvertTo-PcSqlParameterValue $decimalParam '1.25') -eq '1.25') 'Decimal parameter uses invariant SQL formatting'
+AssertThrows { ConvertTo-PcSqlParameterValue $decimalParam '1,25' } 'Decimal parameter rejects locale-dependent separators'
+$enumParam = [pscustomobject]@{ Name = 'Mode'; Default = 'LIMITED'; Kind = 'Enum'; AllowedValues = @('LIMITED','SAMPLED','DETAILED') }
+Assert ((ConvertTo-PcSqlParameterValue $enumParam 'SAMPLED') -eq 'SAMPLED') 'Enum parameter accepts an allowed value'
+AssertThrows { ConvertTo-PcSqlParameterValue $enumParam 'LIMITED; DROP TABLE x' } 'Enum parameter rejects values outside its allowlist'
+AssertThrows { ConvertTo-PcSqlParameterValue $identParam '' } 'Identifier parameters cannot be empty'
 
 # --- Parameter substitution ---
 $fix = Get-PcSqlSnippet 'fix-orphaned-users'
@@ -59,9 +76,13 @@ $custom = Expand-PcSqlSnippet $fix @{ Database = 'My DB'; User = 'u]1'; Login = 
 Assert ($custom -match 'USE \[My DB\]') 'Spaces in identifiers are preserved inside brackets'
 Assert ($custom -match 'ALTER USER \[u\]\]1\]') 'Closing bracket in a value is escaped'
 $lq = Get-PcSqlSnippet 'long-running-queries'
-$raw = Expand-PcSqlSnippet $lq @{ ThresholdMinutes = '30' }
-Assert ($raw -match '> 30 \* 60000') 'Raw parameter is substituted unquoted'
+$expandedThreshold = Expand-PcSqlSnippet $lq @{ ThresholdMinutes = '30' }
+Assert ($expandedThreshold -match '> 30 \* 60000') 'Integer parameter is substituted unquoted'
+AssertThrows { Expand-PcSqlSnippet $lq @{ ThresholdMinutes = '5; SELECT 1' } } 'Snippet expansion rejects unsafe numeric input'
 Assert ((Get-PcSqlSnippet 'does-not-exist') -eq $null) 'Unknown snippet id resolves to nothing'
+foreach ($newId in @('blocking-chain','database-free-space','long-running-transactions','backup-compliance')) {
+    Assert ($null -ne (Get-PcSqlSnippet $newId)) "New v0.28.0 snippet is registered: $newId"
+}
 
 # --- Type classification in menu items ---
 $modItem = New-PcSqlSnippetMenuItem $fix
@@ -92,6 +113,10 @@ $script:Answers.Enqueue('C'); $script:Answers.Enqueue(''); $script:Answers.Enque
 Show-PcSqlSnippet $fix 'Windows > SQL Server Snippets > Users & Security'
 $joined = $script:Out -join "`n"
 Assert ($joined -match 'Type: MODIFICATION') 'Detail view shows the query type'
+Assert ($joined -match 'Scope: Database') 'Detail view shows scope metadata'
+Assert ($joined -match 'Permissions: ALTER ANY USER') 'Detail view shows permission metadata'
+Assert ($joined -match 'Compatibility: SQL Server 2016-2025') 'Detail view shows compatibility metadata'
+Assert ($joined -match 'Cost: Light') 'Detail view shows cost metadata'
 Assert ($joined -match 'WARNING: This query modifies') 'Modification query shows a warning'
 Assert ($joined -match 'ALTER USER \[YourUser\]') 'Generated SQL is displayed'
 Assert ($joined -match '\[C\] Copy query to clipboard') 'Copy option is offered'
@@ -107,6 +132,19 @@ Assert ($joined -match 'ALTER USER \[YourUser\]') 'Kept parameter keeps its defa
 Assert ($joined -match 'USE \[MyAppDb\]') 'Edited parameter value is substituted'
 Assert ($joined -match 'WITH LOGIN = \[applogin\]') 'Third parameter is substituted'
 Assert ($script:Clip -match 'USE \[MyAppDb\]') 'Clipboard reflects edited parameters'
+
+# --- SQL diagnostic correctness guards ---
+$sqlRoot = Join-Path $PSScriptRoot '../win/sql'
+$blocking = Get-Content -LiteralPath (Join-Path $sqlRoot 'performance/blocking-sessions.sql') -Raw
+Assert ($blocking -notmatch 'JOIN\s+sys\.dm_exec_requests\s+AS\s+blocking') 'Blocking query does not require the blocker to have an active request'
+Assert ($blocking -match 'blocking_sess\.open_transaction_count') 'Blocking query exposes sleeping blocker transaction state'
+$tempdb = Get-Content -LiteralPath (Join-Path $sqlRoot 'troubleshooting/tempdb-usage.sql') -Raw
+Assert ($tempdb -match 'alloc_page_count\s*-\s*user_objects_dealloc_page_count') 'TempDB query subtracts user-object deallocations'
+Assert ($tempdb -match 'sys\.dm_db_task_space_usage') 'TempDB query includes active task allocations'
+$missingIndexes = Get-Content -LiteralPath (Join-Path $sqlRoot 'performance/missing-indexes.sql') -Raw
+Assert ($missingIndexes -match 'avg_total_user_cost\s*\*\s*migs\.avg_user_impact\s*\*') 'Missing-index ranking includes cumulative workload frequency'
+$compatibility = Get-Content -LiteralPath (Join-Path $sqlRoot 'health/compatibility-levels.sql') -Raw
+Assert ($compatibility -match "WHEN 170 THEN 'SQL Server 2025'") 'Compatibility snippet recognizes SQL Server 2025'
 
 # --- Top-level category dispatch ---
 $script:CalledCategory = $null

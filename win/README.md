@@ -133,9 +133,10 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 ### 17. SQL Server Snippets
 
 - A browsable library of copy-only T-SQL queries for troubleshooting SQL Server client environments, grouped into Users & Security, Database Health, Performance, Maintenance, Connections & Sessions, and Troubleshooting.
-- Each snippet shows its type (read-only or modification), description, parameters, and the generated query; modification queries carry a warning.
+- Each snippet shows its type, scope, required permissions, supported SQL Server range, estimated cost, parameters, and generated query; modification queries carry a warning.
 - Queries are generated, displayed, and copied to the clipboard; the toolkit never connects to a server, executes SQL, or requests SQL Server credentials.
-- Parameters substitute safely: identifiers are bracket-escaped and string literals are N-quoted and escaped.
+- Parameters substitute safely: identifiers are bracket-escaped, string literals are N-quoted and escaped, and numeric or enumerated values are validated before SQL is generated.
+- v0.28.0 adds blocking-chain diagnostics (including sleeping blockers), net tempdb usage, database and volume free space, long-running transaction context, and configurable backup-threshold checks.
 - See [win/sql/README.md](sql/README.md) for how to add a snippet.
 
 ### 99. Toolkit cleanup

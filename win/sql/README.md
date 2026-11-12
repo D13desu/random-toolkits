@@ -29,7 +29,7 @@ Nothing is downloaded at runtime and no SQL is ever executed or connected.
 1. Create `win/sql/<category>/<id>.sql` with the T-SQL. Use `{{Name}}` for any
    value you want the user to fill in, for example `USE {{Database}};`. The
    token is written bare; the parameter's `Kind` decides how it is rendered
-   (bracketed, N-quoted, or raw).
+   and validated (bracketed, N-quoted, numeric, or allowlisted).
 
 2. Add one entry to `win/sql/snippets.ps1`:
 
@@ -40,6 +40,10 @@ Nothing is downloaded at runtime and no SQL is ever executed or connected.
        Category    = 'health'                # users|health|performance|maintenance|connections|troubleshooting
        Description = 'One-line purpose.'
        Type        = 'READ-ONLY'             # or 'MODIFICATION'
+       Scope       = 'Database'
+       Permissions = 'VIEW DATABASE STATE'
+       Compatibility = 'SQL Server 2016-2025'
+       Cost        = 'Light'                 # Light|Moderate|Heavy
        Docs        = 'https://learn.microsoft.com/...'   # optional
        Parameters  = @( @{ Name='Database'; Default='YourDatabase'; Kind='Identifier' } )
        SqlFile     = 'health/my-snippet.sql'
@@ -48,8 +52,9 @@ Nothing is downloaded at runtime and no SQL is ever executed or connected.
 
 3. Run `pwsh -NoProfile -File ./tests/Sync-SqlSnippets.ps1` (or the full
    `./tests/Sync-Site.ps1`). The build rejects duplicate ids, unknown
-   categories/types, missing SQL files, `{{token}}` placeholders without a
-   declared parameter, and declared parameters that never appear in the SQL.
+   categories/types, mismatched or escaping SQL paths, unregistered SQL files,
+   malformed `{{token}}` placeholders, undeclared parameters, and missing
+   operational metadata.
 
 4. Extend `tests/Test-SqlSnippets.ps1` if the new snippet changes counts or
    behavior the suite asserts on.
@@ -62,10 +67,13 @@ Nothing is downloaded at runtime and no SQL is ever executed or connected.
 | --- | --- | --- |
 | `Identifier` (default) | `[value]` with `]` escaped as `]]` | databases, users, logins, tables |
 | `Literal` | `N'value'` with `'` doubled | string values in predicates |
-| `Raw` | `value` unquoted | numbers, thresholds |
+| `Integer` | validated whole number | counts, minutes, days; supports `Min`/`Max` |
+| `Decimal` | invariant-culture decimal | ratios and percentages; supports `Min`/`Max` |
+| `Enum` | one value from `AllowedValues` | SQL keywords or other predefined choices |
 
 Every `{{Name}}` in the SQL must have a matching parameter and vice versa.
 Snippets with no parameters omit the field and the SQL contains no `{{...}}`.
+Free-form raw substitution is intentionally unsupported.
 
 ## Conventions
 
