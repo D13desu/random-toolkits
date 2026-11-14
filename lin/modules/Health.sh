@@ -5,7 +5,7 @@ lin_check_health() {
     read -r load1 _ </proc/loadavg 2>/dev/null || load1='Unavailable'
     cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
     load_status='INFO'
-    if [[ $load1 =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v load="$load1" -v cores="$cores" 'BEGIN {exit !(load > cores)}'; then load_status='REVIEW'; ((attention+=1)); fi
+    if [[ $load1 =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v current_load="$load1" -v cores="$cores" 'BEGIN {exit !(current_load > cores)}'; then load_status='REVIEW'; ((attention+=1)); fi
 
     memory_percent=$(awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2} END {if(total) printf "%.0f", (total-available)*100/total}' /proc/meminfo 2>/dev/null)
     memory_percent=${memory_percent:-0}

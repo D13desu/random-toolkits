@@ -1,4 +1,4 @@
-# Linux Toolkit v0.2.0
+# Linux Toolkit v0.2.1
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 

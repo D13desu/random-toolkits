@@ -78,7 +78,9 @@ grep -Fq 'Package metadata is not refreshed' <<<"$updates_output" || fail 'Updat
 grep -Fq 'Raw evidence:' <<<"$updates_output" || fail 'Updates summary omitted its raw-evidence route'
 pass 'Friendly updates summary states its metadata boundary'
 
-health_output=$(bash "$toolkit" --check health)
+health_output=$(bash "$toolkit" --check health 2>&1)
+[[ $health_output != *'awk:'* ]] || fail 'Health summary emitted an awk compatibility error'
+if grep -Eq 'awk[^\n]*-v[[:space:]]+load=' "$repo_root/lin/modules/Health.sh"; then fail 'Health summary reuses the gawk built-in name load'; fi
 grep -Fq 'Root filesystem' <<<"$health_output" || fail 'Health summary omitted root storage'
 grep -Fq 'Available updates' <<<"$health_output" || fail 'Health summary omitted updates'
 grep -Fq 'Non-local listeners' <<<"$health_output" || fail 'Health summary omitted listeners'
