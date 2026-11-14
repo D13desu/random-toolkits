@@ -8,3 +8,6 @@
 *.pfx
 *.p12
 *.key
+
+# Local parallel-development worktrees.
+.worktrees/

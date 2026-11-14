@@ -10,6 +10,7 @@ Maintainers: see [Architecture and maintenance](ARCHITECTURE.md) for the source-
 | --- | --- | --- |
 | [Windows Toolkit](win/README.md) | Windows diagnostics, inventory, troubleshooting, and confirmed repairs | Windows PowerShell 5.0+; 5.1 or 7 recommended |
 | [M365 Toolkit](m365/README.md) | Read-only Microsoft 365 investigation and reporting | PowerShell 7.4+ and the relevant Microsoft 365 permissions |
+| [Linux Toolkit](lin/README.md) | Linux diagnostics, inventory, and explicitly confirmed maintenance | Bash 4+ and standard distribution utilities |
 
 ## Windows Toolkit
 
@@ -26,3 +27,11 @@ irm https://tools.d0xd.com/m365/ | iex
 ```
 
 The M365 launcher verifies the downloaded toolkit before running it. Review remote scripts before execution.
+
+## Linux Toolkit
+
+```bash
+curl -fsSL https://tools.d0xd.com/lin/ | bash
+```
+
+See the [Linux toolkit guide](lin/README.md) for the safer download-and-review workflow, available checks, and maintenance safeguards.

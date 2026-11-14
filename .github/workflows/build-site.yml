@@ -30,6 +30,10 @@ jobs:
         shell: pwsh
         run: ./tests/Test-M365MenuEngine.ps1
 
+      - name: Test Linux toolkit
+        shell: bash
+        run: ./tests/Test-LinuxToolkit.sh
+
       - name: Test Sysinternals Live launchers
         shell: pwsh
         run: ./tests/Test-SysinternalsLauncher.ps1
