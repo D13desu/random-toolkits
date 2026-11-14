@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Random Toolkits | Linux Toolkit 0.1.1
+# Random Toolkits | Linux Toolkit 0.2.0
 # Generated from lin/modules/*.sh by tests/Sync-LinuxToolkit.ps1.
 set -o pipefail
-LIN_TOOLKIT_VERSION='0.1.1'
+LIN_TOOLKIT_VERSION='0.2.0'
 
 # BEGIN CORE
 # Shared output, capability, and input helpers.
@@ -47,6 +47,39 @@ lin_error() { printf '%sERROR: %s%s\n' "$LIN_RED" "$*" "$LIN_RESET" >&2; }
 lin_section() { printf '\n%s%s%s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$1" "$LIN_RESET"; }
 lin_field() { printf '%s%s:%s %s\n' "$LIN_CYAN" "$1" "$LIN_RESET" "$2"; }
 lin_menu_item() { printf '  %s[%s]%s %s\n' "${3:-$LIN_GREEN}" "$1" "$LIN_RESET" "$2"; }
+
+lin_status_color() {
+    case $1 in
+        OK) printf '%s' "$LIN_GREEN" ;;
+        INFO|UNAVAILABLE) printf '%s' "$LIN_CYAN" ;;
+        REVIEW) printf '%s' "$LIN_YELLOW" ;;
+        WARNING) printf '%s' "$LIN_RED" ;;
+        *) printf '%s' "$LIN_RESET" ;;
+    esac
+}
+
+lin_status_row() {
+    local status=$1 title=$2 detail=$3 color
+    color=$(lin_status_color "$status")
+    printf '%s%-11s%s %-24s %s\n' "$color" "$status" "$LIN_RESET" "$title" "$detail"
+}
+
+lin_usage_status() {
+    local percent=${1:-0}
+    if (( percent >= 90 )); then printf 'WARNING'
+    elif (( percent >= 80 )); then printf 'REVIEW'
+    else printf 'OK'
+    fi
+}
+
+lin_truncate() {
+    local text=${1//$'\n'/ } width=${2:-60}
+    if (( ${#text} > width )); then printf '%s...' "${text:0:width-3}"; else printf '%s' "$text"; fi
+}
+
+lin_raw_hint() {
+    printf '\n%sRaw evidence:%s bash Linux-Toolkit.sh --check %s --raw\n' "$LIN_DIM" "$LIN_RESET" "$1"
+}
 
 lin_read() {
     local prompt=$1
@@ -125,56 +158,184 @@ lin_check_resources() {
 # END SYSTEM
 
 # BEGIN STORAGE
+lin_storage_root_percent() {
+    df -P / 2>/dev/null | awk 'NR == 2 {gsub(/%/, "", $5); print $5; exit}'
+}
+
 lin_check_storage() {
-    lin_header 'Storage, mounts, and inodes'
-    lin_section 'Filesystems'
-    df -hT 2>/dev/null || df -h
-    lin_section 'Inode usage'
-    df -i 2>/dev/null || lin_warn 'Inode reporting unavailable.'
-    if lin_has lsblk; then
-        lin_section 'Block devices'
-        lsblk -o NAME,TYPE,FSTYPE,SIZE,FSUSED,FSAVAIL,FSUSE%,MOUNTPOINTS 2>/dev/null || lsblk
-    fi
+    lin_header 'Storage summary'
+    local rows overall='OK' filesystem type size used available percent mount status number
+    rows=$(df -hPT 2>/dev/null) || { lin_warn 'Filesystem capacity is unavailable.'; return 0; }
+
+    printf '%-24s %-8s %8s %8s %6s  %s\n' 'Mount' 'Type' 'Used' 'Free' 'Use' 'Status'
+    printf '%-24s %-8s %8s %8s %6s  %s\n' '------------------------' '--------' '--------' '--------' '------' '-------'
+    while read -r filesystem type size used available percent mount; do
+        [[ $percent == Use% ]] && continue
+        number=${percent%%%}
+        [[ $number =~ ^[0-9]+$ ]] || continue
+        status=$(lin_usage_status "$number")
+        [[ $status == WARNING ]] && overall='WARNING'
+        [[ $status == REVIEW && $overall == OK ]] && overall='REVIEW'
+        printf '%-24s %-8s %8s %8s %6s  %s%s%s\n' "$(lin_truncate "$mount" 24)" "$type" "$used" "$available" "$percent" "$(lin_status_color "$status")" "$status" "$LIN_RESET"
+    done <<<"$rows"
+
+    lin_section 'Other capacity indicators'
+    local inode_percent='Unavailable' inode_status='UNAVAILABLE' swap='Unavailable' disks='Unavailable'
+    inode_percent=$(df -Pi / 2>/dev/null | awk 'NR == 2 {print $5; exit}') || true
+    if [[ ${inode_percent%%%} =~ ^[0-9]+$ ]]; then inode_status=$(lin_usage_status "${inode_percent%%%}"); fi
+    if lin_has free; then swap=$(free -h | awk '/^Swap:/ {print $3 " of " $2 " used"}'); fi
+    if lin_has lsblk; then disks=$(lsblk -dn -o TYPE 2>/dev/null | awk '$1 == "disk" {count++} END {print count+0}'); fi
+    lin_status_row "$inode_status" 'Root inode usage' "$inode_percent"
+    lin_status_row 'INFO' 'Swap' "$swap"
+    lin_status_row 'INFO' 'Physical disks' "$disks"
+
+    printf '\n'
+    case $overall in
+        WARNING) printf '%sOverall status: WARNING%s — at least one filesystem is 90%% full or higher.\n' "$LIN_RED" "$LIN_RESET" ;;
+        REVIEW) printf '%sOverall status: REVIEW%s — at least one filesystem is 80%% full or higher.\n' "$LIN_YELLOW" "$LIN_RESET" ;;
+        OK) printf '%sOverall status: OK%s — all reported filesystems are below 80%%.\n' "$LIN_GREEN" "$LIN_RESET" ;;
+    esac
+    lin_raw_hint storage
+}
+
+lin_raw_storage() {
+    lin_header 'Storage raw evidence'
+    lin_section 'df -hT'; df -hT 2>&1 || df -h
+    lin_section 'df -i'; df -i 2>&1 || true
+    if lin_has lsblk; then lin_section 'lsblk'; lsblk -o NAME,TYPE,FSTYPE,SIZE,FSUSED,FSAVAIL,FSUSE%,MOUNTPOINTS 2>&1 || lsblk; fi
 }
 # END STORAGE
 
 # BEGIN NETWORK
+lin_listener_rows() {
+    lin_has ss || return 1
+    local proto state recv send local_endpoint peer process address exposure status
+    while read -r proto state recv send local_endpoint peer process; do
+        [[ -n $local_endpoint ]] || continue
+        address=${local_endpoint%:*}
+        case $address in
+            127.*|'[::1]'|::1|localhost) exposure='Local only'; status='OK' ;;
+            0.0.0.0|'[::]'|::|'*') exposure='All interfaces'; status='REVIEW' ;;
+            *) exposure='Specific address'; status='REVIEW' ;;
+        esac
+        process=${process:-Unavailable}
+        process=${process#users:((}
+        process=${process%%,*}
+        process=${process//\"/}
+        printf '%s\t%s\t%s\t%s\t%s\n' "$proto" "$local_endpoint" "$process" "$exposure" "$status"
+    done < <(ss -H -lntup 2>/dev/null || ss -H -lntu 2>/dev/null)
+}
+
+lin_public_listener_count() {
+    lin_listener_rows 2>/dev/null | awk -F'\t' '$4 != "Local only" {count++} END {print count+0}'
+}
+
 lin_check_network() {
-    lin_header 'Network configuration'
+    lin_header 'Network summary'
+    local interface='Unavailable' gateway='Unavailable' address='Unavailable' state='Unavailable' speed='Unavailable'
     if lin_has ip; then
-        lin_section 'Addresses'; ip -brief address
-        lin_section 'Routes'; ip route show
-    elif lin_has ifconfig; then
-        ifconfig
-    else
-        lin_warn 'Neither ip nor ifconfig is available.'
+        local default_route
+        default_route=$(ip route show default 2>/dev/null | head -n 1)
+        interface=$(awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1);exit}}' <<<"$default_route")
+        gateway=$(awk '{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1);exit}}' <<<"$default_route")
+        [[ -n $interface ]] || interface='Unavailable'
+        [[ -n $gateway ]] || gateway='Direct / unavailable'
+        if [[ $interface != Unavailable ]]; then
+            address=$(ip -o -4 address show dev "$interface" scope global 2>/dev/null | awk 'NR == 1 {print $4}')
+            [[ -n $address ]] || address='No global IPv4 address'
+            [[ -r /sys/class/net/$interface/operstate ]] && state=$(<"/sys/class/net/$interface/operstate")
+            if [[ -r /sys/class/net/$interface/speed ]]; then speed="$(<"/sys/class/net/$interface/speed") Mbps"; fi
+        fi
     fi
-    lin_section 'DNS configuration'
-    if lin_has resolvectl; then resolvectl status 2>/dev/null || true; elif [[ -r /etc/resolv.conf ]]; then cat /etc/resolv.conf; else lin_warn 'DNS configuration unavailable.'; fi
-    lin_section 'Listening sockets'
-    if lin_has ss; then ss -lntup 2>/dev/null || ss -lntu; elif lin_has netstat; then netstat -lntup 2>/dev/null || netstat -lntu; else lin_warn 'Neither ss nor netstat is available.'; fi
+
+    lin_section 'Primary connection'
+    lin_field 'Interface' "$interface"
+    lin_field 'IPv4 address' "$address"
+    lin_field 'Gateway' "$gateway"
+    lin_field 'Link state' "$state"
+    lin_field 'Link speed' "$speed"
+    local dns
+    dns=$(awk '/^nameserver[ \t]+/ {printf "%s%s", separator, $2; separator=", "}' /etc/resolv.conf 2>/dev/null)
+    lin_field 'DNS servers' "${dns:-Unavailable}"
+
+    lin_section 'Listening services'
+    local rows local_count public_count
+    rows=$(lin_listener_rows 2>/dev/null) || rows=''
+    local_count=$(awk -F'\t' '$4 == "Local only" {count++} END {print count+0}' <<<"$rows")
+    public_count=$(awk -F'\t' '$4 != "Local only" && NF {count++} END {print count+0}' <<<"$rows")
+    lin_status_row 'OK' 'Local-only listeners' "$local_count"
+    if (( public_count )); then lin_status_row 'REVIEW' 'Non-local listeners' "$public_count"; else lin_status_row 'OK' 'Non-local listeners' '0'; fi
+
+    if [[ -n $rows ]]; then
+        printf '\n%-6s %-28s %-18s %-18s %s\n' 'Proto' 'Endpoint' 'Process' 'Exposure' 'Status'
+        while IFS=$'\t' read -r proto local_endpoint process exposure status; do
+            printf '%-6s %-28s %-18s %-18s %s%s%s\n' "$proto" "$(lin_truncate "$local_endpoint" 28)" "$(lin_truncate "$process" 18)" "$exposure" "$(lin_status_color "$status")" "$status" "$LIN_RESET"
+        done <<<"$rows"
+    else
+        lin_warn 'Listening socket details are unavailable; install iproute2/ss for this view.'
+    fi
+    printf '\nREVIEW means the socket is bound beyond localhost; it does not prove firewall reachability.\n'
+    lin_raw_hint network
+}
+
+lin_raw_network() {
+    lin_header 'Network raw evidence'
+    if lin_has ip; then lin_section 'ip -brief address'; ip -brief address; lin_section 'ip route'; ip route show; fi
+    lin_section '/etc/resolv.conf'; cat /etc/resolv.conf 2>&1 || true
+    if lin_has resolvectl; then lin_section 'resolvectl status'; resolvectl status 2>&1 || true; fi
+    if lin_has ss; then lin_section 'ss -lntup'; ss -lntup 2>&1 || ss -lntu; fi
 }
 # END NETWORK
 
 # BEGIN SERVICES
-lin_check_services() {
-    lin_header 'Services and recent logs'
+lin_failed_service_count() {
     if lin_has systemctl && [[ -d /run/systemd/system ]]; then
-        lin_section 'Failed services'
-        systemctl --failed --no-pager --plain || true
-        lin_section 'Recently failed service units'
-        systemctl list-units --type=service --state=failed --no-pager --plain || true
+        systemctl --failed --type=service --no-legend --plain 2>/dev/null | awk 'NF {count++} END {print count+0}'
     else
-        lin_warn 'systemd is not the active service manager.'
-        if lin_has rc-status; then rc-status --crashed 2>/dev/null || rc-status; fi
+        printf '0'
     fi
-    lin_section 'Recent boot warnings/errors (latest 50)'
-    if lin_has journalctl && [[ -d /run/systemd/system ]]; then
-        journalctl -b -p warning -n 50 --no-pager 2>&1 || lin_warn 'Journal access was denied or unavailable.'
+}
+
+lin_check_services() {
+    lin_header 'Services and logs summary'
+    if ! lin_has systemctl || [[ ! -d /run/systemd/system ]]; then
+        lin_status_row 'UNAVAILABLE' 'Service manager' 'systemd is not active'
+        if lin_has rc-status; then lin_field 'OpenRC crashed services' "$(rc-status --crashed 2>/dev/null | wc -l | tr -d ' ')"; fi
+        lin_raw_hint services
+        return 0
+    fi
+
+    local failed count
+    failed=$(systemctl --failed --type=service --no-legend --plain 2>/dev/null | sed 's/^[●*[:space:]]*//')
+    count=$(awk 'NF {count++} END {print count+0}' <<<"$failed")
+    if (( count )); then lin_status_row 'WARNING' 'Failed services' "$count unit(s)"; else lin_status_row 'OK' 'Failed services' 'None'; fi
+
+    if [[ -n $failed ]]; then
+        printf '\n%-34s %-10s %-10s %s\n' 'Unit' 'Active' 'Substate' 'Description'
+        while read -r unit load active sub description; do
+            [[ -n $unit ]] || continue
+            printf '%-34s %-10s %-10s %s\n' "$(lin_truncate "$unit" 34)" "$active" "$sub" "$(lin_truncate "$description" 50)"
+        done <<<"$failed"
+    fi
+
+    lin_section 'Recent boot warnings/errors'
+    local journal journal_count
+    journal=$(journalctl -b -p warning -n 50 --no-pager -o short-iso 2>/dev/null | grep -v '^-- No entries --$' || true)
+    journal_count=$(awk 'NF {count++} END {print count+0}' <<<"$journal")
+    if (( journal_count )); then lin_status_row 'REVIEW' 'Recent entries' "$journal_count (latest 5 shown)"; else lin_status_row 'OK' 'Recent entries' 'None visible'; fi
+    if [[ -n $journal ]]; then tail -n 5 <<<"$journal" | while IFS= read -r line; do printf '  %s\n' "$(lin_truncate "$line" 110)"; done; fi
+    printf '\nHistorical log entries are context, not proof that a problem is still active.\n'
+    lin_raw_hint services
+}
+
+lin_raw_services() {
+    lin_header 'Services and logs raw evidence'
+    if lin_has systemctl && [[ -d /run/systemd/system ]]; then
+        lin_section 'systemctl --failed'; systemctl --failed --no-pager --plain 2>&1 || true
+        lin_section 'journalctl warnings/errors'; journalctl -b -p warning -n 50 --no-pager 2>&1 || true
     elif [[ -r /var/log/syslog ]]; then tail -n 50 /var/log/syslog
     elif [[ -r /var/log/messages ]]; then tail -n 50 /var/log/messages
-    else lin_warn 'No supported readable system log was found.'
-    fi
+    else lin_warn 'No supported service manager or readable system log was found.'; fi
 }
 # END SERVICES
 
@@ -203,12 +364,58 @@ lin_check_security() {
 # END SECURITY
 
 # BEGIN UPDATES
+lin_collect_updates() {
+    local manager=${1:-}
+    case $manager in
+        apt-get)
+            apt list --upgradable 2>/dev/null | awk 'NR > 1 && $1 ~ /\// {split($1,n,"/"); old=$NF; gsub(/^\[upgradable from: |\]$/, "", old); print n[1] "\t" $2 "\tfrom " old}' ;;
+        dnf)
+            dnf --cacheonly check-update 2>/dev/null | awk '$1 ~ /\./ && NF >= 3 {print $1 "\t" $2 "\t" $3}' ;;
+        yum)
+            yum -C check-update 2>/dev/null | awk '$1 ~ /\./ && NF >= 3 {print $1 "\t" $2 "\t" $3}' ;;
+        zypper)
+            zypper --non-interactive list-updates 2>/dev/null | awk -F'|' 'NF >= 6 && $1 ~ /v/ {for(i=2;i<=6;i++) gsub(/^[ \t]+|[ \t]+$/, "", $i); print $3 "\t" $5 "\t" $2}' ;;
+        pacman)
+            pacman -Qu 2>/dev/null | awk 'NF >= 4 {print $1 "\t" $4 "\tfrom " $2}' ;;
+        apk)
+            apk version -l '<' 2>/dev/null | awk 'NF {print $1 "\tavailable\tupgrade"}' ;;
+    esac
+    return 0
+}
+
+lin_update_count() {
+    local manager rows
+    manager=$(lin_package_manager) || { printf '0'; return 0; }
+    rows=$(lin_collect_updates "$manager")
+    awk 'NF {count++} END {print count+0}' <<<"$rows"
+}
+
 lin_check_updates() {
-    lin_header 'Available package updates'
+    lin_header 'Available updates summary'
+    local manager rows count shown=0 name version source
+    manager=$(lin_package_manager) || { lin_warn 'No supported package manager was found.'; return 0; }
+    rows=$(lin_collect_updates "$manager")
+    count=$(awk 'NF {count++} END {print count+0}' <<<"$rows")
+    lin_field 'Package manager' "$manager"
+    if (( count )); then lin_status_row 'REVIEW' 'Available updates' "$count package(s)"; else lin_status_row 'OK' 'Available updates' 'None in current metadata'; fi
+    printf 'Package metadata is not refreshed and no packages are installed.\n'
+
+    if [[ -n $rows ]]; then
+        printf '\n%-36s %-24s %s\n' 'Package' 'Available version' 'Context'
+        while IFS=$'\t' read -r name version source; do
+            (( shown+=1 ))
+            (( shown > 20 )) && break
+            printf '%-36s %-24s %s\n' "$(lin_truncate "$name" 36)" "$(lin_truncate "$version" 24)" "$(lin_truncate "$source" 35)"
+        done <<<"$rows"
+        (( count > 20 )) && printf '... and %d more package(s).\n' "$((count-20))"
+    fi
+    lin_raw_hint updates
+}
+
+lin_raw_updates() {
+    lin_header 'Available updates raw evidence'
     local manager
     manager=$(lin_package_manager) || { lin_warn 'No supported package manager was found.'; return 0; }
-    lin_field 'Package manager' "$manager"
-    printf 'This reads currently available update metadata; it does not refresh caches or install packages.\n\n'
     case $manager in
         apt-get) apt list --upgradable 2>/dev/null || true ;;
         dnf) dnf --cacheonly check-update || [[ $? -eq 100 ]] ;;
@@ -233,6 +440,61 @@ lin_check_containers() {
     if (( ! found )); then lin_warn 'Docker and Podman are not installed.'; fi
 }
 # END CONTAINERS
+
+# BEGIN HEALTH
+lin_check_health() {
+    lin_header 'Health summary'
+    local attention=0 load1 cores load_status memory_percent memory_status root_percent root_status failed updates firewall_status firewall_detail listeners containers=0
+
+    read -r load1 _ </proc/loadavg 2>/dev/null || load1='Unavailable'
+    cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
+    load_status='INFO'
+    if [[ $load1 =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v load="$load1" -v cores="$cores" 'BEGIN {exit !(load > cores)}'; then load_status='REVIEW'; ((attention+=1)); fi
+
+    memory_percent=$(awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2} END {if(total) printf "%.0f", (total-available)*100/total}' /proc/meminfo 2>/dev/null)
+    memory_percent=${memory_percent:-0}
+    memory_status=$(lin_usage_status "$memory_percent")
+    [[ $memory_status != OK ]] && ((attention+=1))
+
+    root_percent=$(lin_storage_root_percent); root_percent=${root_percent:-0}
+    root_status=$(lin_usage_status "$root_percent")
+    [[ $root_status != OK ]] && ((attention+=1))
+
+    failed=$(lin_failed_service_count)
+    (( failed > 0 )) && ((attention+=1))
+    updates=$(lin_update_count)
+    (( updates > 0 )) && ((attention+=1))
+    listeners=$(lin_public_listener_count); listeners=${listeners:-0}
+    (( listeners > 0 )) && ((attention+=1))
+
+    firewall_status='UNAVAILABLE'; firewall_detail='No supported frontend found'
+    if lin_has ufw; then
+        if ufw status 2>/dev/null | grep -qi '^Status: active'; then firewall_status='OK'; firewall_detail='UFW active'; else firewall_status='REVIEW'; firewall_detail='UFW inactive or unavailable'; ((attention+=1)); fi
+    elif lin_has firewall-cmd; then
+        if firewall-cmd --state 2>/dev/null | grep -q running; then firewall_status='OK'; firewall_detail='firewalld running'; else firewall_status='REVIEW'; firewall_detail='firewalld not running'; ((attention+=1)); fi
+    elif lin_has nft; then firewall_status='INFO'; firewall_detail='nftables installed; inspect rules for policy'; fi
+
+    if lin_has docker; then containers=$(docker ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}');
+    elif lin_has podman; then containers=$(podman ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}'); fi
+
+    lin_status_row "$load_status" 'CPU load' "$load1 across $cores logical CPU(s)"
+    lin_status_row "$memory_status" 'Memory' "$memory_percent% used"
+    lin_status_row "$root_status" 'Root filesystem' "$root_percent% used"
+    if (( failed )); then lin_status_row 'WARNING' 'Failed services' "$failed"; else lin_status_row 'OK' 'Failed services' '0'; fi
+    if (( updates )); then lin_status_row 'REVIEW' 'Available updates' "$updates"; else lin_status_row 'OK' 'Available updates' '0 in existing metadata'; fi
+    lin_status_row "$firewall_status" 'Firewall' "$firewall_detail"
+    if (( listeners )); then lin_status_row 'REVIEW' 'Non-local listeners' "$listeners"; else lin_status_row 'OK' 'Non-local listeners' '0'; fi
+    lin_status_row 'INFO' 'Running containers' "$containers"
+
+    printf '\n'
+    if (( attention )); then
+        printf '%s%d item(s) need review. A review status is context, not proof of a fault.%s\n' "$LIN_YELLOW" "$attention" "$LIN_RESET"
+    else
+        printf '%sNo measured item crossed its review threshold.%s\n' "$LIN_GREEN" "$LIN_RESET"
+    fi
+    printf '%sThresholds: memory/root storage review at 80%%, warning at 90%%; load review above logical CPU count.%s\n' "$LIN_DIM" "$LIN_RESET"
+}
+# END HEALTH
 
 # BEGIN MAINTENANCE
 lin_restart_service() {
@@ -293,19 +555,32 @@ lin_maintenance_menu() {
 # BEGIN MENU
 lin_list_checks() {
     cat <<'EOF'
+health       Combined health summary with measured thresholds
 system       System and user summary
 resources    CPU, memory, and resource-heavy processes
-storage      Filesystems, mounts, block devices, and inodes
-network      Addresses, routes, DNS, and listening sockets
-services     Failed services and recent boot warnings
+storage      Friendly filesystem, capacity, and inode summary
+network      Friendly connection and listening-service summary
+services     Friendly failed-service and recent-log summary
 security     Firewall, SSH, and mandatory-access-control status
-updates      Available package updates using existing metadata
+updates      Friendly available-update summary using existing metadata
 containers   Docker and Podman inventory
 EOF
 }
 
-lin_run_check() {
+lin_run_raw_check() {
     case ${1:-} in
+        storage) lin_raw_storage ;;
+        network) lin_raw_network ;;
+        services) lin_raw_services ;;
+        updates) lin_raw_updates ;;
+        *) lin_error "Raw evidence is not defined for check: ${1:-<blank>}"; return 2 ;;
+    esac
+}
+
+lin_run_check() {
+    if [[ ${LIN_RAW:-0} == 1 ]]; then lin_run_raw_check "$1"; return; fi
+    case ${1:-} in
+        health) lin_check_health ;;
         system) lin_check_system ;;
         resources) lin_check_resources ;;
         storage) lin_check_storage ;;
@@ -318,33 +593,47 @@ lin_run_check() {
     esac
 }
 
+lin_show_check() {
+    local id=$1 choice
+    lin_run_check "$id"
+    case $id in
+        storage|network|services|updates)
+            choice=$(lin_read 'R: raw evidence | Enter/B: back: ') || return 0
+            if [[ ${choice^^} == R ]]; then LIN_RAW=1 lin_run_check "$id"; lin_pause; fi
+            ;;
+        *) lin_pause ;;
+    esac
+}
+
 lin_main_menu() {
     while true; do
         lin_header 'Main menu'
-        lin_menu_item '1' 'System and user summary'
-        lin_menu_item '2' 'CPU, memory, and heavy processes'
-        lin_menu_item '3' 'Storage, mounts, and inode usage'
-        lin_menu_item '4' 'Network configuration and listening sockets'
-        lin_menu_item '5' 'Failed services and recent logs'
-        lin_menu_item '6' 'Firewall and SSH inspection'
-        lin_menu_item '7' 'Available package updates'
-        lin_menu_item '8' 'Docker and Podman inventory'
-        lin_menu_item '9' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '1' 'Health summary'
+        lin_menu_item '2' 'System and user summary'
+        lin_menu_item '3' 'CPU, memory, and heavy processes'
+        lin_menu_item '4' 'Storage summary'
+        lin_menu_item '5' 'Network summary'
+        lin_menu_item '6' 'Services and logs summary'
+        lin_menu_item '7' 'Firewall and SSH inspection'
+        lin_menu_item '8' 'Available updates summary'
+        lin_menu_item '9' 'Docker and Podman inventory'
+        lin_menu_item '10' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
         lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
         case ${choice^^} in
-            1) lin_check_system; lin_pause ;;
-            2) lin_check_resources; lin_pause ;;
-            3) lin_check_storage; lin_pause ;;
-            4) lin_check_network; lin_pause ;;
-            5) lin_check_services; lin_pause ;;
-            6) lin_check_security; lin_pause ;;
-            7) lin_check_updates; lin_pause ;;
-            8) lin_check_containers; lin_pause ;;
-            9) lin_maintenance_menu ;;
+            1) lin_show_check health ;;
+            2) lin_show_check system ;;
+            3) lin_show_check resources ;;
+            4) lin_show_check storage ;;
+            5) lin_show_check network ;;
+            6) lin_show_check services ;;
+            7) lin_show_check security ;;
+            8) lin_show_check updates ;;
+            9) lin_show_check containers ;;
+            10) lin_maintenance_menu ;;
             Q|0) return 0 ;;
-            *) lin_warn 'Choose 1-9 or Q.' ;;
+            *) lin_warn 'Choose 1-10 or Q.' ;;
         esac
     done
 }
@@ -356,7 +645,9 @@ Linux Toolkit $LIN_TOOLKIT_VERSION
 Usage:
   Linux-Toolkit.sh                 Open the interactive menu
   Linux-Toolkit.sh --list          List command-line checks
-  Linux-Toolkit.sh --check ID      Run one read-only check
+  Linux-Toolkit.sh --check ID      Run one friendly read-only check
+  Linux-Toolkit.sh --check ID --raw
+                                   Show underlying command output when supported
   Linux-Toolkit.sh --no-color      Disable ANSI colours
   Linux-Toolkit.sh --help          Show this help
 
@@ -369,7 +660,12 @@ lin_main() {
     case ${1:-} in
         --help|-h) lin_usage ;;
         --list) lin_list_checks ;;
-        --check) [[ -n ${2:-} ]] || { lin_error '--check requires an ID.'; return 2; }; lin_run_check "$2" ;;
+        --check)
+            [[ -n ${2:-} ]] || { lin_error '--check requires an ID.'; return 2; }
+            if [[ -n ${3:-} && ${3:-} != --raw ]]; then lin_error "Unknown --check option: $3"; return 2; fi
+            [[ ${3:-} == --raw ]] && LIN_RAW=1
+            lin_run_check "$2"
+            ;;
         --no-color) NO_COLOR=1; lin_setup_colors; lin_main_menu ;;
         '') lin_main_menu ;;
         *) lin_error "Unknown argument: $1"; lin_usage; return 2 ;;

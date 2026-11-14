@@ -1,4 +1,4 @@
-# Linux Toolkit v0.1.1
+# Linux Toolkit v0.2.0
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 
@@ -24,14 +24,22 @@ Interactive terminals use semantic colours for navigation, read-only checks, war
 
 ## Checks
 
+- Combined health summary with explicit thresholds and `OK`, `INFO`, `REVIEW`, `WARNING`, or `UNAVAILABLE` states.
 - System identity, OS, kernel, architecture, uptime, and virtualization.
 - CPU, memory, and the processes using the most CPU or memory.
-- Filesystem capacity, inode usage, mounts, and block devices.
-- Addresses, routes, DNS configuration, and listening TCP/UDP sockets.
-- Failed systemd services and recent boot warnings, with basic non-systemd fallbacks.
+- Friendly filesystem capacity, inode, swap, and disk summaries instead of command-shaped output.
+- Primary connection, DNS, and listening-service summaries with cautious exposure labels.
+- Failed-service counts and concise recent-log context, with basic non-systemd fallbacks.
 - Firewall, SSH server, SELinux, and AppArmor status.
-- Available updates from existing package metadata for APT, DNF/YUM, Zypper, Pacman, or APK.
+- Friendly update counts and package tables from existing APT, DNF/YUM, Zypper, Pacman, or APK metadata.
 - Docker and Podman inventory when installed.
+
+Friendly summaries retain access to the underlying evidence. Press `R` from a supported interactive screen or use:
+
+```bash
+bash Linux-Toolkit.sh --check storage --raw
+bash Linux-Toolkit.sh --check network --raw
+```
 
 Run a single read-only check without the menu:
 

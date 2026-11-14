@@ -5,7 +5,7 @@ $linuxRoot=Join-Path $repoRoot 'lin'
 $version=(Get-Content -LiteralPath (Join-Path $linuxRoot 'VERSION') -Raw).Trim()
 if($version -notmatch '^\d+\.\d+\.\d+$'){throw "Invalid Linux Toolkit version: $version"}
 
-$moduleNames=@('Core','System','Storage','Network','Services','Security','Updates','Containers','Maintenance','Menu')
+$moduleNames=@('Core','System','Storage','Network','Services','Security','Updates','Containers','Health','Maintenance','Menu')
 $parts=New-Object 'Collections.Generic.List[string]'
 $parts.Add('#!/usr/bin/env bash')
 $parts.Add("# Random Toolkits | Linux Toolkit $version")

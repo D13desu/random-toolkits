@@ -41,6 +41,39 @@ lin_section() { printf '\n%s%s%s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$1" "$LIN_RESET";
 lin_field() { printf '%s%s:%s %s\n' "$LIN_CYAN" "$1" "$LIN_RESET" "$2"; }
 lin_menu_item() { printf '  %s[%s]%s %s\n' "${3:-$LIN_GREEN}" "$1" "$LIN_RESET" "$2"; }
 
+lin_status_color() {
+    case $1 in
+        OK) printf '%s' "$LIN_GREEN" ;;
+        INFO|UNAVAILABLE) printf '%s' "$LIN_CYAN" ;;
+        REVIEW) printf '%s' "$LIN_YELLOW" ;;
+        WARNING) printf '%s' "$LIN_RED" ;;
+        *) printf '%s' "$LIN_RESET" ;;
+    esac
+}
+
+lin_status_row() {
+    local status=$1 title=$2 detail=$3 color
+    color=$(lin_status_color "$status")
+    printf '%s%-11s%s %-24s %s\n' "$color" "$status" "$LIN_RESET" "$title" "$detail"
+}
+
+lin_usage_status() {
+    local percent=${1:-0}
+    if (( percent >= 90 )); then printf 'WARNING'
+    elif (( percent >= 80 )); then printf 'REVIEW'
+    else printf 'OK'
+    fi
+}
+
+lin_truncate() {
+    local text=${1//$'\n'/ } width=${2:-60}
+    if (( ${#text} > width )); then printf '%s...' "${text:0:width-3}"; else printf '%s' "$text"; fi
+}
+
+lin_raw_hint() {
+    printf '\n%sRaw evidence:%s bash Linux-Toolkit.sh --check %s --raw\n' "$LIN_DIM" "$LIN_RESET" "$1"
+}
+
 lin_read() {
     local prompt=$1
     local value=''
