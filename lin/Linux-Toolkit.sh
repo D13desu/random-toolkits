@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Random Toolkits | Linux Toolkit 0.2.1
+# Random Toolkits | Linux Toolkit 0.3.0
 # Generated from lin/modules/*.sh by tests/Sync-LinuxToolkit.ps1.
 set -o pipefail
-LIN_TOOLKIT_VERSION='0.2.1'
+LIN_TOOLKIT_VERSION='0.3.0'
 
 # BEGIN CORE
 # Shared output, capability, and input helpers.
@@ -428,23 +428,318 @@ lin_raw_updates() {
 # END UPDATES
 
 # BEGIN CONTAINERS
+lin_container_engine() {
+    if lin_has docker; then printf 'docker'; return 0; fi
+    if lin_has podman; then printf 'podman'; return 0; fi
+    return 1
+}
+
+lin_container_summary() {
+    local engine rows running=0 stopped=0 unhealthy=0 restarting=0 name image state ports status
+    engine=$(lin_container_engine) || { printf 'UNAVAILABLE\tDocker/Podman not installed'; return 0; }
+    $engine info >/dev/null 2>&1 || { printf 'UNAVAILABLE\t%s installed; service unavailable or access denied' "$engine"; return 0; }
+    rows=$(lin_container_rows "$engine") || { printf 'UNAVAILABLE\t%s inventory unavailable' "$engine"; return 0; }
+    while IFS=$'\t' read -r name image state ports; do
+        [[ -n $name ]] || continue
+        if [[ $state == Up* ]]; then ((running+=1)); else ((stopped+=1)); fi
+        [[ $state == *unhealthy* ]] && ((unhealthy+=1))
+        [[ $state == Restarting* ]] && ((restarting+=1))
+    done <<<"$rows"
+    if (( unhealthy || restarting )); then status='WARNING'; elif (( stopped )); then status='REVIEW'; else status='OK'; fi
+    printf '%s\t%s | %s running, %s stopped, %s unhealthy, %s restarting' "$status" "$engine" "$running" "$stopped" "$unhealthy" "$restarting"
+}
+
+lin_container_rows() {
+    local engine=$1
+    $engine ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null
+}
+
 lin_check_containers() {
-    lin_header 'Container inventory'
-    local found=0
-    if lin_has docker; then
-        found=1; lin_section 'Docker'; docker version --format 'Client {{.Client.Version}} | Server {{.Server.Version}}' 2>&1 || true; docker ps -a --no-trunc 2>&1 || true
+    lin_header 'Container summary'
+    local engine rows running=0 stopped=0 unhealthy=0 restarting=0 total=0 name image state ports status
+    local summary detail
+    summary=$(lin_container_summary); IFS=$'\t' read -r status detail <<<"$summary"
+    if [[ $status == UNAVAILABLE ]]; then lin_status_row "$status" 'Container engine' "$detail"; return 0; fi
+    engine=$(lin_container_engine)
+    lin_field 'Engine' "$engine"
+    rows=$(lin_container_rows "$engine") || { lin_status_row 'UNAVAILABLE' 'Engine service' 'Installed but unavailable or access denied'; return 0; }
+    while IFS=$'\t' read -r name image state ports; do
+        [[ -n $name ]] || continue; ((total+=1))
+        if [[ $state == Up* ]]; then ((running+=1)); else ((stopped+=1)); fi
+        [[ $state == *unhealthy* ]] && ((unhealthy+=1))
+        [[ $state == Restarting* ]] && ((restarting+=1))
+    done <<<"$rows"
+    lin_status_row "$status" 'Containers' "$running running | $stopped stopped | $unhealthy unhealthy | $restarting restarting"
+    lin_field 'Networks' "$($engine network ls -q 2>/dev/null | awk 'NF {count++} END {print count+0}')"
+    lin_field 'Volumes' "$($engine volume ls -q 2>/dev/null | awk 'NF {count++} END {print count+0}')"
+
+    if [[ -n $rows ]]; then
+        printf '\n%-24s %-28s %-26s %s\n' 'Name' 'Image' 'State / health' 'Published ports'
+        while IFS=$'\t' read -r name image state ports; do
+            printf '%-24s %-28s %-26s %s\n' "$(lin_truncate "$name" 24)" "$(lin_truncate "$image" 28)" "$(lin_truncate "$state" 26)" "$(lin_truncate "$ports" 45)"
+        done <<<"$rows"
     fi
-    if lin_has podman; then
-        found=1; lin_section 'Podman'; podman version 2>&1 || true; podman ps -a --no-trunc 2>&1 || true
-    fi
-    if (( ! found )); then lin_warn 'Docker and Podman are not installed.'; fi
+
+    lin_section 'Disk use'
+    $engine system df 2>/dev/null | head -n 12 || lin_warn 'Container disk-use data is unavailable.'
+    if [[ $engine == docker ]] && docker compose version >/dev/null 2>&1; then lin_section 'Compose projects'; docker compose ls 2>/dev/null || true; fi
+    lin_raw_hint containers
+}
+
+lin_container_details() {
+    local engine target exists env_lines
+    engine=$(lin_container_engine) || { lin_warn 'Docker and Podman are not installed.'; return 0; }
+    target=$(lin_read 'Container name or ID (B to cancel): ') || return 0
+    [[ ${target^^} == B ]] && return 0
+    [[ $target =~ ^[A-Za-z0-9_.-]+$ ]] || { lin_error 'Invalid container name or ID.'; return 1; }
+    exists=$($engine ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | awk -v target="$target" '$1 == target || $2 == target || index($1,target) == 1 {print $1; exit}')
+    [[ -n $exists ]] || { lin_error 'Container was not found.'; return 1; }
+    lin_header "Container details: $target"
+    $engine inspect --format $'Name:\t{{.Name}}\nImage:\t{{.Config.Image}}\nState:\t{{.State.Status}}\nHealth:\t{{if .State.Health}}{{.State.Health.Status}}{{else}}Not configured{{end}}\nRestart policy:\t{{.HostConfig.RestartPolicy.Name}}\nStarted:\t{{.State.StartedAt}}' "$exists" 2>/dev/null || true
+    lin_section 'Published ports'; $engine port "$exists" 2>/dev/null || printf '  None.\n'
+    lin_section 'Mounts'; $engine inspect --format '{{range .Mounts}}{{println .Type .Source "->" .Destination}}{{end}}' "$exists" 2>/dev/null || true
+    lin_section 'Environment variables'
+    env_lines=$($engine inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$exists" 2>/dev/null)
+    if [[ -n $env_lines ]]; then printf '%s\n' "$env_lines" | sed 's/^/  /'; else printf '  None visible.\n'; fi
+}
+
+lin_raw_containers() {
+    lin_header 'Container bounded raw evidence'
+    local engine
+    engine=$(lin_container_engine) || { lin_warn 'Docker and Podman are not installed.'; return 0; }
+    lin_section "$engine ps -a"; $engine ps -a --no-trunc 2>&1 || true
+    lin_section "$engine system df"; $engine system df 2>&1 || true
+    lin_section 'Networks'; $engine network ls 2>&1 || true
+    lin_section 'Volumes'; $engine volume ls 2>&1 || true
+    printf '\nComplete inspect output is intentionally excluded; use selected-container details to view environment values.\n'
 }
 # END CONTAINERS
+
+# BEGIN APPLICATIONSERVICES
+lin_service_running() {
+    local name
+    if lin_has systemctl && [[ -d /run/systemd/system ]]; then
+        for name in "$@"; do systemctl is-active "$name" --quiet 2>/dev/null && return 0; done
+    fi
+    for name in "$@"; do pgrep -x "$name" >/dev/null 2>&1 && return 0; done
+    return 1
+}
+
+lin_apache_command() {
+    local command
+    for command in apache2ctl apachectl httpd; do lin_has "$command" && { printf '%s' "$command"; return 0; }; done
+    return 1
+}
+
+lin_apache_summary() {
+    local command version config status detail
+    command=$(lin_apache_command) || { printf 'UNAVAILABLE\tNot installed'; return 0; }
+    version=$($command -v 2>/dev/null | awk -F': ' '/Server version/ {print $2; exit}')
+    config=$($command configtest 2>&1); status='OK'
+    if [[ $? -ne 0 ]]; then status='WARNING'; detail="config test failed"
+    elif ! lin_service_running apache2 httpd; then status='REVIEW'; detail='config syntax OK; service not detected running'
+    else detail='running; config syntax OK'; fi
+    printf '%s\t%s%s' "$status" "${version:-Apache}" " | $detail"
+}
+
+lin_check_apache() {
+    lin_header 'Apache summary'
+    local command summary status detail sites=0 modules=0 vhosts
+    command=$(lin_apache_command) || { lin_status_row 'UNAVAILABLE' 'Apache' 'Not installed'; return 0; }
+    summary=$(lin_apache_summary); IFS=$'\t' read -r status detail <<<"$summary"
+    lin_status_row "$status" 'Apache' "$detail"
+    [[ -d /etc/apache2/sites-enabled ]] && sites=$(find /etc/apache2/sites-enabled -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | awk 'NF {count++} END {print count+0}')
+    modules=$($command -M 2>/dev/null | awk '/_module/ {count++} END {print count+0}')
+    lin_field 'Enabled sites' "$sites"
+    lin_field 'Loaded modules' "$modules"
+    lin_section 'Virtual hosts (bounded)'
+    vhosts=$($command -S 2>&1 || true)
+    if [[ -n $vhosts ]]; then printf '%s\n' "$vhosts" | grep -E '(^VirtualHost|namevhost|default server|port [0-9]+)' | head -n 15 | while IFS= read -r line; do printf '  %s\n' "$(lin_truncate "$line" 110)"; done
+    else lin_warn 'Virtual-host information is unavailable.'; fi
+    lin_raw_hint apache
+}
+
+lin_raw_apache() {
+    lin_header 'Apache raw evidence'
+    local command
+    command=$(lin_apache_command) || { lin_warn 'Apache is not installed.'; return 0; }
+    lin_section 'Version'; $command -v 2>&1 || true
+    lin_section 'Configuration test'; $command configtest 2>&1 || true
+    lin_section 'Virtual hosts'; $command -S 2>&1 || true
+    lin_section 'Loaded modules'; $command -M 2>&1 || true
+}
+
+lin_nginx_summary() {
+    local version config status detail
+    lin_has nginx || { printf 'UNAVAILABLE\tNot installed'; return 0; }
+    version=$(nginx -v 2>&1 | sed 's|.*/||')
+    config=$(nginx -t 2>&1); status='OK'
+    if [[ $? -ne 0 ]]; then
+        if grep -qiE 'permission denied|operation not permitted' <<<"$config"; then status='UNAVAILABLE'; detail='config test needs additional access'
+        else status='WARNING'; detail='config test failed'; fi
+    elif ! lin_service_running nginx; then status='REVIEW'; detail='config syntax OK; service not detected running'
+    else detail='running; config syntax OK'; fi
+    printf '%s\tnginx %s | %s' "$status" "${version:-unknown}" "$detail"
+}
+
+lin_nginx_config_files() {
+    [[ -d /etc/nginx ]] || return 0
+    find /etc/nginx \( -type f -o -type l \) \( -name '*.conf' -o -path '*/sites-enabled/*' \) 2>/dev/null | sort -u
+}
+
+lin_check_nginx() {
+    lin_header 'Nginx summary'
+    local summary status detail files highlights count
+    summary=$(lin_nginx_summary); IFS=$'\t' read -r status detail <<<"$summary"
+    lin_status_row "$status" 'Nginx' "$detail"
+    [[ $detail == 'Not installed' ]] && return 0
+    files=$(lin_nginx_config_files); count=$(awk 'NF {count++} END {print count+0}' <<<"$files")
+    lin_field 'Configuration files' "$count readable file(s)"
+    lin_section 'Operational directives (values only; secrets excluded)'
+    highlights=''
+    while IFS= read -r file; do
+        [[ -r $file ]] || continue
+        while IFS= read -r line; do highlights+="$(lin_truncate "$line" 105)"$'\n'; done < <(grep -Eh '^[[:space:]]*(listen|server_name|root|proxy_pass|upstream|ssl_certificate)[[:space:]]' "$file" 2>/dev/null | grep -Ev 'ssl_certificate_key|password|secret|token')
+    done <<<"$files"
+    if [[ -n $highlights ]]; then printf '%s' "$highlights" | sed '/^[[:space:]]*$/d' | sort -u | head -n 25 | sed 's/^/  /'; else lin_warn 'No readable operational directives were found.'; fi
+    lin_raw_hint nginx
+}
+
+lin_raw_nginx() {
+    lin_header 'Nginx bounded raw evidence'
+    lin_has nginx || { lin_warn 'Nginx is not installed.'; return 0; }
+    lin_section 'Version and build'; nginx -V 2>&1 || true
+    lin_section 'Configuration test'; nginx -t 2>&1 || true
+    lin_section 'Configuration files'; lin_nginx_config_files
+    printf '\nThe complete nginx -T dump is intentionally excluded because configuration may contain credentials.\n'
+}
+
+lin_postgres_summary() {
+    local version ready status detail
+    lin_has psql || { printf 'UNAVAILABLE\tClient not installed'; return 0; }
+    version=$(psql --version 2>/dev/null | sed 's/^psql (PostgreSQL) //')
+    if lin_has pg_isready; then
+        ready=$(pg_isready -t 3 2>&1)
+        if [[ $? -eq 0 ]]; then status='OK'; detail="$ready"
+        else status='REVIEW'; detail="$ready"; fi
+    elif lin_service_running postgresql postgres; then status='INFO'; detail='service detected; pg_isready unavailable'
+    else status='REVIEW'; detail='client installed; server readiness unavailable'; fi
+    printf '%s\tPostgreSQL %s | %s' "$status" "${version:-unknown}" "$detail"
+}
+
+lin_postgres_settings() {
+    PGCONNECT_TIMEOUT=3 psql -X -w -A -t -F $'\t' -c "SELECT name, setting || COALESCE(unit, '') FROM pg_settings WHERE name IN ('config_file','hba_file','port','listen_addresses','ssl','max_connections','shared_buffers','work_mem','log_destination','logging_collector') ORDER BY name" 2>/dev/null
+}
+
+lin_check_postgres() {
+    lin_header 'PostgreSQL summary'
+    local summary status detail settings clusters databases
+    summary=$(lin_postgres_summary); IFS=$'\t' read -r status detail <<<"$summary"
+    lin_status_row "$status" 'PostgreSQL' "$detail"
+    [[ $detail == 'Client not installed' ]] && return 0
+    if lin_has pg_lsclusters; then
+        clusters=$(pg_lsclusters --no-header 2>/dev/null || true)
+        lin_section 'Detected clusters'
+        if [[ -n $clusters ]]; then printf '%s\n' "$clusters" | head -n 10 | sed 's/^/  /'; else printf '  None detected.\n'; fi
+    fi
+    settings=$(lin_postgres_settings || true)
+    lin_section 'Effective settings'
+    if [[ -n $settings ]]; then
+        while IFS=$'\t' read -r name value; do lin_field "$name" "$value"; done <<<"$settings"
+        databases=$(PGCONNECT_TIMEOUT=3 psql -X -w -A -t -F $'\t' -c "SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database WHERE datallowconn ORDER BY pg_database_size(datname) DESC LIMIT 10" 2>/dev/null || true)
+        if [[ -n $databases ]]; then lin_section 'Largest databases'; while IFS=$'\t' read -r name size; do printf '  %-36s %s\n' "$(lin_truncate "$name" 36)" "$size"; done <<<"$databases"; fi
+    else
+        lin_status_row 'UNAVAILABLE' 'Authenticated settings' 'Local connection unavailable; no password was requested'
+    fi
+    lin_raw_hint postgres
+}
+
+lin_raw_postgres() {
+    lin_header 'PostgreSQL bounded raw evidence'
+    lin_has psql || { lin_warn 'PostgreSQL client is not installed.'; return 0; }
+    lin_section 'Client version'; psql --version
+    if lin_has pg_isready; then lin_section 'Readiness'; pg_isready -t 3 2>&1 || true; fi
+    if lin_has pg_lsclusters; then lin_section 'Clusters'; pg_lsclusters 2>&1 || true; fi
+    lin_section 'Safe pg_settings selection'; lin_postgres_settings || lin_warn 'Authentication is required; no password was requested.'
+}
+
+lin_referenced_certificates() {
+    local directory
+    for directory in /etc/nginx /etc/apache2 /etc/httpd; do
+        [[ -d $directory ]] || continue
+        grep -RhsE '^[[:space:]]*(ssl_certificate|SSLCertificateFile)[[:space:]]+' "$directory" 2>/dev/null |
+            grep -Ev 'ssl_certificate_key' |
+            sed -E 's/^[[:space:]]*(ssl_certificate|SSLCertificateFile)[[:space:]]+//; s/[;[:space:]]+$//; s/^"|"$//'
+    done
+    if [[ -d /etc/letsencrypt/live ]]; then find /etc/letsencrypt/live -maxdepth 2 -name fullchain.pem 2>/dev/null; fi
+}
+
+lin_tls_days_status() {
+    local days=${1:-99999}
+    if (( days < 0 )); then printf 'WARNING'
+    elif (( days <= 30 )); then printf 'REVIEW'
+    else printf 'OK'; fi
+}
+
+lin_check_tls() {
+    lin_header 'Referenced TLS certificates'
+    lin_has openssl || { lin_status_row 'UNAVAILABLE' 'OpenSSL' 'Not installed'; return 0; }
+    local paths path end_text end_epoch now days status subject count=0
+    paths=$(lin_referenced_certificates | sed '/^[[:space:]]*$/d' | sort -u)
+    [[ -n $paths ]] || { lin_status_row 'UNAVAILABLE' 'Certificates' 'No referenced certificate files were found'; return 0; }
+    printf '%-8s %8s %-42s %s\n' 'Status' 'Days' 'Certificate' 'Subject'
+    while IFS= read -r path; do
+        [[ $path == /* && -r $path ]] || { lin_status_row 'UNAVAILABLE' "$(lin_truncate "$path" 24)" 'Unreadable or variable-based path'; continue; }
+        end_text=$(openssl x509 -in "$path" -noout -enddate 2>/dev/null | sed 's/^notAfter=//')
+        subject=$(openssl x509 -in "$path" -noout -subject 2>/dev/null | sed 's/^subject=//')
+        end_epoch=$(date -d "$end_text" +%s 2>/dev/null || printf '')
+        if [[ -n $end_epoch ]]; then now=$(date +%s); days=$(( (end_epoch-now)/86400 )); status=$(lin_tls_days_status "$days")
+        else days='?'; status='UNAVAILABLE'; fi
+        printf '%s%-8s%s %8s %-42s %s\n' "$(lin_status_color "$status")" "$status" "$LIN_RESET" "$days" "$(lin_truncate "$path" 42)" "$(lin_truncate "$subject" 45)"
+        ((count+=1))
+    done <<<"$paths"
+    lin_field 'Certificates inspected' "$count"
+}
+
+lin_check_applications() {
+    lin_header 'Application services summary'
+    local summary status detail certificates
+    summary=$(lin_apache_summary); IFS=$'\t' read -r status detail <<<"$summary"; lin_status_row "$status" 'Apache' "$detail"
+    summary=$(lin_nginx_summary); IFS=$'\t' read -r status detail <<<"$summary"; lin_status_row "$status" 'Nginx' "$detail"
+    summary=$(lin_postgres_summary); IFS=$'\t' read -r status detail <<<"$summary"; lin_status_row "$status" 'PostgreSQL' "$detail"
+    certificates=$(lin_referenced_certificates | sed '/^[[:space:]]*$/d' | sort -u | awk 'NF {count++} END {print count+0}')
+    if (( certificates )); then lin_status_row 'INFO' 'TLS certificates' "$certificates referenced file(s)"; else lin_status_row 'UNAVAILABLE' 'TLS certificates' 'No references found'; fi
+    summary=$(lin_container_summary); IFS=$'\t' read -r status detail <<<"$summary"; lin_status_row "$status" 'Containers' "$detail"
+}
+
+lin_application_menu() {
+    while true; do
+        lin_header 'Application services'
+        lin_menu_item '1' 'Combined application summary'
+        lin_menu_item '2' 'Apache settings and virtual hosts'
+        lin_menu_item '3' 'Nginx settings and server directives'
+        lin_menu_item '4' 'PostgreSQL readiness and settings'
+        lin_menu_item '5' 'Referenced TLS certificate expiry'
+        lin_menu_item 'B' 'Back' "$LIN_DIM"
+        local choice
+        choice=$(lin_read 'Select: ') || return 0
+        case ${choice^^} in
+            1) lin_show_check applications ;;
+            2) lin_show_check apache ;;
+            3) lin_show_check nginx ;;
+            4) lin_show_check postgres ;;
+            5) lin_show_check tls ;;
+            B|0) return 0 ;;
+            *) lin_warn 'Choose 1-5 or B.' ;;
+        esac
+    done
+}
+# END APPLICATIONSERVICES
 
 # BEGIN HEALTH
 lin_check_health() {
     lin_header 'Health summary'
-    local attention=0 load1 cores load_status memory_percent memory_status root_percent root_status failed updates firewall_status firewall_detail listeners containers=0
+    local attention=0 load1 cores load_status memory_percent memory_status root_percent root_status failed updates firewall_status firewall_detail listeners container_summary container_status container_detail
 
     read -r load1 _ </proc/loadavg 2>/dev/null || load1='Unavailable'
     cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
@@ -474,8 +769,8 @@ lin_check_health() {
         if firewall-cmd --state 2>/dev/null | grep -q running; then firewall_status='OK'; firewall_detail='firewalld running'; else firewall_status='REVIEW'; firewall_detail='firewalld not running'; ((attention+=1)); fi
     elif lin_has nft; then firewall_status='INFO'; firewall_detail='nftables installed; inspect rules for policy'; fi
 
-    if lin_has docker; then containers=$(docker ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}');
-    elif lin_has podman; then containers=$(podman ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}'); fi
+    container_summary=$(lin_container_summary); IFS=$'\t' read -r container_status container_detail <<<"$container_summary"
+    [[ $container_status == REVIEW || $container_status == WARNING ]] && ((attention+=1))
 
     lin_status_row "$load_status" 'CPU load' "$load1 across $cores logical CPU(s)"
     lin_status_row "$memory_status" 'Memory' "$memory_percent% used"
@@ -484,7 +779,7 @@ lin_check_health() {
     if (( updates )); then lin_status_row 'REVIEW' 'Available updates' "$updates"; else lin_status_row 'OK' 'Available updates' '0 in existing metadata'; fi
     lin_status_row "$firewall_status" 'Firewall' "$firewall_detail"
     if (( listeners )); then lin_status_row 'REVIEW' 'Non-local listeners' "$listeners"; else lin_status_row 'OK' 'Non-local listeners' '0'; fi
-    lin_status_row 'INFO' 'Running containers' "$containers"
+    lin_status_row "$container_status" 'Containers' "$container_detail"
 
     printf '\n'
     if (( attention )); then
@@ -563,7 +858,12 @@ network      Friendly connection and listening-service summary
 services     Friendly failed-service and recent-log summary
 security     Firewall, SSH, and mandatory-access-control status
 updates      Friendly available-update summary using existing metadata
-containers   Docker and Podman inventory
+applications Apache, Nginx, PostgreSQL, TLS, and container overview
+apache       Apache settings and virtual-host summary
+nginx        Nginx settings and safe directive summary
+postgres     PostgreSQL readiness and selected effective settings
+tls          Referenced TLS certificate expiry
+containers   Docker and Podman health, inventory, and disk use
 EOF
 }
 
@@ -573,6 +873,10 @@ lin_run_raw_check() {
         network) lin_raw_network ;;
         services) lin_raw_services ;;
         updates) lin_raw_updates ;;
+        apache) lin_raw_apache ;;
+        nginx) lin_raw_nginx ;;
+        postgres) lin_raw_postgres ;;
+        containers) lin_raw_containers ;;
         *) lin_error "Raw evidence is not defined for check: ${1:-<blank>}"; return 2 ;;
     esac
 }
@@ -588,6 +892,11 @@ lin_run_check() {
         services) lin_check_services ;;
         security) lin_check_security ;;
         updates) lin_check_updates ;;
+        applications) lin_check_applications ;;
+        apache) lin_check_apache ;;
+        nginx) lin_check_nginx ;;
+        postgres) lin_check_postgres ;;
+        tls) lin_check_tls ;;
         containers) lin_check_containers ;;
         *) lin_error "Unknown check: ${1:-<blank>}"; printf 'Available checks:\n'; lin_list_checks; return 2 ;;
     esac
@@ -597,9 +906,16 @@ lin_show_check() {
     local id=$1 choice
     lin_run_check "$id"
     case $id in
-        storage|network|services|updates)
+        storage|network|services|updates|apache|nginx|postgres)
             choice=$(lin_read 'R: raw evidence | Enter/B: back: ') || return 0
             if [[ ${choice^^} == R ]]; then LIN_RAW=1 lin_run_check "$id"; lin_pause; fi
+            ;;
+        containers)
+            choice=$(lin_read 'D: container details | R: raw evidence | Enter/B: back: ') || return 0
+            case ${choice^^} in
+                D) lin_container_details; lin_pause ;;
+                R) LIN_RAW=1 lin_run_check "$id"; lin_pause ;;
+            esac
             ;;
         *) lin_pause ;;
     esac
@@ -616,8 +932,9 @@ lin_main_menu() {
         lin_menu_item '6' 'Services and logs summary'
         lin_menu_item '7' 'Firewall and SSH inspection'
         lin_menu_item '8' 'Available updates summary'
-        lin_menu_item '9' 'Docker and Podman inventory'
-        lin_menu_item '10' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '9' 'Application services (Apache, Nginx, PostgreSQL, TLS)'
+        lin_menu_item '10' 'Docker and Podman inventory'
+        lin_menu_item '11' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
         lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
@@ -630,10 +947,11 @@ lin_main_menu() {
             6) lin_show_check services ;;
             7) lin_show_check security ;;
             8) lin_show_check updates ;;
-            9) lin_show_check containers ;;
-            10) lin_maintenance_menu ;;
+            9) lin_application_menu ;;
+            10) lin_show_check containers ;;
+            11) lin_maintenance_menu ;;
             Q|0) return 0 ;;
-            *) lin_warn 'Choose 1-10 or Q.' ;;
+            *) lin_warn 'Choose 1-11 or Q.' ;;
         esac
     done
 }

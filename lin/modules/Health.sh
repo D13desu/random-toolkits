@@ -1,6 +1,6 @@
 lin_check_health() {
     lin_header 'Health summary'
-    local attention=0 load1 cores load_status memory_percent memory_status root_percent root_status failed updates firewall_status firewall_detail listeners containers=0
+    local attention=0 load1 cores load_status memory_percent memory_status root_percent root_status failed updates firewall_status firewall_detail listeners container_summary container_status container_detail
 
     read -r load1 _ </proc/loadavg 2>/dev/null || load1='Unavailable'
     cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
@@ -30,8 +30,8 @@ lin_check_health() {
         if firewall-cmd --state 2>/dev/null | grep -q running; then firewall_status='OK'; firewall_detail='firewalld running'; else firewall_status='REVIEW'; firewall_detail='firewalld not running'; ((attention+=1)); fi
     elif lin_has nft; then firewall_status='INFO'; firewall_detail='nftables installed; inspect rules for policy'; fi
 
-    if lin_has docker; then containers=$(docker ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}');
-    elif lin_has podman; then containers=$(podman ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}'); fi
+    container_summary=$(lin_container_summary); IFS=$'\t' read -r container_status container_detail <<<"$container_summary"
+    [[ $container_status == REVIEW || $container_status == WARNING ]] && ((attention+=1))
 
     lin_status_row "$load_status" 'CPU load' "$load1 across $cores logical CPU(s)"
     lin_status_row "$memory_status" 'Memory' "$memory_percent% used"
@@ -40,7 +40,7 @@ lin_check_health() {
     if (( updates )); then lin_status_row 'REVIEW' 'Available updates' "$updates"; else lin_status_row 'OK' 'Available updates' '0 in existing metadata'; fi
     lin_status_row "$firewall_status" 'Firewall' "$firewall_detail"
     if (( listeners )); then lin_status_row 'REVIEW' 'Non-local listeners' "$listeners"; else lin_status_row 'OK' 'Non-local listeners' '0'; fi
-    lin_status_row 'INFO' 'Running containers' "$containers"
+    lin_status_row "$container_status" 'Containers' "$container_detail"
 
     printf '\n'
     if (( attention )); then

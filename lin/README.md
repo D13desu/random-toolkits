@@ -1,4 +1,4 @@
-# Linux Toolkit v0.2.1
+# Linux Toolkit v0.3.0
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 
@@ -33,12 +33,19 @@ Interactive terminals use semantic colours for navigation, read-only checks, war
 - Firewall, SSH server, SELinux, and AppArmor status.
 - Friendly update counts and package tables from existing APT, DNF/YUM, Zypper, Pacman, or APK metadata.
 - Docker and Podman inventory when installed.
+- Apache version, service state, syntax validation, enabled sites/modules, and bounded virtual-host details.
+- Nginx version, service state, syntax validation, and safe operational directives without full configuration dumps.
+- PostgreSQL readiness, clusters, selected effective settings, and database sizes when local authentication is already available.
+- Expiry and subject summaries for certificates referenced by Apache, Nginx, or Let's Encrypt.
+- Docker/Podman container state, health, published ports, disk use, Compose projects, networks, volumes, and selected-container details including environment values.
 
 Friendly summaries retain access to the underlying evidence. Press `R` from a supported interactive screen or use:
 
 ```bash
 bash Linux-Toolkit.sh --check storage --raw
 bash Linux-Toolkit.sh --check network --raw
+bash Linux-Toolkit.sh --check nginx --raw
+bash Linux-Toolkit.sh --check containers --raw
 ```
 
 Run a single read-only check without the menu:
@@ -59,6 +66,8 @@ The maintenance menu can restart one validated, loaded systemd service or clear 
 - verify that a restarted service is active afterward.
 
 The toolkit does not change repositories, install packages, modify firewall or SSH settings, reboot, or enable services.
+
+Application-service checks do not dump complete Nginx configuration, TLS private keys, PostgreSQL authentication files, or complete container inspect documents. Selected-container details display environment-variable values. PostgreSQL checks use existing local authentication and never request or store a password.
 
 ## Supported environments
 

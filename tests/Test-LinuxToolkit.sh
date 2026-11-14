@@ -20,7 +20,7 @@ grep -Fq "Linux Toolkit $version" "$toolkit" || fail 'Toolkit header version doe
 pass 'Version is synchronized'
 
 checks=$(bash "$toolkit" --list)
-for id in health system resources storage network services security updates containers; do
+for id in health system resources storage network services security updates applications apache nginx postgres tls containers; do
     grep -Eq "^${id}[[:space:]]" <<<"$checks" || fail "Missing check: $id"
 done
 pass 'All read-only checks are registered'
@@ -85,6 +85,55 @@ grep -Fq 'Root filesystem' <<<"$health_output" || fail 'Health summary omitted r
 grep -Fq 'Available updates' <<<"$health_output" || fail 'Health summary omitted updates'
 grep -Fq 'Non-local listeners' <<<"$health_output" || fail 'Health summary omitted listeners'
 pass 'Combined health summary covers core review areas'
+
+applications_output=$(bash "$toolkit" --check applications 2>&1)
+for label in Apache Nginx PostgreSQL 'TLS certificates' Containers; do
+    grep -Fq "$label" <<<"$applications_output" || fail "Application summary omitted $label"
+done
+pass 'Application summary covers web, database, TLS, and containers'
+
+[[ $(lin_tls_days_status -1) == WARNING ]] || fail 'Expired TLS certificate should be a warning'
+[[ $(lin_tls_days_status 30) == REVIEW ]] || fail 'TLS certificate at 30 days should require review'
+[[ $(lin_tls_days_status 31) == OK ]] || fail 'TLS certificate beyond 30 days should be OK'
+pass 'TLS expiry thresholds are explicit'
+
+container_module=$(cat "$repo_root/lin/modules/Containers.sh")
+[[ $container_module == *"lin_section 'Environment variables'"* ]] || fail 'Container details do not label environment values'
+[[ $container_module != *'<redacted>'* && $container_module != *'lin_redact_env'* ]] || fail 'Container environment values are still redacted'
+pass 'Container environment values remain visible'
+
+apache2ctl() {
+    case ${1:-} in
+        -v) printf 'Server version: Apache/2.4.test\n' ;;
+        configtest) printf 'Syntax OK\n' ;;
+        -M) printf ' core_module (static)\n ssl_module (shared)\n' ;;
+        -S) printf 'port 443 namevhost example.test (/etc/apache2/sites-enabled/example.conf:1)\n' ;;
+    esac
+}
+apache_fixture=$(lin_apache_summary)
+grep -Fq 'Apache/2.4.test' <<<"$apache_fixture" || fail 'Apache version was not normalized'
+grep -Fq 'config syntax OK' <<<"$apache_fixture" || fail 'Apache config-test result was not normalized'
+pass 'Apache settings collector normalizes command output'
+
+nginx() {
+    case ${1:-} in
+        -v) printf 'nginx version: nginx/1.26.test\n' >&2 ;;
+        -t) printf 'configuration file syntax is ok\n' >&2 ;;
+    esac
+}
+nginx_fixture=$(lin_nginx_summary)
+grep -Fq 'nginx 1.26.test' <<<"$nginx_fixture" || fail 'Nginx version was not normalized'
+grep -Fq 'config syntax OK' <<<"$nginx_fixture" || fail 'Nginx config-test result was not normalized'
+pass 'Nginx settings collector normalizes command output'
+
+psql() {
+    if [[ ${1:-} == --version ]]; then printf 'psql (PostgreSQL) 16.test\n'; else printf 'port\t5432\n'; fi
+}
+pg_isready() { printf '127.0.0.1:5432 - accepting connections\n'; }
+postgres_fixture=$(lin_postgres_summary)
+grep -Fq 'PostgreSQL 16.test' <<<"$postgres_fixture" || fail 'PostgreSQL version was not normalized'
+grep -Fq 'accepting connections' <<<"$postgres_fixture" || fail 'PostgreSQL readiness was not normalized'
+pass 'PostgreSQL readiness collector normalizes command output'
 
 dnf() { printf 'curl.x86_64 8.1.2-1 updates\n'; }
 dnf_rows=$(lin_collect_updates dnf)
