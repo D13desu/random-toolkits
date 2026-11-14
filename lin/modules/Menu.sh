@@ -28,18 +28,16 @@ lin_run_check() {
 lin_main_menu() {
     while true; do
         lin_header 'Main menu'
-        cat <<'EOF'
-1. System and user summary
-2. CPU, memory, and heavy processes
-3. Storage, mounts, and inode usage
-4. Network configuration and listening sockets
-5. Failed services and recent logs
-6. Firewall and SSH inspection
-7. Available package updates
-8. Docker and Podman inventory
-9. Maintenance actions [CHANGES SYSTEM]
-Q. Quit
-EOF
+        lin_menu_item '1' 'System and user summary'
+        lin_menu_item '2' 'CPU, memory, and heavy processes'
+        lin_menu_item '3' 'Storage, mounts, and inode usage'
+        lin_menu_item '4' 'Network configuration and listening sockets'
+        lin_menu_item '5' 'Failed services and recent logs'
+        lin_menu_item '6' 'Firewall and SSH inspection'
+        lin_menu_item '7' 'Available package updates'
+        lin_menu_item '8' 'Docker and Podman inventory'
+        lin_menu_item '9' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
         case ${choice^^} in

@@ -29,6 +29,12 @@ help=$(bash "$toolkit" --help)
 grep -Fq 'never invoke sudo' <<<"$help" || fail 'Help omits the sudo safety boundary'
 pass 'Help documents the privilege boundary'
 
+colour_sample=$(bash -c 'source "$1"; LIN_GREEN=$'"'"'\033[32m'"'"'; LIN_RESET=$'"'"'\033[0m'"'"'; lin_menu_item 1 "Read-only check"' _ "$toolkit")
+[[ $colour_sample == *$'\033[32m[1]\033[0m'* ]] || fail 'Menu item omitted its semantic colour'
+plain_sample=$(NO_COLOR=1 bash "$toolkit" --check system)
+[[ $plain_sample != *$'\033['* ]] || fail 'NO_COLOR output contains ANSI escapes'
+pass 'Semantic colours and the NO_COLOR opt-out work'
+
 set +e
 bash "$toolkit" --check unknown >/dev/null 2>&1
 status=$?

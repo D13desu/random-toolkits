@@ -1,4 +1,4 @@
-# Linux Toolkit v0.1.0
+# Linux Toolkit v0.1.1
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 
@@ -19,6 +19,8 @@ curl -fsSL https://tools.d0xd.com/lin/ | bash
 ```
 
 Interactive input is read from `/dev/tty`, so the menu continues to work when the script is piped to Bash. Bash 4 or newer is required.
+
+Interactive terminals use semantic colours for navigation, read-only checks, warnings, errors, and change actions. Set `NO_COLOR=1` or pass `--no-color` for plain output; redirected output is plain automatically.
 
 ## Checks
 

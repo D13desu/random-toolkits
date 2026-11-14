@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Random Toolkits | Linux Toolkit 0.1.0
+# Random Toolkits | Linux Toolkit 0.1.1
 # Generated from lin/modules/*.sh by tests/Sync-LinuxToolkit.ps1.
 set -o pipefail
-LIN_TOOLKIT_VERSION='0.1.0'
+LIN_TOOLKIT_VERSION='0.1.1'
 
 # BEGIN CORE
 # Shared output, capability, and input helpers.
@@ -13,6 +13,7 @@ LIN_GREEN=''
 LIN_YELLOW=''
 LIN_RED=''
 LIN_DIM=''
+LIN_BOLD=''
 
 lin_setup_colors() {
     LIN_RESET=''
@@ -21,6 +22,7 @@ lin_setup_colors() {
     LIN_YELLOW=''
     LIN_RED=''
     LIN_DIM=''
+    LIN_BOLD=''
     if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
         LIN_RESET=$'\033[0m'
         LIN_CYAN=$'\033[36m'
@@ -28,19 +30,23 @@ lin_setup_colors() {
         LIN_YELLOW=$'\033[33m'
         LIN_RED=$'\033[31m'
         LIN_DIM=$'\033[2m'
+        LIN_BOLD=$'\033[1m'
     fi
 }
 
 lin_header() {
     local title=${1:-Main menu}
-    printf '\n%sLINUX TOOLKIT %s | %s%s\n' "$LIN_CYAN" "$LIN_TOOLKIT_VERSION" "$title" "$LIN_RESET"
-    printf '%sRead-only unless an action is explicitly labelled CHANGES SYSTEM.%s\n\n' "$LIN_DIM" "$LIN_RESET"
+    printf '\n%s%sLINUX TOOLKIT %s%s%s | %s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$LIN_TOOLKIT_VERSION" "$LIN_RESET" "$LIN_CYAN" "$title" "$LIN_RESET"
+    printf '%sRead-only unless an action is explicitly labelled %sCHANGES SYSTEM%s%s.%s\n\n' "$LIN_DIM" "$LIN_YELLOW" "$LIN_RESET" "$LIN_DIM" "$LIN_RESET"
 }
 
 lin_has() { command -v "$1" >/dev/null 2>&1; }
 
 lin_warn() { printf '%sWARNING: %s%s\n' "$LIN_YELLOW" "$*" "$LIN_RESET" >&2; }
 lin_error() { printf '%sERROR: %s%s\n' "$LIN_RED" "$*" "$LIN_RESET" >&2; }
+lin_section() { printf '\n%s%s%s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$1" "$LIN_RESET"; }
+lin_field() { printf '%s%s:%s %s\n' "$LIN_CYAN" "$1" "$LIN_RESET" "$2"; }
+lin_menu_item() { printf '  %s[%s]%s %s\n' "${3:-$LIN_GREEN}" "$1" "$LIN_RESET" "$2"; }
 
 lin_read() {
     local prompt=$1
@@ -94,26 +100,26 @@ lin_package_manager() {
 # BEGIN SYSTEM
 lin_check_system() {
     lin_header 'System and user summary'
-    printf 'Hostname: %s\n' "$(hostname 2>/dev/null || printf 'Unavailable')"
-    printf 'Operating system: %s\n' "$(lin_os_release_value PRETTY_NAME)"
-    printf 'Kernel: %s\n' "$(uname -srmo 2>/dev/null || uname -a)"
-    printf 'Architecture: %s\n' "$(uname -m)"
-    printf 'User: %s (uid %s)\n' "$(id -un)" "$(id -u)"
-    printf 'Groups: %s\n' "$(id -Gn 2>/dev/null || printf 'Unavailable')"
-    printf 'Shell: %s\n' "${SHELL:-Unknown}"
-    printf 'Uptime: %s\n' "$(uptime -p 2>/dev/null || uptime 2>/dev/null || printf 'Unavailable')"
-    if [[ -r /proc/uptime ]]; then printf 'Boot time: %s\n' "$(uptime -s 2>/dev/null || printf 'Unavailable')"; fi
-    if lin_has systemd-detect-virt; then printf 'Virtualization: %s\n' "$(systemd-detect-virt 2>/dev/null || printf 'none detected')"; fi
+    lin_field 'Hostname' "$(hostname 2>/dev/null || printf 'Unavailable')"
+    lin_field 'Operating system' "$(lin_os_release_value PRETTY_NAME)"
+    lin_field 'Kernel' "$(uname -srmo 2>/dev/null || uname -a)"
+    lin_field 'Architecture' "$(uname -m)"
+    lin_field 'User' "$(id -un) (uid $(id -u))"
+    lin_field 'Groups' "$(id -Gn 2>/dev/null || printf 'Unavailable')"
+    lin_field 'Shell' "${SHELL:-Unknown}"
+    lin_field 'Uptime' "$(uptime -p 2>/dev/null || uptime 2>/dev/null || printf 'Unavailable')"
+    if [[ -r /proc/uptime ]]; then lin_field 'Boot time' "$(uptime -s 2>/dev/null || printf 'Unavailable')"; fi
+    if lin_has systemd-detect-virt; then lin_field 'Virtualization' "$(systemd-detect-virt 2>/dev/null || printf 'none detected')"; fi
 }
 
 lin_check_resources() {
     lin_header 'CPU, memory, and processes'
     if lin_has lscpu; then lscpu | awk -F: '/^(Architecture|CPU\(s\)|Model name|Thread|Core|Socket|Virtualization):/ {gsub(/^[ \t]+/, "", $2); printf "%-20s %s\n", $1 ":", $2}'; else uname -m; fi
-    printf '\nMemory:\n'
+    lin_section 'Memory'
     if lin_has free; then free -h; elif [[ -r /proc/meminfo ]]; then head -n 8 /proc/meminfo; else lin_warn 'Memory information unavailable.'; fi
-    printf '\nHighest CPU processes:\n'
+    lin_section 'Highest CPU processes'
     ps -eo pid,user,comm,%cpu,%mem --sort=-%cpu 2>/dev/null | head -n 11 || ps aux | head -n 11
-    printf '\nHighest memory processes:\n'
+    lin_section 'Highest memory processes'
     ps -eo pid,user,comm,%cpu,%mem --sort=-%mem 2>/dev/null | head -n 11 || true
 }
 # END SYSTEM
@@ -121,12 +127,12 @@ lin_check_resources() {
 # BEGIN STORAGE
 lin_check_storage() {
     lin_header 'Storage, mounts, and inodes'
-    printf 'Filesystems:\n'
+    lin_section 'Filesystems'
     df -hT 2>/dev/null || df -h
-    printf '\nInode usage:\n'
+    lin_section 'Inode usage'
     df -i 2>/dev/null || lin_warn 'Inode reporting unavailable.'
     if lin_has lsblk; then
-        printf '\nBlock devices:\n'
+        lin_section 'Block devices'
         lsblk -o NAME,TYPE,FSTYPE,SIZE,FSUSED,FSAVAIL,FSUSE%,MOUNTPOINTS 2>/dev/null || lsblk
     fi
 }
@@ -136,16 +142,16 @@ lin_check_storage() {
 lin_check_network() {
     lin_header 'Network configuration'
     if lin_has ip; then
-        printf 'Addresses:\n'; ip -brief address
-        printf '\nRoutes:\n'; ip route show
+        lin_section 'Addresses'; ip -brief address
+        lin_section 'Routes'; ip route show
     elif lin_has ifconfig; then
         ifconfig
     else
         lin_warn 'Neither ip nor ifconfig is available.'
     fi
-    printf '\nDNS configuration:\n'
+    lin_section 'DNS configuration'
     if lin_has resolvectl; then resolvectl status 2>/dev/null || true; elif [[ -r /etc/resolv.conf ]]; then cat /etc/resolv.conf; else lin_warn 'DNS configuration unavailable.'; fi
-    printf '\nListening sockets:\n'
+    lin_section 'Listening sockets'
     if lin_has ss; then ss -lntup 2>/dev/null || ss -lntu; elif lin_has netstat; then netstat -lntup 2>/dev/null || netstat -lntu; else lin_warn 'Neither ss nor netstat is available.'; fi
 }
 # END NETWORK
@@ -154,15 +160,15 @@ lin_check_network() {
 lin_check_services() {
     lin_header 'Services and recent logs'
     if lin_has systemctl && [[ -d /run/systemd/system ]]; then
-        printf 'Failed services:\n'
+        lin_section 'Failed services'
         systemctl --failed --no-pager --plain || true
-        printf '\nRecently failed service units:\n'
+        lin_section 'Recently failed service units'
         systemctl list-units --type=service --state=failed --no-pager --plain || true
     else
         lin_warn 'systemd is not the active service manager.'
         if lin_has rc-status; then rc-status --crashed 2>/dev/null || rc-status; fi
     fi
-    printf '\nRecent boot warnings/errors (latest 50):\n'
+    lin_section 'Recent boot warnings/errors (latest 50)'
     if lin_has journalctl && [[ -d /run/systemd/system ]]; then
         journalctl -b -p warning -n 50 --no-pager 2>&1 || lin_warn 'Journal access was denied or unavailable.'
     elif [[ -r /var/log/syslog ]]; then tail -n 50 /var/log/syslog
@@ -175,22 +181,22 @@ lin_check_services() {
 # BEGIN SECURITY
 lin_check_security() {
     lin_header 'Firewall and SSH inspection'
-    printf 'Firewall:\n'
+    lin_section 'Firewall'
     if lin_has ufw; then ufw status verbose 2>&1 || true
     elif lin_has firewall-cmd; then firewall-cmd --state 2>&1 || true; firewall-cmd --list-all 2>&1 || true
     elif lin_has nft; then nft list ruleset 2>&1 || lin_warn 'Root may be required to list the nftables ruleset.'
     elif lin_has iptables; then iptables -S 2>&1 || lin_warn 'Root may be required to list iptables rules.'
     else lin_warn 'No supported firewall frontend was found.'; fi
 
-    printf '\nSSH server configuration highlights:\n'
+    lin_section 'SSH server configuration highlights'
     if lin_has sshd; then
         sshd -T 2>/dev/null | awk '$1 ~ /^(permitrootlogin|passwordauthentication|pubkeyauthentication|x11forwarding|maxauthtries|allowusers|allowgroups)$/' || lin_warn 'Effective sshd settings could not be read.'
     elif [[ -r /etc/ssh/sshd_config ]]; then
         awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|X11Forwarding|MaxAuthTries|AllowUsers|AllowGroups)[[:space:]]/ {print}' /etc/ssh/sshd_config
     else lin_warn 'OpenSSH server configuration was not found.'; fi
 
-    printf '\nMandatory access control:\n'
-    if lin_has getenforce; then printf 'SELinux: %s\n' "$(getenforce)"; fi
+    lin_section 'Mandatory access control'
+    if lin_has getenforce; then lin_field 'SELinux' "$(getenforce)"; fi
     if lin_has aa-status; then aa-status 2>&1 || true; fi
     if ! lin_has getenforce && ! lin_has aa-status; then lin_warn 'No SELinux/AppArmor status command was found.'; fi
 }
@@ -201,7 +207,7 @@ lin_check_updates() {
     lin_header 'Available package updates'
     local manager
     manager=$(lin_package_manager) || { lin_warn 'No supported package manager was found.'; return 0; }
-    printf 'Package manager: %s\n' "$manager"
+    lin_field 'Package manager' "$manager"
     printf 'This reads currently available update metadata; it does not refresh caches or install packages.\n\n'
     case $manager in
         apt-get) apt list --upgradable 2>/dev/null || true ;;
@@ -219,10 +225,10 @@ lin_check_containers() {
     lin_header 'Container inventory'
     local found=0
     if lin_has docker; then
-        found=1; printf 'Docker:\n'; docker version --format 'Client {{.Client.Version}} | Server {{.Server.Version}}' 2>&1 || true; docker ps -a --no-trunc 2>&1 || true
+        found=1; lin_section 'Docker'; docker version --format 'Client {{.Client.Version}} | Server {{.Server.Version}}' 2>&1 || true; docker ps -a --no-trunc 2>&1 || true
     fi
     if lin_has podman; then
-        found=1; printf '\nPodman:\n'; podman version 2>&1 || true; podman ps -a --no-trunc 2>&1 || true
+        found=1; lin_section 'Podman'; podman version 2>&1 || true; podman ps -a --no-trunc 2>&1 || true
     fi
     if (( ! found )); then lin_warn 'Docker and Podman are not installed.'; fi
 }
@@ -252,7 +258,7 @@ lin_clean_package_cache() {
     lin_require_root || return 1
     local manager
     manager=$(lin_package_manager) || { lin_error 'No supported package manager was found.'; return 1; }
-    printf 'Package manager: %s\n' "$manager"
+    lin_field 'Package manager' "$manager"
     printf 'This removes cached package downloads. Installed packages and repository configuration are not removed.\n'
     lin_confirm "Clear the $manager package cache?" || { printf 'Cancelled.\n'; return 0; }
     case $manager in
@@ -269,7 +275,9 @@ lin_clean_package_cache() {
 lin_maintenance_menu() {
     while true; do
         lin_header 'Maintenance [CHANGES SYSTEM]'
-        printf '1. Restart one loaded systemd service\n2. Clear the detected package-manager cache\nB. Back\n'
+        lin_menu_item '1' 'Restart one loaded systemd service [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '2' 'Clear the detected package-manager cache [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item 'B' 'Back' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
         case ${choice^^} in
@@ -313,18 +321,16 @@ lin_run_check() {
 lin_main_menu() {
     while true; do
         lin_header 'Main menu'
-        cat <<'EOF'
-1. System and user summary
-2. CPU, memory, and heavy processes
-3. Storage, mounts, and inode usage
-4. Network configuration and listening sockets
-5. Failed services and recent logs
-6. Firewall and SSH inspection
-7. Available package updates
-8. Docker and Podman inventory
-9. Maintenance actions [CHANGES SYSTEM]
-Q. Quit
-EOF
+        lin_menu_item '1' 'System and user summary'
+        lin_menu_item '2' 'CPU, memory, and heavy processes'
+        lin_menu_item '3' 'Storage, mounts, and inode usage'
+        lin_menu_item '4' 'Network configuration and listening sockets'
+        lin_menu_item '5' 'Failed services and recent logs'
+        lin_menu_item '6' 'Firewall and SSH inspection'
+        lin_menu_item '7' 'Available package updates'
+        lin_menu_item '8' 'Docker and Podman inventory'
+        lin_menu_item '9' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
         case ${choice^^} in

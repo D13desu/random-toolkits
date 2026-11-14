@@ -6,6 +6,7 @@ LIN_GREEN=''
 LIN_YELLOW=''
 LIN_RED=''
 LIN_DIM=''
+LIN_BOLD=''
 
 lin_setup_colors() {
     LIN_RESET=''
@@ -14,6 +15,7 @@ lin_setup_colors() {
     LIN_YELLOW=''
     LIN_RED=''
     LIN_DIM=''
+    LIN_BOLD=''
     if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
         LIN_RESET=$'\033[0m'
         LIN_CYAN=$'\033[36m'
@@ -21,19 +23,23 @@ lin_setup_colors() {
         LIN_YELLOW=$'\033[33m'
         LIN_RED=$'\033[31m'
         LIN_DIM=$'\033[2m'
+        LIN_BOLD=$'\033[1m'
     fi
 }
 
 lin_header() {
     local title=${1:-Main menu}
-    printf '\n%sLINUX TOOLKIT %s | %s%s\n' "$LIN_CYAN" "$LIN_TOOLKIT_VERSION" "$title" "$LIN_RESET"
-    printf '%sRead-only unless an action is explicitly labelled CHANGES SYSTEM.%s\n\n' "$LIN_DIM" "$LIN_RESET"
+    printf '\n%s%sLINUX TOOLKIT %s%s%s | %s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$LIN_TOOLKIT_VERSION" "$LIN_RESET" "$LIN_CYAN" "$title" "$LIN_RESET"
+    printf '%sRead-only unless an action is explicitly labelled %sCHANGES SYSTEM%s%s.%s\n\n' "$LIN_DIM" "$LIN_YELLOW" "$LIN_RESET" "$LIN_DIM" "$LIN_RESET"
 }
 
 lin_has() { command -v "$1" >/dev/null 2>&1; }
 
 lin_warn() { printf '%sWARNING: %s%s\n' "$LIN_YELLOW" "$*" "$LIN_RESET" >&2; }
 lin_error() { printf '%sERROR: %s%s\n' "$LIN_RED" "$*" "$LIN_RESET" >&2; }
+lin_section() { printf '\n%s%s%s%s\n' "$LIN_BOLD" "$LIN_CYAN" "$1" "$LIN_RESET"; }
+lin_field() { printf '%s%s:%s %s\n' "$LIN_CYAN" "$1" "$LIN_RESET" "$2"; }
+lin_menu_item() { printf '  %s[%s]%s %s\n' "${3:-$LIN_GREEN}" "$1" "$LIN_RESET" "$2"; }
 
 lin_read() {
     local prompt=$1

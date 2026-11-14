@@ -21,7 +21,7 @@ lin_clean_package_cache() {
     lin_require_root || return 1
     local manager
     manager=$(lin_package_manager) || { lin_error 'No supported package manager was found.'; return 1; }
-    printf 'Package manager: %s\n' "$manager"
+    lin_field 'Package manager' "$manager"
     printf 'This removes cached package downloads. Installed packages and repository configuration are not removed.\n'
     lin_confirm "Clear the $manager package cache?" || { printf 'Cancelled.\n'; return 0; }
     case $manager in
@@ -38,7 +38,9 @@ lin_clean_package_cache() {
 lin_maintenance_menu() {
     while true; do
         lin_header 'Maintenance [CHANGES SYSTEM]'
-        printf '1. Restart one loaded systemd service\n2. Clear the detected package-manager cache\nB. Back\n'
+        lin_menu_item '1' 'Restart one loaded systemd service [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '2' 'Clear the detected package-manager cache [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item 'B' 'Back' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
         case ${choice^^} in
