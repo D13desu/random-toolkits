@@ -32,7 +32,7 @@ jobs:
 
       - name: Test Linux toolkit
         shell: bash
-        run: ./tests/Test-LinuxToolkit.sh
+        run: bash ./tests/Test-LinuxToolkit.sh
 
       - name: Test Sysinternals Live launchers
         shell: pwsh
