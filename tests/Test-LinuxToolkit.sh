@@ -20,7 +20,7 @@ grep -Fq "Linux Toolkit $version" "$toolkit" || fail 'Toolkit header version doe
 pass 'Version is synchronized'
 
 checks=$(bash "$toolkit" --list)
-for id in health system resources storage network services security updates applications apache nginx postgres tls containers; do
+for id in health system resources storage network services security updates applications apache nginx postgres tls containers sysinternals processes connections handles tracing autoruns memorymaps dumps; do
     grep -Eq "^${id}[[:space:]]" <<<"$checks" || fail "Missing check: $id"
 done
 pass 'All read-only checks are registered'
@@ -101,6 +101,22 @@ container_module=$(cat "$repo_root/lin/modules/Containers.sh")
 [[ $container_module == *"lin_section 'Environment variables'"* ]] || fail 'Container details do not label environment values'
 [[ $container_module != *'<redacted>'* && $container_module != *'lin_redact_env'* ]] || fail 'Container environment values are still redacted'
 pass 'Container environment values remain visible'
+
+sysinternals_output=$(bash "$toolkit" --check sysinternals)
+for label in 'Process Explorer' TCPView Handle 'Process Monitor' Autoruns 'VMMap / RAMMap' ProcDump Sysmon; do
+    grep -Fq "$label" <<<"$sysinternals_output" || fail "Sysinternals overview omitted $label"
+done
+grep -Fq 'not a complete Linux Sysinternals Suite' <<<"$sysinternals_output" || fail 'Sysinternals overview implies a complete Microsoft suite exists'
+pass 'Sysinternals overview identifies ports and native equivalents'
+
+process_output=$(bash "$toolkit" --check processes)
+grep -Fq 'Highest CPU use' <<<"$process_output" || fail 'Process Explorer-style check omitted CPU use'
+grep -Fq 'Highest memory use' <<<"$process_output" || fail 'Process Explorer-style check omitted memory use'
+pass 'Process Explorer-style summary is friendly and bounded'
+
+[[ $(lin_tool_available sh definitely-not-a-real-tool) == sh ]] || fail 'Tool detection did not select an available fallback'
+if lin_tool_available definitely-not-a-real-tool >/dev/null 2>&1; then fail 'Tool detection reported a nonexistent command'; fi
+pass 'Sysinternals tool detection is deterministic'
 
 apache2ctl() {
     case ${1:-} in

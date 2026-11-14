@@ -14,6 +14,14 @@ nginx        Nginx settings and safe directive summary
 postgres     PostgreSQL readiness and selected effective settings
 tls          Referenced TLS certificate expiry
 containers   Docker and Podman health, inventory, and disk use
+sysinternals Sysinternals ports and native Linux equivalent overview
+processes    Process Explorer-style process summary
+connections TCPView-style socket and connection summary
+handles      Handle-style open-file summary
+tracing      ProcMon-style tracing-tool readiness
+autoruns     Autoruns-style services, timers, and cron summary
+memorymaps   VMMap-style process memory summary
+dumps        ProcDump-style dump-tool readiness
 EOF
 }
 
@@ -27,6 +35,12 @@ lin_run_raw_check() {
         nginx) lin_raw_nginx ;;
         postgres) lin_raw_postgres ;;
         containers) lin_raw_containers ;;
+        sysinternals) lin_raw_sysinternals ;;
+        processes) lin_raw_processes ;;
+        connections) lin_raw_connections ;;
+        handles) lin_raw_handles ;;
+        autoruns) lin_raw_autoruns ;;
+        memorymaps) lin_raw_memorymaps ;;
         *) lin_error "Raw evidence is not defined for check: ${1:-<blank>}"; return 2 ;;
     esac
 }
@@ -48,6 +62,14 @@ lin_run_check() {
         postgres) lin_check_postgres ;;
         tls) lin_check_tls ;;
         containers) lin_check_containers ;;
+        sysinternals) lin_check_sysinternals ;;
+        processes) lin_check_processes ;;
+        connections) lin_check_connections ;;
+        handles) lin_check_handles ;;
+        tracing) lin_check_tracing ;;
+        autoruns) lin_check_autoruns ;;
+        memorymaps) lin_check_memorymaps ;;
+        dumps) lin_check_dumps ;;
         *) lin_error "Unknown check: ${1:-<blank>}"; printf 'Available checks:\n'; lin_list_checks; return 2 ;;
     esac
 }
@@ -56,7 +78,7 @@ lin_show_check() {
     local id=$1 choice
     lin_run_check "$id"
     case $id in
-        storage|network|services|updates|apache|nginx|postgres)
+        storage|network|services|updates|apache|nginx|postgres|sysinternals|processes|connections|handles|autoruns|memorymaps)
             choice=$(lin_read 'R: raw evidence | Enter/B: back: ') || return 0
             if [[ ${choice^^} == R ]]; then LIN_RAW=1 lin_run_check "$id"; lin_pause; fi
             ;;
@@ -84,7 +106,8 @@ lin_main_menu() {
         lin_menu_item '8' 'Available updates summary'
         lin_menu_item '9' 'Application services (Apache, Nginx, PostgreSQL, TLS)'
         lin_menu_item '10' 'Docker and Podman inventory'
-        lin_menu_item '11' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '11' 'Sysinternals-style Linux tools'
+        lin_menu_item '12' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
         lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
@@ -99,9 +122,10 @@ lin_main_menu() {
             8) lin_show_check updates ;;
             9) lin_application_menu ;;
             10) lin_show_check containers ;;
-            11) lin_maintenance_menu ;;
+            11) lin_sysinternals_menu ;;
+            12) lin_maintenance_menu ;;
             Q|0) return 0 ;;
-            *) lin_warn 'Choose 1-11 or Q.' ;;
+            *) lin_warn 'Choose 1-12 or Q.' ;;
         esac
     done
 }
