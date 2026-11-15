@@ -30,6 +30,10 @@ jobs:
         shell: pwsh
         run: ./tests/Test-M365MenuEngine.ps1
 
+      - name: Test M365 service health
+        shell: pwsh
+        run: ./tests/Test-M365Health.ps1
+
       - name: Test Linux toolkit
         shell: bash
         run: bash ./tests/Test-LinuxToolkit.sh

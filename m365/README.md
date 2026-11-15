@@ -39,3 +39,11 @@ Maintain `Menu-Engine.ps1`; `../tests/Sync-M365.ps1` embeds it into the download
 ## v0.3.7 Identity Protection
 
 Main menu R: risky users, risk detections and travel-related risk findings. Uses Microsoft Graph v1.0 Identity Protection endpoints and requests IdentityRiskyUser.Read.All and IdentityRiskEvent.Read.All delegated scopes. Requires appropriate Microsoft Entra ID Protection licensing and roles. No automatic geographical distance/speed calculation: travel results are Microsoft-generated detections. Tenant state is not changed. Risk findings are not proof of compromise.
+
+## Microsoft 365 health dashboard
+
+Main menu **H** shows the connected tenant's Microsoft-reported service health across the services returned by Graph (for example Exchange Online, Teams, SharePoint, OneDrive and other Microsoft 365 workloads). It summarizes overall health, lists per-service status, and lets you inspect active incidents/advisories, impact, and Microsoft updates. Use **R** to refresh or **E** to export the timestamped snapshot as JSON to `reports/`.
+
+Requires the delegated Microsoft Graph `ServiceHealth.Read.All` permission with administrator consent and a supported service-health role (for example Service Support Administrator). Existing Graph sessions must disconnect and reconnect through **C** to request the new scope. Authorization errors are reported without changing tenant settings.
+
+This is a point-in-time tenant service-health report, not a public global outage feed, connectivity test, security posture score, or SLA measurement. Missing/unknown service states and failed requests produce an unknown/incomplete overall result, never an all-clear. Successfully fetched services remain visible when the incident request fails. Resolved issues are excluded; unknown status values remain visible. A refresh replaces the prior snapshot.
