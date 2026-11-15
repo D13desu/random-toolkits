@@ -6,7 +6,7 @@
         throw 'PowerShell 7.4+ is required. Open pwsh and run the launcher again.'
     }
 
-    $expectedHash = '5C4BB3E5F1D02618F82B08E6211C1ABA7B2067E3AAD0AF926369FA351EC2CB74'
+    $expectedHash = 'A6157ECB17E75D7D71DC6ED2F34A065A4F78D8A2BF4C747D7C7B1517ADF30A02'
     $uri = 'https://tools.d0xd.com/m365/M365-Toolkit.ps1'
     $dataRoot = [Environment]::GetFolderPath('LocalApplicationData')
     if (-not $dataRoot) { $dataRoot = Join-Path $HOME '.local/share' }

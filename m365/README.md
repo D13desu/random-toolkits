@@ -39,3 +39,17 @@ Maintain `Menu-Engine.ps1`; `../tests/Sync-M365.ps1` embeds it into the download
 ## v0.3.7 Identity Protection
 
 Main menu R: risky users, risk detections and travel-related risk findings. Uses Microsoft Graph v1.0 Identity Protection endpoints and requests IdentityRiskyUser.Read.All and IdentityRiskEvent.Read.All delegated scopes. Requires appropriate Microsoft Entra ID Protection licensing and roles. No automatic geographical distance/speed calculation: travel results are Microsoft-generated detections. Tenant state is not changed. Risk findings are not proof of compromise.
+
+## Microsoft 365 health dashboard
+
+Main menu **H** shows the connected tenant's Microsoft-reported service health across the services returned by Graph (for example Exchange Online, Teams, SharePoint, OneDrive and other Microsoft 365 workloads). It summarizes overall health, lists per-service status, and lets you inspect active incidents/advisories, impact, and Microsoft updates. Use **R** to refresh or **E** to export the timestamped snapshot as JSON to `reports/`.
+
+Requires the delegated Microsoft Graph `ServiceHealth.Read.All` permission with administrator consent and a supported service-health role (for example Service Support Administrator). Existing Graph sessions must disconnect and reconnect through **C** to request the new scope. Authorization errors are reported without changing tenant settings.
+
+This is a point-in-time tenant service-health report, not a public global outage feed, connectivity test, security posture score, or SLA measurement. Missing/unknown service states and failed requests produce an unknown/incomplete overall result, never an all-clear. Successfully fetched services remain visible when the incident request fails. Resolved issues are excluded; unknown status values remain visible. A refresh replaces the prior snapshot.
+
+## Global/public Microsoft 365 status
+
+Main menu **G** (also available inside **H**) reads Microsoft's public RSS feed at <https://status.cloud.microsoft/api/feed/mac> without Graph authentication or tenant permissions. It shows Microsoft-published status, entry publication time, description, source URL and retrieval timestamp, with **R** to refresh and **E** to export JSON.
+
+This feed backs the Microsoft 365 business public status card. It carries selected public announcements, especially widespread incidents or issues preventing access to the admin-center Service health dashboard; it is **not a complete global, per-service outage feed**. An `Available` notice or an empty feed does not prove every Microsoft 365 service is healthy. Entries may include resolved updates. Use **H** for the connected tenant's service health and incidents. Fetch/parse failures are shown explicitly, and refresh never retains old entries after failure.

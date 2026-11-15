@@ -188,7 +188,7 @@ function EXO-Connections {
 }
 function Graph-Connect {
  Need 'Microsoft.Graph.Authentication'
- $scopes=@('User.Read.All','Directory.Read.All','AuditLog.Read.All','Reports.Read.All','Policy.Read.All','IdentityRiskyUser.Read.All','IdentityRiskEvent.Read.All')
+ $scopes=@('User.Read.All','Directory.Read.All','AuditLog.Read.All','Reports.Read.All','Policy.Read.All','IdentityRiskyUser.Read.All','IdentityRiskEvent.Read.All','ServiceHealth.Read.All')
  $defaultChoice=if($IsWindows){'1'}else{'2'}
  Write-Section 'Microsoft Graph authentication'
  Write-Menu "[1] Browser authentication`n[2] Device-code authentication"
@@ -1304,4 +1304,155 @@ function Security-Menu {
  }
 }
 
-while($true){Head 'Main menu'; Show-ConnectionSummary; Write-Menu "[1] List all tenant users`n[2] User overview`n[3] Full user investigation`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Sign-in activity`n[7] Mailbox permissions`n[8] Conditional Access policies`n`n[M] Mail flow`n[Q] Security and quarantine`n[I] Tenant-wide IP investigation`n[R] Risky users / unusual travel`n[C] Connection management`n`n[0] Exit"; $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant(); if($choice -eq '0'){break}; try { switch($choice){ '1'{Tenant-Users} '2'{User-Overview} '3'{Full-UserInvestigation} '4'{Mailbox} '5'{Rules} '6'{Signins} '7'{Permissions} '8'{ConditionalAccess-Policies} 'I'{Investigate-IP} 'R'{Risk-Menu} 'M'{Mail-FlowMenu} 'Q'{Security-Menu} 'C'{Connection-Menu} default{Write-Host 'Unknown option';Wait-Key} } }catch{Write-Host "Operation failed: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key} }
+function Convert-M365PublicText([string]$Text) {
+ $plain=[Net.WebUtility]::HtmlDecode(($Text -replace '<[^>]+>',' '))
+ return ($plain -replace '[\x00-\x1f\x7f-\x9f]',' ' -replace '\s+',' ').Trim()
+}
+function ConvertFrom-M365PublicFeed([string]$Content) {
+ $settings=[Xml.XmlReaderSettings]::new()
+ $settings.DtdProcessing=[Xml.DtdProcessing]::Prohibit
+ $settings.XmlResolver=$null
+ $settings.MaxCharactersInDocument=2097152
+ $inputReader=[IO.StringReader]::new($Content)
+ $reader=$null
+ try{
+  $reader=[Xml.XmlReader]::Create($inputReader,$settings)
+  $document=[Xml.XmlDocument]::new()
+  $document.XmlResolver=$null
+  $document.Load($reader)
+  if(-not $document.SelectSingleNode('/rss/channel')){throw 'Unexpected public status feed format (RSS channel missing).'}
+  foreach($item in $document.SelectNodes('/rss/channel/item')){
+   [pscustomobject]@{
+    Title=Convert-M365PublicText ([string]$item.title)
+    Status=Convert-M365PublicText ([string]$item.status)
+    Published=Convert-M365PublicText ([string]$item.pubDate)
+    Description=Convert-M365PublicText ([string]$item.description)
+    Link=Convert-M365PublicText ([string]$item.link)
+   }
+  }
+ }finally{
+  if($reader){$reader.Dispose()}
+  $inputReader.Dispose()
+ }
+}
+function Get-M365PublicHealthSnapshot {
+ $source='https://status.cloud.microsoft/api/feed/mac'
+ $items=@();$errorText=$null
+ try{
+  $response=Invoke-WebRequest -Uri $source -TimeoutSec 30 -MaximumRetryCount 0 -ErrorAction Stop
+  $items=@(ConvertFrom-M365PublicFeed $response.Content)
+ }catch{$errorText="Public status unavailable: $($_.Exception.Message)"}
+ [pscustomobject]@{Source=$source;FetchedAtUtc=[datetime]::UtcNow.ToString('o');Items=$items;Error=$errorText}
+}
+function Show-M365PublicHealthDashboard {
+ $refresh=$true;$snapshot=$null
+ while($true){
+  if($refresh){$snapshot=Get-M365PublicHealthSnapshot;$refresh=$false}
+  Head 'Microsoft 365 global/public status'
+  Write-Field 'Source' $snapshot.Source 'Info'
+  Write-Field 'Fetched UTC' $snapshot.FetchedAtUtc
+  Write-Host 'Public Microsoft status feed; no tenant connection or sign-in required.' -ForegroundColor DarkGray
+  Write-Host 'Limited to public announcements, including selected widespread/access incidents.' -ForegroundColor Yellow
+  Write-Host 'This is not a complete worldwide incident feed. Available/empty does not establish all services are healthy.' -ForegroundColor Yellow
+  Write-Host 'Feed entries can include resolved updates or availability notices. Use tenant health for tenant impact.' -ForegroundColor DarkGray
+  if($snapshot.Error){Write-Warning $snapshot.Error}
+  elseif(-not $snapshot.Items.Count){Write-Host 'No public entries returned. Global health is unknown.' -ForegroundColor Yellow}
+  foreach($item in $snapshot.Items){
+   Write-Section $item.Title
+   Write-Field 'Microsoft status' $item.Status 'Info'
+   Write-Field 'Published (source)' $item.Published
+   Write-Host $item.Description
+   Write-Field 'Details URL' $item.Link
+  }
+  Write-Menu "[R] Refresh public feed`n[E] Export public snapshot (JSON)`n[0] Back"
+  switch((Read-M365MenuChoice).Trim().ToUpperInvariant()){
+   'R' {$refresh=$true}
+   'E' {Save-Evidence $snapshot 'm365-public-status';Wait-Key}
+   '0' {return}
+  }
+ }
+}
+
+function Get-M365HealthState([string]$Status) {
+ switch($Status){
+  'serviceOperational' {return 'Healthy'}
+  'serviceDegradation' {return 'Degraded'}
+  'serviceInterruption' {return 'Interrupted'}
+  {$_ -in @('investigating','restoringService','verifyingService','extendedRecovery','investigationSuspended')} {return 'Attention'}
+  default {return 'Unknown'}
+ }
+}
+function Get-M365HealthSnapshot {
+ Graph-Ready
+ if('ServiceHealth.Read.All' -notin @((Get-MgContext).Scopes)){
+  throw 'Missing ServiceHealth.Read.All. Disconnect Graph and reconnect from Connections to consent to this delegated permission (admin consent required). A supported service-health role is also required.'
+ }
+ $services=@();$issues=@();$errors=[Collections.Generic.List[string]]::new()
+ try{$services=@(Get-GraphPaged 'https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/healthOverviews')}catch{$errors.Add("Service overview unavailable: $($_.Exception.Message)")}
+ try{$issues=@(Get-GraphPaged 'https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/issues' | Where-Object {-not $_.isResolved})}catch{$errors.Add("Active incidents unavailable: $($_.Exception.Message)")}
+ if(-not $services.Count){$errors.Add('No service health overview returned; overall health cannot be established.')}
+ $states=@($services | ForEach-Object {Get-M365HealthState $_.status})
+ $overall=if($errors.Count -or 'Unknown' -in $states){'Unknown / incomplete'}elseif('Interrupted' -in $states){'Service interruption'}elseif('Degraded' -in $states){'Service degradation'}elseif('Attention' -in $states -or $issues.Count){'Attention required'}else{'All reported services operational'}
+ [pscustomobject]@{TenantId=(Get-MgContext).TenantId;FetchedAtUtc=[datetime]::UtcNow.ToString('o');Overall=$overall;Services=$services;ActiveIssues=$issues;Errors=$errors.ToArray()}
+}
+function Show-M365HealthIssues($Issues) {
+ while($true){
+  $result=Show-M365RecordMenu @($Issues) 'Active Microsoft 365 incidents and advisories' {param($row,$index) "$($row.id) | $($row.service) | $($row.classification) | $($row.status) | $($row.title)"}
+  if($result.Action -ne 'Select'){return}
+  Head 'Incident details'
+  foreach($field in @('id','title','service','classification','status','startDateTime','lastModifiedDateTime','impactDescription','feature','featureGroup')){Write-Field $field $result.Item.$field}
+  Write-Section 'Microsoft updates (UTC)'
+  foreach($post in @($result.Item.posts | Sort-Object createdDateTime)){
+   Write-Field 'Posted' $post.createdDateTime
+   # Graph posts may contain HTML; display as text, never execute or open it.
+   [Net.WebUtility]::HtmlDecode(($post.description.content -replace '<[^>]+>',' ')) | Out-Host
+  }
+  Write-Section 'Raw evidence'
+  Raw-Record $result.Item
+  Wait-Key
+ }
+}
+function Show-M365HealthDashboard {
+ $snapshot=$null;$refresh=$true
+ while($true){
+  if($refresh){
+   # Replace the entire snapshot on every refresh; never retain a previous green result.
+   $snapshot=Get-M365HealthSnapshot
+   $refresh=$false
+  }
+  Head 'Microsoft 365 ecosystem health'
+  Write-Field 'Tenant' $snapshot.TenantId 'Info'
+  Write-Field 'Snapshot UTC' $snapshot.FetchedAtUtc
+  $kind=if($snapshot.Overall -eq 'All reported services operational'){'Good'}else{'Warning'}
+  Write-Field 'Overall health' $snapshot.Overall $kind
+  Write-Host 'Microsoft-reported tenant service health; not a connectivity probe or a security assessment.' -ForegroundColor DarkGray
+  Write-Host 'Snapshot only. Press R to fetch current status. Only services returned for this tenant are shown.' -ForegroundColor DarkGray
+  foreach($errorText in $snapshot.Errors){Write-Warning $errorText}
+  Write-Section 'Services'
+  foreach($service in @($snapshot.Services | Sort-Object service)){
+   $state=Get-M365HealthState $service.status
+   $color=if($state -eq 'Healthy'){'Good'}elseif($state -eq 'Interrupted'){'Bad'}else{'Warning'}
+   Write-Field $service.service "$state ($($service.status))" $color
+  }
+  Write-Field 'Active issues' $snapshot.ActiveIssues.Count
+  Write-Menu "[1] Browse services and associated issues`n[2] Active incidents and advisories`n[G] Global/public Microsoft 365 status`n[R] Refresh health`n[E] Export health snapshot (JSON)`n[0] Back"
+  switch((Read-M365MenuChoice).Trim().ToUpperInvariant()){
+   '1' {
+    $result=Show-M365RecordMenu @($snapshot.Services | Sort-Object service) 'Microsoft 365 services' {param($row,$index) "$($row.service) | $(Get-M365HealthState $row.status) | $($row.status)"}
+    if($result.Action -eq 'Select'){
+     Head $result.Item.service
+     Raw-Record $result.Item
+     Wait-Key
+     Show-M365HealthIssues @($snapshot.ActiveIssues | Where-Object service -eq $result.Item.service)
+    }
+   }
+   '2' {Show-M365HealthIssues $snapshot.ActiveIssues}
+   'G' {Show-M365PublicHealthDashboard}
+   'R' {$refresh=$true}
+   'E' {Save-Evidence $snapshot 'm365-service-health';Wait-Key}
+   '0' {return}
+  }
+ }
+}
+
+while($true){Head 'Main menu'; Show-ConnectionSummary; Write-Menu "[1] List all tenant users`n[2] User overview`n[3] Full user investigation`n[4] Mailbox configuration`n[5] Forwarding and inbox rules`n[6] Sign-in activity`n[7] Mailbox permissions`n[8] Conditional Access policies`n`n[H] Microsoft 365 tenant health dashboard`n[G] Microsoft 365 global/public status (no sign-in)`n[M] Mail flow`n[Q] Security and quarantine`n[I] Tenant-wide IP investigation`n[R] Risky users / unusual travel`n[C] Connection management`n`n[0] Exit"; $choice=(Read-M365MenuChoice).Trim().ToUpperInvariant(); if($choice -eq '0'){break}; try { switch($choice){ '1'{Tenant-Users} '2'{User-Overview} '3'{Full-UserInvestigation} '4'{Mailbox} '5'{Rules} '6'{Signins} '7'{Permissions} '8'{ConditionalAccess-Policies} 'I'{Investigate-IP} 'R'{Risk-Menu} 'G'{Show-M365PublicHealthDashboard} 'H'{Show-M365HealthDashboard} 'M'{Mail-FlowMenu} 'Q'{Security-Menu} 'C'{Connection-Menu} default{Write-Host 'Unknown option';Wait-Key} } }catch{Write-Host "Operation failed: $($_.Exception.Message)" -ForegroundColor Red;Wait-Key} }
