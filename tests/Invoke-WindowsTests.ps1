@@ -49,6 +49,8 @@ $artifactTests = @(
 
 $nonWindowsTests = @(
     'Test-M365MenuEngine.ps1'
+    'Test-M365Health.ps1'
+    'Test-M365PublicHealth.ps1'
 )
 
 $classifiedTests = @($safeTests + $liveTests + $artifactTests)
