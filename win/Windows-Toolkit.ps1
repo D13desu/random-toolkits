@@ -3029,6 +3029,28 @@ function Format-PcUptime([timespan]$Value) {
     return ('{0}m' -f [math]::Max(0,$Value.Minutes))
 }
 
+function Get-PcMenuSystemSummary {
+    # The menu must not wait for WMI/CIM, module imports, domain SID lookups,
+    # dsregcmd, protection checks, or the external public-IP service.
+    if(Test-PcSystemSummaryCache $script:PcSystemSummary){
+        return Format-PcSystemSummary $script:PcSystemSummary
+    }
+    $username=[Environment]::UserName
+    if($env:USERDOMAIN){$username=$env:USERDOMAIN+'\'+$username}
+    $administrator='Unavailable'
+    try{
+        $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+        if($identity.Name){$username=[string]$identity.Name}
+        $principal=New-Object Security.Principal.WindowsPrincipal($identity)
+        $administrator=if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){'Yes'}else{'No'}
+    }catch{}finally{if($identity){$identity.Dispose()}}
+    @(
+        "Identity: $username | Admin: $administrator | PowerShell $($PSVersionTable.PSVersion)"
+        "Device: $([Environment]::MachineName) | $([Environment]::OSVersion.VersionString)"
+        'Inventory: Not collected. Open [1] Computer and user details to load the full summary.'
+    )
+}
+
 function Get-PcSystemSummary {
     $schemaVersion='0.28.2'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
@@ -5024,7 +5046,7 @@ function Start-WindowsMenu {
     param([switch]$AllowCallerReturn)
     $state=@{}
     while ($true) {
-        $systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
+        $systemSummary=Get-PcMenuSystemSummary
         $menu=@(
             New-PcMenuItem '1' 'Computer and user details' 'Check' 'Full untruncated identity, groups, hardware, network and Windows information'
             New-PcMenuItem '2' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
@@ -5048,7 +5070,10 @@ function Start-WindowsMenu {
         $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary -Root:(-not $AllowCallerReturn)
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
-            '1' { Show-PcSystemDetails (Get-PcSystemSummary) }
+            '1' {
+                if(-not (Test-PcSystemSummaryCache $script:PcSystemSummary)){Write-Host 'Collecting computer and user details...' -ForegroundColor Cyan}
+                Show-PcSystemDetails (Get-PcSystemSummary)
+            }
             '2' { Start-NetworkMenu }
             '3' { Start-NetworkCategory 'power' }
             '4' { Start-NetworkCategory 'storage' }

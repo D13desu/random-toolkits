@@ -161,3 +161,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 .\win\Windows-Toolkit.ps1 -Check tcp -Target localhost -Port 443
 .\win\Windows-Toolkit.ps1 -Check quick -Target example.com
 ```
+
+## Startup performance
+
+The main menu opens with local identity, elevation, computer name and OS version. It does not wait for public-IP requests, CIM inventory, group-name resolution, Entra status or security/protection probes. Select **1 — Computer and user details** to collect the full inventory on demand; the menu then reuses that session's cached detailed header. Before collection, the header explicitly says the inventory has not been collected. Individual diagnostics remain available directly from their sections.

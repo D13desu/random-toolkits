@@ -29,6 +29,21 @@ function Write-Host { param($Object,$ForegroundColor) $script:Output.Add([string
 function Write-Warning { param($Message) $script:Output.Add([string]$Message) }
 $script:Answers = New-Object 'System.Collections.Generic.Queue[string]'
 function Read-Host { param($Prompt) if ($script:Answers.Count -eq 0) { throw "Unexpected prompt: $Prompt" }; $script:Output.Add($Prompt); $script:Answers.Dequeue() }
+$script:PcSystemSummary=$null
+$originalSummaryFunction=${function:Get-PcSystemSummary}
+function Get-PcSystemSummary { throw 'Opening the menu must not collect inventory' }
+$quickSummary=Get-PcMenuSystemSummary
+Assert-True (($quickSummary -join '|') -match 'Inventory: Not collected' -and ($quickSummary -join '|') -match [regex]::Escape([Environment]::MachineName)) 'Cold header shows local identity and explicitly deferred inventory'
+$script:Answers.Enqueue('0')
+Start-WindowsMenu -AllowCallerReturn
+Assert-True ($script:Answers.Count -eq 0 -and $null -eq $script:PcSystemSummary) 'Cold menu opens and exits without collecting or caching full inventory'
+$script:InventoryCalls=0
+function Get-PcSystemSummary { $script:InventoryCalls++;$script:PcSystemSummary=$detailFixture;return $detailFixture }
+foreach($answer in @('1','','0')){$script:Answers.Enqueue($answer)}
+Start-WindowsMenu -AllowCallerReturn
+Assert-True ($script:InventoryCalls -eq 1 -and $script:Answers.Count -eq 0) 'Full details are collected only after selecting option 1'
+Assert-True (((Get-PcMenuSystemSummary) -join '|') -match 'Public: 198\.51\.100\.20' -and $script:InventoryCalls -eq 1) 'Returning to menu uses cached details without collecting again'
+${function:Get-PcSystemSummary}=$originalSummaryFunction
 foreach ($category in @($categories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { $script:Answers.Enqueue($category.Key); $script:Answers.Enqueue('0') }
 $script:Answers.Enqueue('0')
 Start-NetworkMenu
