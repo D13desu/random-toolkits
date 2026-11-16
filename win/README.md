@@ -162,6 +162,6 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 .\win\Windows-Toolkit.ps1 -Check quick -Target example.com
 ```
 
-## Startup performance
+## Startup feedback
 
-The startup header retains local identity/elevation, hardware, storage, RAM, OS/uptime, network path, antivirus and restart information. Public-IP lookup, domain group-name resolution, Entra/PRT checks and the protection bundle (firewall, BitLocker, Secure Boot, TPM and VBS) are deferred to **1 — Computer and user details**. Deferred header fields are marked `Details [1]`; they are not reported as healthy or unavailable. The overview is cached for the session, and opening details replaces the header with the complete cached inventory. These are likely slow/blocking collectors, not timings measured on every Windows configuration.
+The interactive launcher displays `Loading tools...` before collecting the complete system summary. All existing startup checks and header fields remain enabled. The message appears after the script has downloaded and starts executing.

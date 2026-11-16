@@ -3029,16 +3029,7 @@ function Format-PcUptime([timespan]$Value) {
     return ('{0}m' -f [math]::Max(0,$Value.Minutes))
 }
 
-function Get-PcMenuSystemSummary {
-    if(Test-PcSystemSummaryCache $script:PcSystemSummary){return Format-PcSystemSummary $script:PcSystemSummary}
-    if(-not (Test-PcSystemSummaryCache $script:PcMenuSummary)){
-        $script:PcMenuSummary=Get-PcSystemSummary -Overview
-    }
-    Format-PcSystemSummary $script:PcMenuSummary
-}
-
 function Get-PcSystemSummary {
-    param([switch]$Overview)
     $schemaVersion='0.28.2'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
@@ -3059,20 +3050,16 @@ function Get-PcSystemSummary {
         $authenticationType=[string]$identity.AuthenticationType
         $principal=New-Object Security.Principal.WindowsPrincipal($identity)
         $administrator=[string]($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
-        if(-not $Overview){
         $groupNames=@(foreach($sid in $identity.Groups){try{$sid.Translate([Security.Principal.NTAccount]).Value}catch{[string]$sid.Value}}) | Sort-Object -Unique
         if($groupNames.Count){$groups=$groupNames -join ', '}
-        }
     } catch {
         if([Environment]::UserName){$username=[Environment]::UserName}
     }
     try {$selectedAddress=Get-PcInternetPrivateIPv4;if($selectedAddress){$privateIp=$selectedAddress}} catch {}
-    if(-not $Overview){
     try {
         $response=Invoke-RestMethod -UseBasicParsing -Uri 'https://api.ipify.org?format=json' -TimeoutSec 3 -ErrorAction Stop
         if($response.ip){$publicIp=[string]$response.ip}
     } catch {}
-    }else{$publicIp='Details [1]';$groups='Details [1]'}
     try {
         $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -OperationTimeoutSec 5 -ErrorAction Stop | Where-Object Size)
         if($disks.Count){
@@ -3112,12 +3099,12 @@ function Get-PcSystemSummary {
         if($os.LastBootUpTime){$lastBootTime=[datetime]$os.LastBootUpTime;$lastBoot=$lastBootTime.ToString('yyyy-MM-dd HH:mm:ss');$uptime=Format-PcUptime ((Get-Date)-$lastBootTime)}
     } catch {}
     try{$securitySummary=Get-PcSecurityHeader}catch{}
-    if(-not $Overview){try{$join=Get-PcDeviceJoinHeader;$entra=$join.Entra;$prt=$join.Prt}catch{}}else{$entra='Details [1]';$prt='Details [1]'}
+    try{$join=Get-PcDeviceJoinHeader;$entra=$join.Entra;$prt=$join.Prt}catch{}
     try{$networkPath=Get-PcNetworkPathHeader}catch{}
     try{$restartPending=Get-PcRestartHeader}catch{}
-    if(-not $Overview){try{$protection=Get-PcProtectionHeader}catch{}}
+    try{$protection=Get-PcProtectionHeader}catch{}
 
-    $summary=[pscustomobject]@{
+    $script:PcSystemSummary=[pscustomobject]@{
         SchemaVersion=$schemaVersion
         Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
         Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion;SecuritySummary=$securitySummary
@@ -3128,8 +3115,7 @@ function Get-PcSystemSummary {
         Runtime=$runtime;StorageFreePercent=$storageFreePercent;CpuLoad=$cpuLoad;RamUsage=$ramUsage;RestartPending=$restartPending
         JoinSummary=$joinSummary;Entra=$entra;Prt=$prt;NetworkPath=$networkPath;Protection=$protection
     }
-    if(-not $Overview){$script:PcSystemSummary=$summary}
-    return $summary
+    return $script:PcSystemSummary
 }
 
 function Show-PcSystemDetails($Summary) {
@@ -3211,7 +3197,7 @@ function Format-PcSystemSummary($Summary) {
     $network=$Summary.NetworkPath
     $networkText=if($network){"$($network.Adapter) | $($network.LinkSpeed) | Private: $($Summary.PrivateIp) | Gateway: $($network.Gateway) | VPN: $($network.Vpn) | Public: $($Summary.PublicIp)"}else{"Private: $($Summary.PrivateIp) | Public: $($Summary.PublicIp)"}
     $protection=$Summary.Protection
-    $protectionText=if($protection){"Firewall: $($protection.Firewall) | BitLocker: $($protection.BitLocker) | Secure Boot: $($protection.SecureBoot) | TPM: $($protection.Tpm) | VBS: $($protection.Vbs)"}else{'Deferred to Computer and user details [1]'}
+    $protectionText=if($protection){"Firewall: $($protection.Firewall) | BitLocker: $($protection.BitLocker) | Secure Boot: $($protection.SecureBoot) | TPM: $($protection.Tpm) | VBS: $($protection.Vbs)"}else{'Unavailable'}
     @(
         "Identity: $($Summary.Username) | Admin: $admin | $($Summary.Runtime)"
         "Device: $($Summary.Hostname) | $($Summary.JoinSummary) | Entra: $($Summary.Entra) | PRT: $($Summary.Prt)"
@@ -5038,7 +5024,7 @@ function Start-WindowsMenu {
     param([switch]$AllowCallerReturn)
     $state=@{}
     while ($true) {
-        $systemSummary=Get-PcMenuSystemSummary
+        $systemSummary=Format-PcSystemSummary (Get-PcSystemSummary)
         $menu=@(
             New-PcMenuItem '1' 'Computer and user details' 'Check' 'Full untruncated identity, groups, hardware, network and Windows information'
             New-PcMenuItem '2' 'Network' 'Menu' 'Connectivity, DNS, AD, routing and firewall'
@@ -5062,10 +5048,7 @@ function Start-WindowsMenu {
         $answer=Read-PcCategoryMenu 'Windows' $menu $state $systemSummary -Root:(-not $AllowCallerReturn)
         if ($null -eq $answer -or $answer.Trim() -in @('0','B')) { return }
         switch ($answer.Trim()) {
-            '1' {
-                if(-not (Test-PcSystemSummaryCache $script:PcSystemSummary)){Write-Host 'Collecting computer and user details...' -ForegroundColor Cyan}
-                Show-PcSystemDetails (Get-PcSystemSummary)
-            }
+            '1' { Show-PcSystemDetails (Get-PcSystemSummary) }
             '2' { Start-NetworkMenu }
             '3' { Start-NetworkCategory 'power' }
             '4' { Start-NetworkCategory 'storage' }
@@ -5092,6 +5075,7 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This t
 if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }
 elseif ($Check) { Invoke-NetworkCheck $Check $Target $Port }
 elseif (-not $NoMenu) {
+    Write-Host 'Loading tools... Collecting system summary; this may take a few seconds.' -ForegroundColor Cyan
     try { Start-WindowsMenu }
     catch [OperationCanceledException] {
         if($_.Exception.Message -ne 'Windows Toolkit quit requested.'){throw}
