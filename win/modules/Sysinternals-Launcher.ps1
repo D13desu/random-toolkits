@@ -55,11 +55,26 @@ function Invoke-PcAccessChk([string]$Executable,[string[]]$Arguments) {
     return $LASTEXITCODE
 }
 
+function Resolve-PcAccessChkAccount([string]$Account,[string]$DefaultAccount) {
+    $Account=$Account.Trim()
+    if(-not $Account){return $DefaultAccount}
+    # Explicit identities and well-known principals must retain their meaning.
+    if($Account -match '[\\@]' -or $Account -match '^S-1-' -or $Account -in @('Everyone','SYSTEM','LOCAL SERVICE','NETWORK SERVICE','Authenticated Users','INTERACTIVE','ANONYMOUS LOGON')){return $Account}
+    if($DefaultAccount -match '^([^\\]+)\\[^\\]+$'){return $Matches[1]+'\'+$Account}
+    return $Account
+}
+
 function Start-PcAccessChk {
     Write-Host "`nAccessChk file/folder permissions (read-only)" -ForegroundColor Cyan
     Write-Host 'Enter B at any prompt to return. Output reports effective access for the specified account.'
-    $account=Read-Host 'User or group (DOMAIN\user, COMPUTER\user, or Everyone)'
+    $defaultAccount=[string]$script:PcSystemSummary.Username
+    if(-not $defaultAccount -or $defaultAccount -eq 'Unavailable'){
+        $defaultAccount=if($env:USERDOMAIN){$env:USERDOMAIN+'\'+[Environment]::UserName}else{[Environment]::UserName}
+    }
+    Write-Host ('Default account: '+$defaultAccount) -ForegroundColor DarkGray
+    $account=Read-Host 'User/group (Enter = default; username uses its domain; DOMAIN\user or user@domain overrides)'
     if($null -eq $account -or $account.Trim() -eq 'B'){return}
+    $account=Resolve-PcAccessChkAccount $account $defaultAccount
     $path=Read-Host 'Absolute file/folder path (without surrounding quotes)'
     if($null -eq $path -or $path.Trim() -eq 'B'){return}
     $choice=Read-Host 'Access: [1] All permissions (R/W) [2] Read [3] Write (default 1)'

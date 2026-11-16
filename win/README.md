@@ -107,7 +107,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 ### 13. Microsoft Sysinternals Live
 
 - Microsoft-hosted shortcuts for Process Explorer, Process Monitor, Autoruns, TCPView, RAMMap, WinObj, VMMap, DebugView, AccessChk, and Disk2vhd.
-- AccessChk (option 9) prompts for a user/group, absolute file/folder path, all/read/write access and optional recursion. It runs with those arguments in the current console and pauses so results remain visible. R/W indicate read/write; verbose output lists specific rights. B cancels at any input prompt. It does not change permissions or accept the EULA automatically. UNC checks do not separately establish SMB share permissions; errors or empty filtered output must not be interpreted as proof of denied access.
+- AccessChk (option 9) prompts for a user/group, absolute file/folder path, all/read/write access and optional recursion. The account defaults to the summary identity: Enter uses the current account, a bare username inherits its domain, and a full `DOMAIN\user` or UPN overrides it. Explicit well-known principals such as Everyone remain unchanged. It runs with those arguments in the current console and pauses so results remain visible. R/W indicate read/write; verbose output lists specific rights. B cancels at any input prompt. It does not change permissions or accept the EULA automatically. UNC checks do not separately establish SMB share permissions; errors or empty filtered output must not be interpreted as proof of denied access.
 - Tools run from Microsoft's network share; the toolkit does not download, install, or cache them.
 
 ### 14. Windows Security
