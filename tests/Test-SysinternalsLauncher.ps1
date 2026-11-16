@@ -26,8 +26,30 @@ function Start-Process {param($FilePath,$ArgumentList,$ErrorAction);$script:Star
 $env:PROCESSOR_ARCHITEW6432='';$env:PROCESSOR_ARCHITECTURE='AMD64'
 Start-PcSysinternalsLiveTool tcpview
 Assert ($script:Started -eq '\\live.sysinternals.com\tools\tcpview64.exe') 'Tool launcher passes the Microsoft UNC path directly to Start-Process'
+$script:AccessExecutable=$null;$script:AccessArguments=@();$script:AccessCalls=0
+function Invoke-PcAccessChk {param($Executable,$Arguments);$script:AccessExecutable=$Executable;$script:AccessArguments=$Arguments;$script:AccessCalls++;return 0}
+$script:Answers=New-Object 'Collections.Generic.Queue[string]'
+function Read-Host {param($Prompt);if(-not $script:Answers.Count){throw "Unexpected prompt: $Prompt"};$script:Answers.Dequeue()}
+foreach($answer in @('DOMAIN\Test User','C:\Data & Reports','3','y','')){$script:Answers.Enqueue($answer)}
 Start-PcSysinternalsLiveTool accesschk
-Assert ($script:Started -eq 'cmd.exe' -and $script:Arguments -eq '/k ""\\live.sysinternals.com\tools\accesschk64.exe" -?"') 'AccessChk opens usage help in a persistent command prompt'
+Assert ($script:AccessExecutable -eq '\\live.sysinternals.com\tools\accesschk64.exe' -and ($script:AccessArguments -join '|') -eq '-v|-w|-s|DOMAIN\Test User|C:\Data & Reports') 'AccessChk receives account, literal spaced path, write filter and recursion as separate arguments'
+Assert ($script:Answers.Count -eq 0) 'AccessChk waits for Enter after displaying output'
+$readArgs=@(New-PcAccessChkArguments -Account Everyone -Path 'C:\' -Access Read)
+Assert (($readArgs -join '|') -eq '-v|-r|Everyone|C:\.') 'Read filter and drive-root path are preserved safely'
+$allArgs=@(New-PcAccessChkArguments -Account 'DOMAIN\user' -Path '\\server\share\Folder Name')
+Assert (($allArgs -join '|') -eq '-v|DOMAIN\user|\\server\share\Folder Name') 'Default shows all permissions without read/write filters or recursion'
+foreach($bad in @(@('-w','C:\Data'),@('Everyone','relative'),@('Everyone','C:\Data"'),@('Everyone','C:\*'))){
+ $caught=$false;try{$null=New-PcAccessChkArguments -Account $bad[0] -Path $bad[1]}catch{$caught=$true}
+ Assert $caught 'Invalid account, relative path, quotes or wildcards are rejected before execution'
+}
+$before=$script:AccessCalls
+foreach($answer in @('B')){$script:Answers.Enqueue($answer)}
+Start-PcSysinternalsLiveTool accesschk
+Assert ($script:AccessCalls -eq $before -and $script:Answers.Count -eq 0) 'Back cancels without launching AccessChk'
+function Invoke-PcAccessChk {param($Executable,$Arguments);throw 'Mock native failure'}
+foreach($answer in @('Everyone','C:\Data','1','n','')){$script:Answers.Enqueue($answer)}
+$caught=$false;try{Start-PcSysinternalsLiveTool accesschk}catch{$caught=$_.Exception.Message -eq 'Mock native failure'}
+Assert ($caught -and $script:Answers.Count -eq 0) 'Launch failure still pauses before returning'
 $env:PROCESSOR_ARCHITECTURE=$savedArchitecture;$env:PROCESSOR_ARCHITEW6432=$savedWow
 
 $toolkit=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
