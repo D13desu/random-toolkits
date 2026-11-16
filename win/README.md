@@ -161,3 +161,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 .\win\Windows-Toolkit.ps1 -Check tcp -Target localhost -Port 443
 .\win\Windows-Toolkit.ps1 -Check quick -Target example.com
 ```
+
+## Startup feedback
+
+The interactive launcher displays `Loading tools...` before collecting the complete system summary. All existing startup checks and header fields remain enabled. The message appears after the script has downloaded and starts executing.

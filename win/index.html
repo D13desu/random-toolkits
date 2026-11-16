@@ -5075,6 +5075,7 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This t
 if ($Check -like 'ad-*') { Invoke-AdCheck $Check $DomainController }
 elseif ($Check) { Invoke-NetworkCheck $Check $Target $Port }
 elseif (-not $NoMenu) {
+    Write-Host 'Loading tools... Collecting system summary; this may take a few seconds.' -ForegroundColor Cyan
     try { Start-WindowsMenu }
     catch [OperationCanceledException] {
         if($_.Exception.Message -ne 'Windows Toolkit quit requested.'){throw}
