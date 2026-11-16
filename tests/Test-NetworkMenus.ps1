@@ -44,6 +44,7 @@ Start-WindowsMenu -AllowCallerReturn
 Assert-True ($script:InventoryCalls -eq 1 -and $script:Answers.Count -eq 0) 'Full details are collected only after selecting option 1'
 Assert-True (((Get-PcMenuSystemSummary) -join '|') -match 'Public: 198\.51\.100\.20' -and $script:InventoryCalls -eq 1) 'Returning to menu uses cached details without collecting again'
 ${function:Get-PcSystemSummary}=$originalSummaryFunction
+$script:Output.Clear()
 foreach ($category in @($categories | Where-Object { $_.Id -in @('overview','connectivity','dns','ad','routing','firewall') })) { $script:Answers.Enqueue($category.Key); $script:Answers.Enqueue('0') }
 $script:Answers.Enqueue('0')
 Start-NetworkMenu
