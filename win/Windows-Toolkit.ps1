@@ -256,16 +256,75 @@ function Get-PcSysinternalsLivePath([string]$Id) {
     [pscustomobject]@{Tool=$tool;Path=($directory+'\'+$file);Architecture=$architecture}
 }
 
+function New-PcAccessChkArguments {
+    param([string]$Account,[string]$Path,[ValidateSet('All','Read','Write')][string]$Access='All',[switch]$Recurse)
+    $Account=$Account.Trim();$Path=$Path.Trim()
+    if(-not $Account -or $Account -match '^[/-]|["\x00-\x1f]'){throw 'Enter a user or group such as DOMAIN\user, COMPUTER\user or Everyone.'}
+    if($Path -notmatch '^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)' -or $Path -match '["*?\x00-\x1f]'){throw 'Enter an absolute file/folder path (C:\Data or \\server\share\Data), without quotes or wildcards.'}
+    # Avoid Windows PowerShell native quoting ambiguity for a trailing backslash.
+    if($Path.EndsWith('\')){$Path+='.'}
+    $arguments=@('-v')
+    if($Access -eq 'Read'){$arguments+='-r'}
+    if($Access -eq 'Write'){$arguments+='-w'}
+    if($Recurse){$arguments+='-s'}
+    $arguments+=$Account;$arguments+=$Path
+    return $arguments
+}
+
+function Invoke-PcAccessChk([string]$Executable,[string[]]$Arguments) {
+    # Pass data directly to the executable, never through cmd.exe or Invoke-Expression.
+    & $Executable @Arguments | Out-Host
+    return $LASTEXITCODE
+}
+
+function Resolve-PcAccessChkAccount([string]$Account,[string]$DefaultAccount) {
+    $Account=$Account.Trim()
+    if(-not $Account){return $DefaultAccount}
+    # Explicit identities and well-known principals must retain their meaning.
+    if($Account -match '[\\@]' -or $Account -match '^S-1-' -or $Account -in @('Everyone','SYSTEM','LOCAL SERVICE','NETWORK SERVICE','Authenticated Users','INTERACTIVE','ANONYMOUS LOGON')){return $Account}
+    if($DefaultAccount -match '^([^\\]+)\\[^\\]+$'){return $Matches[1]+'\'+$Account}
+    return $Account
+}
+
+function Start-PcAccessChk {
+    Write-Host "`nAccessChk file/folder permissions (read-only)" -ForegroundColor Cyan
+    Write-Host 'Enter B at any prompt to return. Output reports effective access for the specified account.'
+    $defaultAccount=[string]$script:PcSystemSummary.Username
+    if(-not $defaultAccount -or $defaultAccount -eq 'Unavailable'){
+        $defaultAccount=if($env:USERDOMAIN){$env:USERDOMAIN+'\'+[Environment]::UserName}else{[Environment]::UserName}
+    }
+    Write-Host ('Default account: '+$defaultAccount) -ForegroundColor DarkGray
+    $account=Read-Host 'User/group (Enter = default; username uses its domain; DOMAIN\user or user@domain overrides)'
+    if($null -eq $account -or $account.Trim() -eq 'B'){return}
+    $account=Resolve-PcAccessChkAccount $account $defaultAccount
+    $path=Read-Host 'Absolute file/folder path (without surrounding quotes)'
+    if($null -eq $path -or $path.Trim() -eq 'B'){return}
+    $choice=Read-Host 'Access: [1] All permissions (R/W) [2] Read [3] Write (default 1)'
+    if($null -eq $choice -or $choice.Trim() -eq 'B'){return}
+    $access=switch($choice.Trim()){'2'{'Read'}'3'{'Write'}{$_ -in @('','1')}{'All'}default{throw 'Choose 1, 2 or 3.'}}
+    $recursive=Read-Host 'Recurse into subfolders? [y/N]'
+    if($null -eq $recursive -or $recursive.Trim() -eq 'B'){return}
+    if($recursive.Trim() -notmatch '^(?i:y|yes|n|no)?$'){throw 'Choose Y or N.'}
+    $arguments=@(New-PcAccessChkArguments -Account $account -Path $path -Access $access -Recurse:($recursive.Trim() -match '^(?i:y|yes)$'))
+    $resolved=Get-PcSysinternalsLivePath 'accesschk'
+    Write-Host ('Executable: '+$resolved.Path) -ForegroundColor DarkGray
+    Write-Host ('Arguments: '+(($arguments | ForEach-Object {'"'+$_+'"'}) -join ' ')) -ForegroundColor DarkGray
+    Write-Host 'R = read, W = write; verbose output lists specific rights. Filtered/empty output is not proof of denial if the command reports an error.'
+    Write-Host 'UNC checks do not separately establish SMB share permissions. Microsoft EULA prompts remain enabled.' -ForegroundColor Yellow
+    try{
+        $exitCode=Invoke-PcAccessChk $resolved.Path $arguments
+        Write-Host "AccessChk exit code: $exitCode"
+    }finally{
+        $null=Read-Host 'Press Enter to return'
+    }
+}
+
 function Start-PcSysinternalsLiveTool([string]$Id) {
+    if($Id -eq 'accesschk'){Start-PcAccessChk;return}
     $resolved=Get-PcSysinternalsLivePath $Id
     Write-Host "Opening $($resolved.Tool.Name) from Microsoft's Sysinternals Live share..." -ForegroundColor Cyan
     Write-Host $resolved.Path -ForegroundColor DarkGray
-    if($resolved.Tool.Id -eq 'accesschk'){
-        # AccessChk is a console tool: retain the window so usage/output stays visible.
-        Start-Process -FilePath 'cmd.exe' -ArgumentList ('/k ""{0}" -?"' -f $resolved.Path) -ErrorAction Stop
-    }else{
-        Start-Process -FilePath $resolved.Path -ErrorAction Stop
-    }
+    Start-Process -FilePath $resolved.Path -ErrorAction Stop
     Write-Host 'The executable remains hosted by Microsoft. Its EULA and elevation prompts are not bypassed.' -ForegroundColor Green
 }
 
