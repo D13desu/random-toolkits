@@ -106,7 +106,8 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 
 ### 13. Microsoft Sysinternals Live
 
-- Microsoft-hosted shortcuts for Process Explorer, Process Monitor, Autoruns, TCPView, RAMMap, WinObj, VMMap, DebugView, ZoomIt, and Disk2vhd.
+- Microsoft-hosted shortcuts for Process Explorer, Process Monitor, Autoruns, TCPView, RAMMap, WinObj, VMMap, DebugView, AccessChk, and Disk2vhd.
+- AccessChk (option 9) opens a persistent command prompt with its usage help so console output remains visible. Use its Microsoft-hosted executable path with the desired arguments to inspect permissions.
 - Tools run from Microsoft's network share; the toolkit does not download, install, or cache them.
 
 ### 14. Windows Security

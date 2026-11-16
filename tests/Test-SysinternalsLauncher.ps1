@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message};Write-Output "PASS: $Message"}
 
 $catalog=@(Get-PcSysinternalsLiveCatalog)
-Assert ($catalog.Count -eq 10) 'Curated Sysinternals Live catalog has ten GUI tools'
+Assert ($catalog.Count -eq 10) 'Curated Sysinternals Live catalog has ten tools'
 Assert (@($catalog.Id|Select-Object -Unique).Count -eq $catalog.Count) 'Tool identifiers are unique'
 Assert (-not ($catalog.Id -contains 'sysmon') -and -not ($catalog.Id -contains 'sdelete')) 'Service-installing and destructive tools are not one-click launchers'
 
@@ -22,10 +22,12 @@ try{
 } finally {$env:PROCESSOR_ARCHITECTURE=$savedArchitecture;$env:PROCESSOR_ARCHITEW6432=$savedWow}
 
 $script:Started=$null
-function Start-Process {param($FilePath,$ArgumentList,$ErrorAction);$script:Started=$FilePath}
+function Start-Process {param($FilePath,$ArgumentList,$ErrorAction);$script:Started=$FilePath;$script:Arguments=$ArgumentList}
 $env:PROCESSOR_ARCHITEW6432='';$env:PROCESSOR_ARCHITECTURE='AMD64'
 Start-PcSysinternalsLiveTool tcpview
 Assert ($script:Started -eq '\\live.sysinternals.com\tools\tcpview64.exe') 'Tool launcher passes the Microsoft UNC path directly to Start-Process'
+Start-PcSysinternalsLiveTool accesschk
+Assert ($script:Started -eq 'cmd.exe' -and $script:Arguments -eq '/k ""\\live.sysinternals.com\tools\accesschk64.exe" -?"') 'AccessChk opens usage help in a persistent command prompt'
 $env:PROCESSOR_ARCHITECTURE=$savedArchitecture;$env:PROCESSOR_ARCHITEW6432=$savedWow
 
 $toolkit=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
