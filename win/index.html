@@ -3030,28 +3030,15 @@ function Format-PcUptime([timespan]$Value) {
 }
 
 function Get-PcMenuSystemSummary {
-    # The menu must not wait for WMI/CIM, module imports, domain SID lookups,
-    # dsregcmd, protection checks, or the external public-IP service.
-    if(Test-PcSystemSummaryCache $script:PcSystemSummary){
-        return Format-PcSystemSummary $script:PcSystemSummary
+    if(Test-PcSystemSummaryCache $script:PcSystemSummary){return Format-PcSystemSummary $script:PcSystemSummary}
+    if(-not (Test-PcSystemSummaryCache $script:PcMenuSummary)){
+        $script:PcMenuSummary=Get-PcSystemSummary -Overview
     }
-    $username=[Environment]::UserName
-    if($env:USERDOMAIN){$username=$env:USERDOMAIN+'\'+$username}
-    $administrator='Unavailable'
-    try{
-        $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-        if($identity.Name){$username=[string]$identity.Name}
-        $principal=New-Object Security.Principal.WindowsPrincipal($identity)
-        $administrator=if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){'Yes'}else{'No'}
-    }catch{}finally{if($identity){$identity.Dispose()}}
-    @(
-        "Identity: $username | Admin: $administrator | PowerShell $($PSVersionTable.PSVersion)"
-        "Device: $([Environment]::MachineName) | $([Environment]::OSVersion.VersionString)"
-        'Inventory: Not collected. Open [1] Computer and user details to load the full summary.'
-    )
+    Format-PcSystemSummary $script:PcMenuSummary
 }
 
 function Get-PcSystemSummary {
+    param([switch]$Overview)
     $schemaVersion='0.28.2'
     if(Test-PcSystemSummaryCache $script:PcSystemSummary $schemaVersion){return $script:PcSystemSummary}
 
@@ -3072,16 +3059,20 @@ function Get-PcSystemSummary {
         $authenticationType=[string]$identity.AuthenticationType
         $principal=New-Object Security.Principal.WindowsPrincipal($identity)
         $administrator=[string]($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
+        if(-not $Overview){
         $groupNames=@(foreach($sid in $identity.Groups){try{$sid.Translate([Security.Principal.NTAccount]).Value}catch{[string]$sid.Value}}) | Sort-Object -Unique
         if($groupNames.Count){$groups=$groupNames -join ', '}
+        }
     } catch {
         if([Environment]::UserName){$username=[Environment]::UserName}
     }
     try {$selectedAddress=Get-PcInternetPrivateIPv4;if($selectedAddress){$privateIp=$selectedAddress}} catch {}
+    if(-not $Overview){
     try {
         $response=Invoke-RestMethod -UseBasicParsing -Uri 'https://api.ipify.org?format=json' -TimeoutSec 3 -ErrorAction Stop
         if($response.ip){$publicIp=[string]$response.ip}
     } catch {}
+    }else{$publicIp='Details [1]';$groups='Details [1]'}
     try {
         $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 3' -OperationTimeoutSec 5 -ErrorAction Stop | Where-Object Size)
         if($disks.Count){
@@ -3121,12 +3112,12 @@ function Get-PcSystemSummary {
         if($os.LastBootUpTime){$lastBootTime=[datetime]$os.LastBootUpTime;$lastBoot=$lastBootTime.ToString('yyyy-MM-dd HH:mm:ss');$uptime=Format-PcUptime ((Get-Date)-$lastBootTime)}
     } catch {}
     try{$securitySummary=Get-PcSecurityHeader}catch{}
-    try{$join=Get-PcDeviceJoinHeader;$entra=$join.Entra;$prt=$join.Prt}catch{}
+    if(-not $Overview){try{$join=Get-PcDeviceJoinHeader;$entra=$join.Entra;$prt=$join.Prt}catch{}}else{$entra='Details [1]';$prt='Details [1]'}
     try{$networkPath=Get-PcNetworkPathHeader}catch{}
     try{$restartPending=Get-PcRestartHeader}catch{}
-    try{$protection=Get-PcProtectionHeader}catch{}
+    if(-not $Overview){try{$protection=Get-PcProtectionHeader}catch{}}
 
-    $script:PcSystemSummary=[pscustomobject]@{
+    $summary=[pscustomobject]@{
         SchemaVersion=$schemaVersion
         Username=$username;Groups=$groups;Hostname=$hostname;PrivateIp=$privateIp;PublicIp=$publicIp
         Storage=$storage;Cpu=$cpu;Ram=$ram;OsVersion=$osVersion;SecuritySummary=$securitySummary
@@ -3137,7 +3128,8 @@ function Get-PcSystemSummary {
         Runtime=$runtime;StorageFreePercent=$storageFreePercent;CpuLoad=$cpuLoad;RamUsage=$ramUsage;RestartPending=$restartPending
         JoinSummary=$joinSummary;Entra=$entra;Prt=$prt;NetworkPath=$networkPath;Protection=$protection
     }
-    return $script:PcSystemSummary
+    if(-not $Overview){$script:PcSystemSummary=$summary}
+    return $summary
 }
 
 function Show-PcSystemDetails($Summary) {
@@ -3219,7 +3211,7 @@ function Format-PcSystemSummary($Summary) {
     $network=$Summary.NetworkPath
     $networkText=if($network){"$($network.Adapter) | $($network.LinkSpeed) | Private: $($Summary.PrivateIp) | Gateway: $($network.Gateway) | VPN: $($network.Vpn) | Public: $($Summary.PublicIp)"}else{"Private: $($Summary.PrivateIp) | Public: $($Summary.PublicIp)"}
     $protection=$Summary.Protection
-    $protectionText=if($protection){"Firewall: $($protection.Firewall) | BitLocker: $($protection.BitLocker) | Secure Boot: $($protection.SecureBoot) | TPM: $($protection.Tpm) | VBS: $($protection.Vbs)"}else{'Unavailable'}
+    $protectionText=if($protection){"Firewall: $($protection.Firewall) | BitLocker: $($protection.BitLocker) | Secure Boot: $($protection.SecureBoot) | TPM: $($protection.Tpm) | VBS: $($protection.Vbs)"}else{'Deferred to Computer and user details [1]'}
     @(
         "Identity: $($Summary.Username) | Admin: $admin | $($Summary.Runtime)"
         "Device: $($Summary.Hostname) | $($Summary.JoinSummary) | Entra: $($Summary.Entra) | PRT: $($Summary.Prt)"
