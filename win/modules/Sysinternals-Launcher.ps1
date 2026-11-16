@@ -19,7 +19,7 @@ function Get-PcSysinternalsLiveCatalog {
         [pscustomobject]@{Key='6';Id='winobj';Name='WinObj';Detail='Windows Object Manager namespace viewer';x86='Winobj.exe';x64='Winobj64.exe';arm64='Winobj64a.exe'}
         [pscustomobject]@{Key='7';Id='vmmap';Name='VMMap';Detail='Detailed virtual and physical process memory map';x86='vmmap.exe';x64='vmmap64.exe';arm64='vmmap64a.exe'}
         [pscustomobject]@{Key='8';Id='dbgview';Name='DebugView';Detail='Capture local and kernel debug output';x86='Dbgview.exe';x64='Dbgview64.exe';arm64='Dbgview64a.exe'}
-        [pscustomobject]@{Key='9';Id='zoomit';Name='ZoomIt';Detail='Screen zoom, annotation and presentation timer';x86='ZoomIt.exe';x64='ZoomIt64.exe';arm64='ZoomIt64a.exe'}
+        [pscustomobject]@{Key='9';Id='accesschk';Name='AccessChk';Detail='Inspect effective permissions on files, Registry keys, services and processes';x86='accesschk.exe';x64='accesschk64.exe';arm64='accesschk64a.exe'}
         [pscustomobject]@{Key='10';Id='disk2vhd';Name='Disk2vhd';Detail='Create VHD images of selected physical volumes';x86='disk2vhd.exe';x64='disk2vhd64.exe';arm64='disk2vhd64a.exe'}
     )
 }
@@ -38,7 +38,12 @@ function Start-PcSysinternalsLiveTool([string]$Id) {
     $resolved=Get-PcSysinternalsLivePath $Id
     Write-Host "Opening $($resolved.Tool.Name) from Microsoft's Sysinternals Live share..." -ForegroundColor Cyan
     Write-Host $resolved.Path -ForegroundColor DarkGray
-    Start-Process -FilePath $resolved.Path -ErrorAction Stop
+    if($resolved.Tool.Id -eq 'accesschk'){
+        # AccessChk is a console tool: retain the window so usage/output stays visible.
+        Start-Process -FilePath 'cmd.exe' -ArgumentList ('/k ""{0}" -?"' -f $resolved.Path) -ErrorAction Stop
+    }else{
+        Start-Process -FilePath $resolved.Path -ErrorAction Stop
+    }
     Write-Host 'The executable remains hosted by Microsoft. Its EULA and elevation prompts are not bypassed.' -ForegroundColor Green
 }
 
