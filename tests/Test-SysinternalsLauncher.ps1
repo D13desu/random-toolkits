@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message};Write-Output "PASS: $Message"}
 
 $catalog=@(Get-PcSysinternalsLiveCatalog)
-Assert ($catalog.Count -eq 10) 'Curated Sysinternals Live catalog has ten tools'
+Assert ($catalog.Count -eq 13) 'Curated Sysinternals Live catalog has thirteen tools'
 Assert (@($catalog.Id|Select-Object -Unique).Count -eq $catalog.Count) 'Tool identifiers are unique'
 Assert (-not ($catalog.Id -contains 'sysmon') -and -not ($catalog.Id -contains 'sdelete')) 'Service-installing and destructive tools are not one-click launchers'
 
@@ -13,9 +13,14 @@ try{
  $env:PROCESSOR_ARCHITEW6432='';$env:PROCESSOR_ARCHITECTURE='AMD64'
  $x64=Get-PcSysinternalsLivePath procexp
  Assert ($x64.Path -eq '\\live.sysinternals.com\tools\procexp64.exe') 'x64 shortcut uses the official tools share and x64 binary'
+ Assert ((Get-PcSysinternalsLivePath accessenum).Path -eq '\\live.sysinternals.com\tools\AccessEnum.exe') 'AccessEnum uses its published x86 executable on x64'
+ Assert ((Get-PcSysinternalsLivePath shareenum).Path -eq '\\live.sysinternals.com\tools\ShareEnum64.exe') 'ShareEnum uses the published x64 executable'
+ Assert ((Get-PcSysinternalsLivePath handle).Path -eq '\\live.sysinternals.com\tools\handle64.exe') 'Handle uses the x64 executable'
  $env:PROCESSOR_ARCHITECTURE='ARM64'
  $arm=Get-PcSysinternalsLivePath procmon
  Assert ($arm.Path -eq '\\live.sysinternals.com\tools\ARM64\Procmon64a.exe') 'ARM64 shortcut uses the official ARM64 share folder'
+ Assert ((Get-PcSysinternalsLivePath handle).Path -eq '\\live.sysinternals.com\tools\ARM64\handle64a.exe') 'Handle uses the native ARM64 executable'
+ Assert ((Get-PcSysinternalsLivePath accessenum).Path -eq '\\live.sysinternals.com\tools\AccessEnum.exe' -and (Get-PcSysinternalsLivePath shareenum).Path -eq '\\live.sysinternals.com\tools\ShareEnum.exe') 'GUI tools use published x86 executables in the root share on ARM64'
  $env:PROCESSOR_ARCHITECTURE='x86'
  $x86=Get-PcSysinternalsLivePath autoruns
  Assert ($x86.Path -eq '\\live.sysinternals.com\tools\Autoruns.exe') 'x86 shortcut uses the x86 executable'
@@ -26,6 +31,10 @@ function Start-Process {param($FilePath,$ArgumentList,$ErrorAction);$script:Star
 $env:PROCESSOR_ARCHITEW6432='';$env:PROCESSOR_ARCHITECTURE='AMD64'
 Start-PcSysinternalsLiveTool tcpview
 Assert ($script:Started -eq '\\live.sysinternals.com\tools\tcpview64.exe') 'Tool launcher passes the Microsoft UNC path directly to Start-Process'
+Start-PcSysinternalsLiveTool accessenum
+Assert ($script:Started -eq '\\live.sysinternals.com\tools\AccessEnum.exe') 'AccessEnum menu dispatch opens its GUI'
+Start-PcSysinternalsLiveTool shareenum
+Assert ($script:Started -eq '\\live.sysinternals.com\tools\ShareEnum64.exe') 'ShareEnum menu dispatch opens its GUI'
 $script:AccessExecutable=$null;$script:AccessArguments=@();$script:AccessCalls=0
 Assert ((Resolve-PcAccessChkAccount 'alice' 'GIROSYSTEM\kgarcia') -eq 'GIROSYSTEM\alice') 'Bare username inherits the summary identity domain'
 Assert ((Resolve-PcAccessChkAccount '' 'GIROSYSTEM\kgarcia') -eq 'GIROSYSTEM\kgarcia') 'Blank account uses the full summary identity'
@@ -64,6 +73,22 @@ function Invoke-PcAccessChk {param($Executable,$Arguments);throw 'Mock native fa
 foreach($answer in @('Everyone','C:\Data','1','n','')){$script:Answers.Enqueue($answer)}
 $caught=$false;try{Start-PcSysinternalsLiveTool accesschk}catch{$caught=$_.Exception.Message -eq 'Mock native failure'}
 Assert ($caught -and $script:Answers.Count -eq 0) 'Launch failure still pauses before returning'
+$script:HandleCalls=0;$script:HandleArguments=@();$script:HandleExecutable=$null
+function Invoke-PcHandle {param($Executable,$Arguments);$script:HandleCalls++;$script:HandleExecutable=$Executable;$script:HandleArguments=$Arguments;return 0}
+foreach($answer in @('C:\Data & Reports\report.docx','')){$script:Answers.Enqueue($answer)}
+Start-PcSysinternalsLiveTool handle
+Assert ($script:HandleExecutable -eq '\\live.sysinternals.com\tools\handle64.exe' -and ($script:HandleArguments -join '|') -eq '-u|C:\Data & Reports\report.docx' -and $script:Answers.Count -eq 0) 'Handle passes a literal spaced path and pauses after inspection'
+foreach($bad in @('','-c 123','/c','file"name',"file`nname")){
+ $caught=$false;try{$null=New-PcHandleArguments $bad}catch{$caught=$true}
+ Assert $caught 'Handle rejects blank searches, option injection, quotes and control characters'
+}
+$before=$script:HandleCalls;$script:Answers.Enqueue('B')
+Start-PcSysinternalsLiveTool handle
+Assert ($script:HandleCalls -eq $before -and $script:Answers.Count -eq 0) 'Handle back returns without executing'
+function Invoke-PcHandle {param($Executable,$Arguments);throw 'Mock Handle failure'}
+foreach($answer in @('report.docx','')){$script:Answers.Enqueue($answer)}
+$caught=$false;try{Start-PcSysinternalsLiveTool handle}catch{$caught=$_.Exception.Message -eq 'Mock Handle failure'}
+Assert ($caught -and $script:Answers.Count -eq 0) 'Handle launch failure still pauses'
 $env:PROCESSOR_ARCHITECTURE=$savedArchitecture;$env:PROCESSOR_ARCHITEW6432=$savedWow
 
 $toolkit=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
