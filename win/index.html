@@ -243,6 +243,9 @@ function Get-PcSysinternalsLiveCatalog {
         [pscustomobject]@{Key='8';Id='dbgview';Name='DebugView';Detail='Capture local and kernel debug output';x86='Dbgview.exe';x64='Dbgview64.exe';arm64='Dbgview64a.exe'}
         [pscustomobject]@{Key='9';Id='accesschk';Name='AccessChk';Detail='Inspect effective permissions on files, Registry keys, services and processes';x86='accesschk.exe';x64='accesschk64.exe';arm64='accesschk64a.exe'}
         [pscustomobject]@{Key='10';Id='disk2vhd';Name='Disk2vhd';Detail='Create VHD images of selected physical volumes';x86='disk2vhd.exe';x64='disk2vhd64.exe';arm64='disk2vhd64a.exe'}
+        [pscustomobject]@{Key='11';Id='accessenum';Name='AccessEnum';Detail='Compare file/folder and Registry permissions in a GUI';x86='AccessEnum.exe';x64='AccessEnum.exe';arm64='AccessEnum.exe';RootOnArm64=$true}
+        [pscustomobject]@{Key='12';Id='shareenum';Name='ShareEnum';Detail='Browse network shares and their permissions in a GUI';x86='ShareEnum.exe';x64='ShareEnum64.exe';arm64='ShareEnum.exe';RootOnArm64=$true}
+        [pscustomobject]@{Key='13';Id='handle';Name='Handle';Detail='Find processes holding a file/folder open (inspection only; Administrator)';x86='handle.exe';x64='handle64.exe';arm64='handle64a.exe'}
     )
 }
 
@@ -252,7 +255,7 @@ function Get-PcSysinternalsLivePath([string]$Id) {
     $architecture=Get-PcSysinternalsArchitecture
     $file=[string]$tool.$architecture
     if([string]::IsNullOrWhiteSpace($file)){throw "$($tool.Name) has no $architecture Sysinternals Live shortcut."}
-    $directory=if($architecture -eq 'arm64'){$script:PcSysinternalsLiveRoot+'\ARM64'}else{$script:PcSysinternalsLiveRoot}
+    $directory=if($architecture -eq 'arm64' -and -not $tool.RootOnArm64){$script:PcSysinternalsLiveRoot+'\ARM64'}else{$script:PcSysinternalsLiveRoot}
     [pscustomobject]@{Tool=$tool;Path=($directory+'\'+$file);Architecture=$architecture}
 }
 
@@ -319,8 +322,42 @@ function Start-PcAccessChk {
     }
 }
 
+function New-PcHandleArguments([string]$Search) {
+    $Search=$Search.Trim()
+    if(-not $Search -or $Search -match '^[/-]|["\x00-\x1f]'){
+        throw 'Enter a file/folder path or name fragment, without quotes or a leading option switch.'
+    }
+    # Only a fixed inspection flag and a single search argument are allowed.
+    # Never expose -c (close handle) or -y (skip confirmation).
+    return @('-u',$Search)
+}
+
+function Invoke-PcHandle([string]$Executable,[string[]]$Arguments) {
+    & $Executable @Arguments | Out-Host
+    return $LASTEXITCODE
+}
+
+function Start-PcHandle {
+    Write-Host "`nHandle: find open files/folders" -ForegroundColor Cyan
+    Write-Host 'Requires an Administrator session. Searches are case-insensitive name/path fragments, not wildcard patterns.'
+    Write-Host 'Inspection only: this menu does not close handles. Microsoft EULA prompts remain enabled.'
+    $search=Read-Host 'File/folder path or name fragment (B = back)'
+    if($null -eq $search -or $search.Trim() -eq 'B'){return}
+    $arguments=@(New-PcHandleArguments $search)
+    $resolved=Get-PcSysinternalsLivePath 'handle'
+    Write-Host ('Searching for: '+$search.Trim()) -ForegroundColor Cyan
+    try{
+        $exitCode=Invoke-PcHandle $resolved.Path $arguments
+        Write-Host "Handle exit code: $exitCode"
+        Write-Host 'No matches is not proof that a file is unlocked; access errors or processes changing during the scan can limit results.' -ForegroundColor DarkGray
+    }finally{
+        $null=Read-Host 'Press Enter to return'
+    }
+}
+
 function Start-PcSysinternalsLiveTool([string]$Id) {
     if($Id -eq 'accesschk'){Start-PcAccessChk;return}
+    if($Id -eq 'handle'){Start-PcHandle;return}
     $resolved=Get-PcSysinternalsLivePath $Id
     Write-Host "Opening $($resolved.Tool.Name) from Microsoft's Sysinternals Live share..." -ForegroundColor Cyan
     Write-Host $resolved.Path -ForegroundColor DarkGray
