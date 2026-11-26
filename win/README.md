@@ -169,3 +169,14 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 ## Startup feedback
 
 The interactive launcher displays `Loading tools...` before collecting the complete system summary. All existing startup checks and header fields remain enabled. The message appears after the script has downloaded and starts executing.
+
+### Windows Update registry presets
+
+**Registry tweaks > Windows Update pause/resume** provides preview/apply actions for the active entries in [Aetherinox pause-windows-updates 1.6.0](https://github.com/Aetherinox/pause-windows-updates/releases/tag/1.6.0). The `.bat` utility and commented registry examples are not executed or included. Preset data is embedded; no upstream downloads happen when applying it.
+
+- **Pause** writes 23 values, including pause timestamps from 2025-01-01 through 2051-12-31, maximum pause days, active hours, Windows Update Medic startup/recovery settings, automatic-update/restart policy, `UseWUServer=0`, and driver-update exclusion.
+- **Resume** applies the upstream 26-entry resume preset, including removing pause timestamps and restoring its selected Medic/update/driver settings. It is **not a restore to previous values or guaranteed Windows defaults**: it retains some overrides and does not restore `UseWUServer`.
+- Both actions require administrator access, show the changes, ask for confirmation, save existing String/DWORD/Binary values (or record their absence) to a UTF-16 `.reg` undo file under `%LOCALAPPDATA%\Random-Toolkits\registry-backups`, then verify registry read-back. `-WhatIf` and cancellation make no registry changes. Backup failures stop before registry writes; subsequent failures report possible partial application and the undo path. Import the undo file as administrator to restore the saved values.
+- Pausing includes security updates. The presets can conflict with domain/MDM/WSUS configuration. Protected service keys may deny writes; the toolkit does not change ownership, ACLs, service runtime state or scheduled tasks, and does not reboot. A successful read-back is not proof that Windows will honor the pause or resume updates. Validate behavior on the target Windows build; managed policies can reapply values.
+
+Release assets verified against published SHA-256: pause `6dfe36e0e6ee17f15029b935ef1c7e6560e7db1e6437dba0d9c368fbf5c87160`; resume `81928ce7f4fac0fa40d9859c5ac392caeb4fce490bc355293935afb017138d3f`. Source attribution: Aetherinox, [MIT license](https://github.com/Aetherinox/pause-windows-updates/blob/1.6.0/LICENSE).
