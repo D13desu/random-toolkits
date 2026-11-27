@@ -1080,12 +1080,18 @@ syn_emit() {
     if (( ${#SYN_REPORT} < 262144 )); then SYN_REPORT+="$text"$'\n'; fi
 }
 syn_capture() {
-    local name=$1 exe timer rc; shift
+    local name=$1 exe timer timer_help rc; local -a timer_args=(); shift
     SYN_OUT=''; SYN_STATE='UNAVAILABLE'
     exe=$(syn_resolve "$name") || { SYN_OUT="Missing utility: $name"; return 127; }
     timer=$(syn_resolve timeout) || timer=''
     if [[ -n $timer ]]; then
-        if SYN_OUT=$(LC_ALL=C "$timer" 20 "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
+        timer_help=$(LC_ALL=C "$timer" --help 2>&1) || true
+        if grep -Eq '(^|[[:space:][])\-t([[:space:]=]|$)' <<<"$timer_help"; then timer_args=(-t 20)
+        elif grep -Eq 'DURATION|SECS|SECONDS' <<<"$timer_help"; then timer_args=(20)
+        else timer=''; fi
+    fi
+    if [[ -n $timer ]]; then
+        if SYN_OUT=$(LC_ALL=C "$timer" "${timer_args[@]}" "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
     else
         if SYN_OUT=$(LC_ALL=C "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
     fi
@@ -1495,7 +1501,9 @@ syn_identity_menu() {
             0|B|b) return ;;
             1) value=$(syn_input 'User') && syn_identity "$value" || true ;;
             2|3) value=$(syn_input 'Numeric ID') || continue; name=user;[[ $choice == 3 ]] && name=group;syn_numeric_identity "$name" "$value" || true ;;
-            4) syn_gated synouser --enum local || true ;; 5) syn_gated synogroup --enum local || true ;;
+            4|5) name=synouser;[[ $choice == 5 ]] && name=synogroup
+                 if syn_supports "$name" --enum && syn_supports "$name" local;then syn_run "$name" --enum local || true
+                 else syn_emit '[UNAVAILABLE] Native local enumeration syntax not advertised.';fi ;;
             6|7) value=$(syn_input 'Name') || continue;syn_identity_arg "$value" || continue;name=synouser;[[ $choice == 7 ]] && name=synogroup
                  syn_gated "$name" --get "$value" || true ;;
             8) syn_gated wbinfo --ping-dc || true;syn_gated wbinfo --online-status || true ;;
@@ -1775,7 +1783,7 @@ syn_shares_menu() {
         lin_menu_item 3 'Find containing share, root ownership and ACL';lin_menu_item 4 'Selected share configuration (if advertised)';lin_menu_item 0 'Back'
         choice=$(lin_read 'Select: ') || return
         case $choice in
-            0|B|b) return ;; 1) syn_smb_config || true ;; 2) syn_gated synoshare --enum ALL || true ;;
+            0|B|b) return ;; 1) syn_smb_config || true ;; 2) if syn_supports synoshare --enum && syn_supports synoshare ALL;then syn_run synoshare --enum ALL || true;else syn_emit '[UNAVAILABLE] Native ALL-share enumeration syntax not advertised.';fi ;;
             3) path=$(syn_input 'Absolute file path') || continue
                if syn_share_root "$path"; then syn_emit "Containing share: $SYN_SHARE_NAME | $SYN_SHARE_ROOT";syn_acl_get "$SYN_SHARE_ROOT" || true
                else syn_emit '[UNAVAILABLE] Containing share could not be resolved from literal effective paths.';fi ;;

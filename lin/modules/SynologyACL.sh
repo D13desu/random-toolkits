@@ -158,7 +158,9 @@ syn_identity_menu() {
             0|B|b) return ;;
             1) value=$(syn_input 'User') && syn_identity "$value" || true ;;
             2|3) value=$(syn_input 'Numeric ID') || continue; name=user;[[ $choice == 3 ]] && name=group;syn_numeric_identity "$name" "$value" || true ;;
-            4) syn_gated synouser --enum local || true ;; 5) syn_gated synogroup --enum local || true ;;
+            4|5) name=synouser;[[ $choice == 5 ]] && name=synogroup
+                 if syn_supports "$name" --enum && syn_supports "$name" local;then syn_run "$name" --enum local || true
+                 else syn_emit '[UNAVAILABLE] Native local enumeration syntax not advertised.';fi ;;
             6|7) value=$(syn_input 'Name') || continue;syn_identity_arg "$value" || continue;name=synouser;[[ $choice == 7 ]] && name=synogroup
                  syn_gated "$name" --get "$value" || true ;;
             8) syn_gated wbinfo --ping-dc || true;syn_gated wbinfo --online-status || true ;;

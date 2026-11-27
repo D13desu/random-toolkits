@@ -35,12 +35,18 @@ syn_emit() {
     if (( ${#SYN_REPORT} < 262144 )); then SYN_REPORT+="$text"$'\n'; fi
 }
 syn_capture() {
-    local name=$1 exe timer rc; shift
+    local name=$1 exe timer timer_help rc; local -a timer_args=(); shift
     SYN_OUT=''; SYN_STATE='UNAVAILABLE'
     exe=$(syn_resolve "$name") || { SYN_OUT="Missing utility: $name"; return 127; }
     timer=$(syn_resolve timeout) || timer=''
     if [[ -n $timer ]]; then
-        if SYN_OUT=$(LC_ALL=C "$timer" 20 "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
+        timer_help=$(LC_ALL=C "$timer" --help 2>&1) || true
+        if grep -Eq '(^|[[:space:][])\-t([[:space:]=]|$)' <<<"$timer_help"; then timer_args=(-t 20)
+        elif grep -Eq 'DURATION|SECS|SECONDS' <<<"$timer_help"; then timer_args=(20)
+        else timer=''; fi
+    fi
+    if [[ -n $timer ]]; then
+        if SYN_OUT=$(LC_ALL=C "$timer" "${timer_args[@]}" "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
     else
         if SYN_OUT=$(LC_ALL=C "$exe" "$@" 2>&1); then rc=0; else rc=$?; fi
     fi

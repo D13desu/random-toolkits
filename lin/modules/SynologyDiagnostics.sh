@@ -70,7 +70,7 @@ syn_shares_menu() {
         lin_menu_item 3 'Find containing share, root ownership and ACL';lin_menu_item 4 'Selected share configuration (if advertised)';lin_menu_item 0 'Back'
         choice=$(lin_read 'Select: ') || return
         case $choice in
-            0|B|b) return ;; 1) syn_smb_config || true ;; 2) syn_gated synoshare --enum ALL || true ;;
+            0|B|b) return ;; 1) syn_smb_config || true ;; 2) if syn_supports synoshare --enum && syn_supports synoshare ALL;then syn_run synoshare --enum ALL || true;else syn_emit '[UNAVAILABLE] Native ALL-share enumeration syntax not advertised.';fi ;;
             3) path=$(syn_input 'Absolute file path') || continue
                if syn_share_root "$path"; then syn_emit "Containing share: $SYN_SHARE_NAME | $SYN_SHARE_ROOT";syn_acl_get "$SYN_SHARE_ROOT" || true
                else syn_emit '[UNAVAILABLE] Containing share could not be resolved from literal effective paths.';fi ;;
