@@ -63,6 +63,7 @@ function Get-SmbConnection {
 }
 function Get-Command {
     param($Name,$ErrorAction)
+    if($Name -eq $script:SmbExtraMissing){return}
     if($Name -eq 'Get-SmbConnection'){
         if(-not $script:SmbMissing){[pscustomobject]@{Name=$Name}}
     }else{Microsoft.PowerShell.Core\Get-Command -Name $Name -ErrorAction $ErrorAction}
@@ -105,3 +106,54 @@ Assert ($script:SmbQueries -eq $before+2 -and $script:SmbSteps.Count -eq 0) 'SMB
 Assert ($script:SmbDetails[1].Limitations -like '*not a list of filenames or locks*') 'SMB notes explain aggregate open counts and client-only scope'
 # END SMB CONNECTION TESTS
 Assert ('smb-connections' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -EQ connectivity)).Entry.Id) 'SMB view is reachable from Connectivity and adapters'
+
+# BEGIN EXTENDED SMB TESTS
+$script:ExtraQueries=0;$script:ExtraFail=$false;$script:SmbExtraMissing=''
+function Get-SmbMapping { [CmdletBinding()]param();$script:ExtraQueries++;if($script:ExtraFail){throw 'Mapping fixture failure'};[pscustomobject]@{LocalPath='Z:';RemotePath='\\NAS\Share with spaces';Status='OK';Persistent=$false} }
+function Get-SmbClientConfiguration { [CmdletBinding()]param();[pscustomobject]@{RequireSecuritySignature=$false;EnableInsecureGuestLogons=$false;RequireEncryption=$true;PrivateSecret='NOT FOR DISPLAY'} }
+function Get-SmbMultichannelConnection { [CmdletBinding()]param();[pscustomobject]@{ServerName='NAS';Selected=$false;ClientIpAddress='192.0.2.1';ServerIpAddress='192.0.2.2'} }
+function Get-SmbSession { [CmdletBinding()]param();[pscustomobject]@{SessionId=123;ClientUserName='DOMAIN\User';ClientComputerName='192.0.2.3';NumOpens=0} }
+function Get-SmbOpenFile { [CmdletBinding()]param();[pscustomobject]@{FileId=456;SessionId=123;Path='C:\Data\File with spaces.docx';ClientUserName='DOMAIN\User'} }
+function Get-SmbShare { [CmdletBinding()]param();[pscustomobject]@{Name='Data';Path='C:\Data';EncryptData=$false} }
+function Get-SmbShareAccess { [CmdletBinding()]param($Name);$script:LastShareName=$Name;[pscustomobject]@{Name=$Name;AccountName='DOMAIN\User';AccessControlType='Allow';AccessRight='Read'} }
+foreach($kind in @('Mappings','ClientConfiguration','Multichannel','Sessions','OpenFiles','Shares','ShareAccess')){
+ $snapshot=Get-PcSmbDiagnosticSnapshot $kind 'Data with spaces'
+ Assert ($snapshot.Status -eq 'OK' -and $snapshot.Rows.Count -eq 1) "SMB $kind collects a projected snapshot"
+}
+Assert ($script:LastShareName -eq 'Data with spaces') 'Share name remains a literal parameter value'
+$config=Get-PcSmbDiagnosticSnapshot ClientConfiguration
+Assert ($config.Rows[0].RequireSecuritySignature -ceq $false -and $config.Rows[0].RequireEncryption -ceq $true -and ($config | ConvertTo-Json -Depth 8) -notmatch 'PrivateSecret|NOT FOR DISPLAY') 'Client configuration exposes only selected diagnostic settings'
+$multi=Get-PcSmbDiagnosticSnapshot Multichannel
+Assert ($multi.Rows[0].Selected -ceq $false -and $multi.Rows[0].ClientRdmaCapable -eq 'Unavailable') 'Multichannel preserves false and distinguishes unknown metadata'
+$script:ExtraFail=$true;$bad=Get-PcSmbDiagnosticSnapshot Mappings
+Assert ($bad.Status -eq 'Failed' -and $bad.Rows.Count -eq 0) 'Mapping failures do not retain old rows'
+$script:ExtraFail=$false;$script:SmbExtraMissing='Get-SmbSession';$bad=Get-PcSmbDiagnosticSnapshot Sessions
+Assert ($bad.Status -eq 'Unavailable' -and $bad.Rows.Count -eq 0) 'Optional server cmdlet can be unavailable without breaking other views'
+$script:SmbExtraMissing='';$bad=Get-PcSmbDiagnosticSnapshot ShareAccess '*'
+Assert ($bad.Status -eq 'Failed') 'Share permissions reject wildcard expansion'
+function Get-Item { [CmdletBinding()]param($LiteralPath,[switch]$Force);$script:AclPath=$LiteralPath;[pscustomobject]@{FullName=$LiteralPath;PSProvider=[pscustomobject]@{Name='FileSystem'};Attributes='Archive'} }
+function Get-Acl { [CmdletBinding()]param($LiteralPath);[pscustomobject]@{Owner='DOMAIN\Owner';AreAccessRulesProtected=$false;Access=@([pscustomobject]@{IdentityReference='DOMAIN\User';AccessControlType='Deny';FileSystemRights='Write';IsInherited=$false;InheritanceFlags='None';PropagationFlags='None'},[pscustomobject]@{IdentityReference='DOMAIN\Group';AccessControlType='Allow';FileSystemRights='ReadAndExecute';IsInherited=$true;InheritanceFlags='ContainerInherit';PropagationFlags='None'})} }
+$acl=Get-PcFilesystemAclSnapshot '\\NAS\Share with spaces\File [1].docx'
+Assert ($script:AclPath -ceq '\\NAS\Share with spaces\File [1].docx' -and $acl.Rules.Count -eq 2) 'UNC ACL path is literal and all access rules are retained'
+Assert ($acl.Rules[0].Type -eq 'Deny' -and -not $acl.Rules[0].IsInherited -and $acl.Rules[1].IsInherited -and $acl.Notes -like '*not an effective-access calculation*') 'ACL inspector distinguishes explicit/inherited Allow/Deny without claiming effective access'
+$caught=$false;try{Get-PcFilesystemAclSnapshot 'HKLM:\Software'}catch{$caught=$true}
+Assert $caught 'ACL inspection rejects non-filesystem paths'
+$script:ExtraSteps=New-Object 'Collections.Generic.Queue[string]'
+foreach($step in @('Select','Refresh','Back')){$script:ExtraSteps.Enqueue($step)}
+function Show-PcMenu {
+ param($Title,$Items,$State,[switch]$Filterable,[switch]$Refreshable,$Description,$Commands)
+ switch($script:ExtraSteps.Dequeue()){
+  'Select'{[pscustomobject]@{Action='Select';Item=$Items[0]}}
+  'Refresh'{[pscustomobject]@{Action='Refresh'}}
+  'Back'{[pscustomobject]@{Action='Back'}}
+ }
+}
+$before=$script:ExtraQueries;Start-PcSmbDiagnosticView Mappings
+Assert ($script:ExtraQueries -eq $before+2 -and $script:ExtraSteps.Count -eq 0) 'Extended SMB details use cached rows and refresh explicitly'
+function Get-WinEvent { [CmdletBinding()]param($ListLog);[pscustomobject]@{LogName='Microsoft-Windows-SMBClient/Connectivity';IsEnabled=$true;RecordCount=5} }
+function Start-PcEventBrowser {param($LogName);$script:OpenedSmbLog=$LogName}
+foreach($step in @('Select','Back')){$script:ExtraSteps.Enqueue($step)}
+Start-PcSmbEvents
+Assert ($script:OpenedSmbLog -eq 'Microsoft-Windows-SMBClient/Connectivity') 'SMB channel selection opens the existing event browser'
+Assert (@(Get-PcSmbDiagnosticCatalog | Where-Object {$_.Id -in @('Sessions','OpenFiles') -and $_.Admin}).Count -eq 2) 'Server sessions and open-file menus declare administrator requirements'
+# END EXTENDED SMB TESTS

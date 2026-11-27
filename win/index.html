@@ -2097,13 +2097,133 @@ function Start-PcSmbConnections {
         }
     }
 }
+
+function Get-PcSmbDiagnosticCatalog {
+    @(
+        [pscustomobject]@{Key='1';Id='Connections';Name='Client connections and identities';Command='Get-SmbConnection';Admin=$false;Fields=@()}
+        [pscustomobject]@{Key='2';Id='Mappings';Name='Mapped shares and drive letters';Command='Get-SmbMapping';Admin=$false;Fields=@('LocalPath','RemotePath','Status','Persistent')}
+        [pscustomobject]@{Key='3';Id='ClientConfiguration';Name='SMB client signing, encryption and guest settings';Command='Get-SmbClientConfiguration';Admin=$false;Fields=@('EnableSecuritySignature','RequireSecuritySignature','EnableInsecureGuestLogons','RequireEncryption','EnableMultiChannel','ConnectionCountPerRssNetworkInterface','DirectoryCacheLifetime','FileInfoCacheLifetime','FileNotFoundCacheLifetime')}
+        [pscustomobject]@{Key='4';Id='Multichannel';Name='Client multichannel paths and interfaces';Command='Get-SmbMultichannelConnection';Admin=$false;Fields=@('ServerName','Selected','ClientIpAddress','ServerIpAddress','ClientInterfaceIndex','ServerInterfaceIndex','ClientRssCapable','ClientRdmaCapable','CurrentChannels','MaxChannels')}
+        [pscustomobject]@{Key='5';Id='Sessions';Name='Clients connected to THIS Windows file server';Command='Get-SmbSession';Admin=$true;Fields=@('SessionId','ClientComputerName','ClientUserName','NumOpens','SecondsExists','SecondsIdle','Dialect','Encrypted')}
+        [pscustomobject]@{Key='6';Id='OpenFiles';Name='Open files hosted by THIS Windows file server';Command='Get-SmbOpenFile';Admin=$true;Fields=@('FileId','SessionId','Path','ShareRelativePath','ClientComputerName','ClientUserName','Permissions','Locks')}
+        [pscustomobject]@{Key='7';Id='Shares';Name='Shares hosted by THIS Windows file server';Command='Get-SmbShare';Admin=$false;Fields=@('Name','Path','Description','ScopeName','Special','EncryptData','FolderEnumerationMode','CachingMode','ContinuouslyAvailable')}
+        [pscustomobject]@{Key='8';Id='ShareAccess';Name='Share-level permissions on THIS Windows server';Command='Get-SmbShareAccess';Admin=$false;Fields=@('Name','ScopeName','AccountName','AccessControlType','AccessRight')}
+    )
+}
+function Get-PcSmbDiagnosticSnapshot {
+    param([ValidateSet('Mappings','ClientConfiguration','Multichannel','Sessions','OpenFiles','Shares','ShareAccess')][string]$Kind,[string]$ShareName)
+    $spec=Get-PcSmbDiagnosticCatalog | Where-Object Id -EQ $Kind | Select-Object -First 1
+    $rows=New-Object 'Collections.Generic.List[object]';$status='OK';$issue=''
+    if(-not (Get-Command $spec.Command -ErrorAction SilentlyContinue)){$status='Unavailable';$issue='Missing '+$spec.Command}
+    else{
+        try{
+            if($Kind -eq 'ShareAccess'){
+                if([string]::IsNullOrWhiteSpace($ShareName) -or $ShareName.IndexOfAny([char[]]'*?[]') -ge 0){throw 'Enter one exact local share name, without wildcard characters.'}
+                $raw=@(Get-SmbShareAccess -Name $ShareName -ErrorAction Stop)
+            }else{$raw=@(& $spec.Command -ErrorAction Stop)}
+            $index=0
+            foreach($record in $raw){
+                if($null -eq $record){continue};$index++
+                $projected=[ordered]@{Id=($Kind+'-'+$index)}
+                foreach($field in $spec.Fields){$projected[$field]=Get-PcSmbConnectionField $record $field}
+                $rows.Add([pscustomobject]$projected)
+            }
+        }catch{$rows.Clear();$status='Failed';$issue=$_.Exception.Message}
+    }
+    [pscustomobject]@{CollectedAt=(Get-Date);Status=$status;Issue=$issue;Rows=$rows.ToArray();Kind=$Kind}
+}
+function Start-PcSmbDiagnosticView([string]$Kind,[string]$ShareName) {
+    $snapshot=Get-PcSmbDiagnosticSnapshot $Kind $ShareName;$state=@{}
+    $spec=Get-PcSmbDiagnosticCatalog | Where-Object Id -EQ $Kind | Select-Object -First 1
+    while($true){
+        $items=@(foreach($row in $snapshot.Rows){
+            $parts=@(foreach($field in $spec.Fields){'{0}: {1}' -f $field,$row.$field})
+            [pscustomobject]@{Id=$row.Id;Label=($parts[0..([math]::Min(2,$parts.Count-1))] -join ' | ');Detail=($parts -join ' | ');SearchText=($parts -join ' ');Data=$row}
+        })
+        $description=if($snapshot.Status -eq 'OK'){'Snapshot '+$snapshot.CollectedAt.ToString('HH:mm:ss')+' | '+$snapshot.Rows.Count+' returned | Local Windows scope; current logon/elevation context.'}else{$snapshot.Status+': '+$snapshot.Issue}
+        $choice=Show-PcMenu -Title ('Windows > Network > SMB > '+$spec.Name) -Items $items -State $state -Filterable -Refreshable -Description $description
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$snapshot=Get-PcSmbDiagnosticSnapshot $Kind $ShareName}
+            'Select'{Show-PcListDetails ($choice.Item.Data | Select-Object -Property $spec.Fields) 'SMB details (cached; read-only)'}
+        }
+    }
+}
+function Get-PcFilesystemAclSnapshot([string]$LiteralPath) {
+    if($LiteralPath -notmatch '^(?:[a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)'){throw 'Enter an absolute filesystem path, such as C:\Data or \\NAS\Share\Folder.'}
+    $item=Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop
+    if($item.PSProvider.Name -ne 'FileSystem'){throw 'Only filesystem paths are supported.'}
+    $acl=Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+    $rules=@(foreach($rule in $acl.Access){
+        [pscustomobject]@{Identity=[string]$rule.IdentityReference;Type=[string]$rule.AccessControlType;Rights=[string]$rule.FileSystemRights;IsInherited=$rule.IsInherited;InheritanceFlags=[string]$rule.InheritanceFlags;PropagationFlags=[string]$rule.PropagationFlags}
+    })
+    [pscustomobject]@{Path=$item.FullName;Owner=[string]$acl.Owner;InheritanceProtected=$acl.AreAccessRulesProtected;Attributes=[string]$item.Attributes;Rules=$rules;Notes='ACL entries and inheritance only; not an effective-access calculation. Allow/Deny ordering, groups, share permissions and the server filesystem all affect access. A Synology SMB view may not expose every DSM ACL detail.'}
+}
+function Start-PcFilesystemAclInspector {
+    $path=Read-PcInput 'Absolute local or UNC file/folder path (literal; no quotes)'
+    if([string]::IsNullOrWhiteSpace($path)){return}
+    $snapshot=Get-PcFilesystemAclSnapshot $path
+    $state=@{};$index=0
+    $items=@(foreach($rule in $snapshot.Rules){
+        $index++
+        [pscustomobject]@{Id=('ace-'+$index);Label=($rule.Type+' | '+$rule.Identity+' | '+$rule.Rights);Detail=('Inherited: '+$rule.IsInherited+' | '+$rule.InheritanceFlags+' | '+$rule.PropagationFlags);Data=$rule}
+    })
+    while($true){
+        $choice=Show-PcMenu -Title 'Filesystem ACL entries (not calculated effective access)' -Items $items -State $state -Filterable -Description ($snapshot.Path+' | Owner: '+$snapshot.Owner+' | Inheritance protected: '+$snapshot.InheritanceProtected) -Commands @{C='Ownership, attributes and scope'}
+        switch($choice.Action){
+            'Back'{return}
+            'Select'{Show-PcListDetails $choice.Item.Data 'Filesystem ACE (cached)'}
+            'Command'{if($choice.Command -eq 'C'){Show-PcListDetails ($snapshot | Select-Object Path,Owner,InheritanceProtected,Attributes,Notes) 'ACL scope and ownership'}}
+        }
+    }
+}
+function Start-PcSmbEvents {
+    if(-not (Get-Command Get-WinEvent -ErrorAction SilentlyContinue)){throw 'Get-WinEvent is unavailable.'}
+    $logs=@(Get-WinEvent -ListLog 'Microsoft-Windows-SMB*' -ErrorAction Stop | Sort-Object LogName)
+    if(-not $logs.Count){Write-Host 'No SMB event channels returned for this Windows installation.';Wait-PcMenuReturn;return}
+    $items=@(foreach($log in $logs){[pscustomobject]@{Id=$log.LogName;Label=$log.LogName;Detail=('Enabled: '+$log.IsEnabled+' | Records: '+$log.RecordCount);Data=$log}})
+    $state=@{}
+    while($true){
+        $choice=Show-PcMenu -Title 'Windows > SMB event channels' -Items $items -State $state -Filterable -Description 'Local client/server channels. Disabled logs are not enabled by this tool; permissions may restrict access.'
+        if($choice.Action -eq 'Back'){return}
+        if($choice.Action -eq 'Select'){Start-PcEventBrowser $choice.Item.Data.LogName}
+    }
+}
+function Start-PcSmbMenu {
+    $state=@{}
+    while($true){
+        $menu=@(foreach($entry in @(Get-PcSmbDiagnosticCatalog)){
+            $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@($entry.Command);Admin=$entry.Admin})
+            $reason=if($availability.Available){''}else{$availability.Reason}
+            New-PcMenuItem $entry.Key $entry.Name 'Check' 'Read-only' $reason
+        })
+        $events=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@('Get-WinEvent');Admin=$false})
+        $acl=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@('Get-Item','Get-Acl');Admin=$false})
+        $menu+=New-PcMenuItem '9' 'SMB client/server event logs' 'Menu' '' $(if($events.Available){''}else{$events.Reason})
+        $menu+=New-PcMenuItem '10' 'Filesystem ACL and inheritance inspector' 'Check' 'Local or UNC path; no permissions are changed' $(if($acl.Available){''}else{$acl.Reason})
+        $answer=Read-PcCategoryMenu 'Windows > Network > SMB diagnostics' $menu $state 'Server views query THIS Windows machine, not a Synology NAS. No disconnect, close, delete or permission-change actions.'
+        if($null -eq $answer -or $answer -in @('0','B')){return}
+        try{
+            if($answer -eq '9'){Start-PcSmbEvents;continue}
+            if($answer -eq '10'){Start-PcFilesystemAclInspector;continue}
+            $entry=Get-PcSmbDiagnosticCatalog | Where-Object Key -EQ $answer | Select-Object -First 1
+            if(-not $entry){continue}
+            $availability=Get-NetworkAvailability ([pscustomobject]@{MinPS='5.0';Commands=@($entry.Command);Admin=$entry.Admin})
+            if(-not $availability.Available){throw $availability.Reason}
+            if($entry.Id -eq 'Connections'){Start-PcSmbConnections;continue}
+            $share=''
+            if($entry.Id -eq 'ShareAccess'){$share=Read-PcInput 'Exact share name hosted on THIS Windows server';if(-not $share){continue}}
+            Start-PcSmbDiagnosticView $entry.Id $share
+        }catch [OperationCanceledException]{continue}catch{Write-Warning $_.Exception.Message;Wait-PcMenuReturn}
+    }
+}
 # END NETWORK CONNECTIONS
 
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
         [pscustomobject]@{Key='connections';Id='connections';Name='Network connections (TCP/UDP, PID and process)';MinPS='5.0';Commands=@('Get-NetTCPConnection','Get-CimInstance');Admin=$false;Action={param($t,$p) Start-PcNetworkConnections}}
-        [pscustomobject]@{Key='smb-connections';Id='smb-connections';Name='SMB client connections (shares and identities)';MinPS='5.0';Commands=@('Get-SmbConnection');Admin=$false;Action={param($t,$p) Start-PcSmbConnections}}
+        [pscustomobject]@{Key='smb-connections';Id='smb-connections';Name='SMB diagnostics (connections, mappings, files and ACLs)';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-PcSmbMenu}}
         [pscustomobject]@{Key='discovery';Id='discovery';Name='Discover network devices / TCP ports';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-NetworkDiscovery}}
         [pscustomobject]@{Key='printers';Id='printers';Name='Installed printers and status';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcPrinters}}
         [pscustomobject]@{Key='print-jobs';Id='print-jobs';Name='Print queues and jobs';MinPS='5.0';Commands=@('Get-Printer','Get-PrintJob');Admin=$false;Action={param($t,$p) Get-PcPrintJobs}}
