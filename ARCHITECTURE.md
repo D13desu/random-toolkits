@@ -489,3 +489,7 @@ The current design is deliberately simple, but these changes would lower mainten
 5. Upload only explicit public site paths if repository-internal files should not be part of the Pages artifact.
 
 Make those as separate, tested changes. The present architecture works without them, and this guide describes the code as it exists now.
+
+## Synology DSM module
+
+`lin/modules/SynologyCore.sh`, `SynologySMB.sh`, `SynologyACL.sh`, `SynologyOffice.sh` and `SynologyDiagnostics.sh` are assembled before the main menu by `tests/Sync-LinuxToolkit.ps1`. They share existing output/input helpers and do not alter PATH. `tests/Test-SynologyToolkit.sh` uses the supplied production command matrix and mocked DSM/Samba outputs; `tests/Test-SynologyTransactions.py` exercises the embedded move helper in isolated temporary filesystem fixtures. CI runs the Synology suite separately from the generic Linux suite. No production NAS is available in CI.

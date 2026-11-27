@@ -42,6 +42,10 @@ jobs:
         shell: bash
         run: bash ./tests/Test-LinuxToolkit.sh
 
+      - name: Test Synology diagnostics
+        shell: bash
+        run: bash ./tests/Test-SynologyToolkit.sh
+
       - name: Test Sysinternals Live launchers
         shell: pwsh
         run: ./tests/Test-SysinternalsLauncher.ps1

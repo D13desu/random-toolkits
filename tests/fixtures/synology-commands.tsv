@@ -1,0 +1,16 @@
+id	/bin/id
+wbinfo	/usr/local/bin/wbinfo
+synouser	/usr/syno/sbin/synouser
+synogroup	/usr/syno/sbin/synogroup
+synoacltool	/usr/syno/bin/synoacltool
+synoshare	/usr/syno/sbin/synoshare
+smbstatus	/usr/local/bin/smbstatus
+testparm	/usr/local/bin/testparm
+synosystemctl	/usr/syno/bin/synosystemctl
+synopkg	/usr/syno/bin/synopkg
+synodisk	/usr/syno/bin/synodisk
+synostgpool	/usr/syno/sbin/synostgpool
+smartctl	/bin/smartctl
+mdadm	/sbin/mdadm
+getent	MISSING
+synoservice	MISSING
