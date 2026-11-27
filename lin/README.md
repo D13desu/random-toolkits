@@ -1,4 +1,4 @@
-# Linux Toolkit v0.4.0
+# Linux Toolkit v0.5.0
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 
@@ -80,3 +80,7 @@ The script uses capability detection rather than requiring a specific distributi
 ## Development
 
 Maintain the files in `modules/`, then run `../tests/Sync-LinuxToolkit.ps1`. This assembles `Linux-Toolkit.sh` and copies it byte-for-byte to `index.html`. Run `bash ../tests/Test-LinuxToolkit.sh` on Linux before publishing.
+
+## Synology NAS troubleshooting
+
+Main menu **13** opens the DSM module; `--check synology` prints read-only system/command compatibility information. On other Linux systems the DSM submenu reports unavailable and leaves the existing menus unchanged. See [Synology guide](SYNOLOGY.md) for workflows, privilege requirements, quarantine safeguards and validation limits.

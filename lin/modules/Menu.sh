@@ -1,5 +1,6 @@
 lin_list_checks() {
     cat <<'EOF'
+synology     Synology DSM system/command compatibility (read-only)
 health       Combined health summary with measured thresholds
 system       System and user summary
 resources    CPU, memory, and resource-heavy processes
@@ -48,6 +49,7 @@ lin_run_raw_check() {
 lin_run_check() {
     if [[ ${LIN_RAW:-0} == 1 ]]; then lin_run_raw_check "$1"; return; fi
     case ${1:-} in
+        synology) syn_info ;;
         health) lin_check_health ;;
         system) lin_check_system ;;
         resources) lin_check_resources ;;
@@ -108,6 +110,7 @@ lin_main_menu() {
         lin_menu_item '10' 'Docker and Podman inventory'
         lin_menu_item '11' 'Sysinternals-style Linux tools'
         lin_menu_item '12' 'Maintenance actions [CHANGES SYSTEM]' "$LIN_YELLOW"
+        lin_menu_item '13' 'Synology NAS Troubleshooting'
         lin_menu_item 'Q' 'Quit' "$LIN_DIM"
         local choice
         choice=$(lin_read 'Select: ') || return 0
@@ -124,8 +127,9 @@ lin_main_menu() {
             10) lin_show_check containers ;;
             11) lin_sysinternals_menu ;;
             12) lin_maintenance_menu ;;
+            13) synology_menu ;;
             Q|0) return 0 ;;
-            *) lin_warn 'Choose 1-12 or Q.' ;;
+            *) lin_warn 'Choose 1-13 or Q.' ;;
         esac
     done
 }
