@@ -2022,12 +2022,88 @@ function Start-PcNetworkConnections {
         }
     }
 }
+
+function Get-PcSmbConnectionField($Connection,[string]$Name) {
+    $property=$Connection.PSObject.Properties[$Name]
+    if($null -eq $property -or $null -eq $property.Value){return 'Unavailable'}
+    return $property.Value
+}
+function Get-PcSmbConnections {
+    $collectedAt=Get-Date
+    $rows=New-Object 'Collections.Generic.List[object]'
+    $status='OK';$issue=''
+    if(-not (Get-Command Get-SmbConnection -ErrorAction SilentlyContinue)){
+        $status='Unavailable';$issue='Get-SmbConnection (SmbShare module) is unavailable on this Windows installation.'
+    }else{
+        try{
+            # Finish collection before constructing rows: an error must not leave a
+            # partial/stale set that looks like a successful empty snapshot.
+            $connections=@(Get-SmbConnection -ErrorAction Stop)
+            $index=0
+            foreach($connection in $connections){
+                if($null -eq $connection){continue}
+                $index++
+                $identity='Unavailable'
+                if($connection.Credential -is [string]){$identity=$connection.Credential}
+                elseif($connection.Credential -is [Management.Automation.PSCredential]){$identity=$connection.Credential.UserName}
+                $server=[string](Get-PcSmbConnectionField $connection 'ServerName')
+                $share=[string](Get-PcSmbConnectionField $connection 'ShareName')
+                $rows.Add([pscustomobject]@{
+                    Id=('smb-'+$index);ServerName=$server;ShareName=$share
+                    SharePath=('\\'+$server+'\'+$share)
+                    UserName=(Get-PcSmbConnectionField $connection 'UserName')
+                    CredentialIdentity=$identity
+                    Dialect=(Get-PcSmbConnectionField $connection 'Dialect')
+                    NumOpens=(Get-PcSmbConnectionField $connection 'NumOpens')
+                    Encrypted=(Get-PcSmbConnectionField $connection 'Encrypted')
+                    ContinuouslyAvailable=(Get-PcSmbConnectionField $connection 'ContinuouslyAvailable')
+                })
+            }
+        }catch{
+            $rows.Clear();$status='Failed';$issue=$_.Exception.Message
+        }
+    }
+    [pscustomobject]@{CollectedAt=$collectedAt;Status=$status;Issue=$issue;Rows=$rows.ToArray()}
+}
+function New-PcSmbConnectionMenuItem($Row) {
+    [pscustomobject]@{
+        Id=$Row.Id
+        Label=('{0} | SMB {1} | Opens: {2}' -f $Row.SharePath,$Row.Dialect,$Row.NumOpens)
+        Detail=('User: {0} | Credential identity: {1}' -f $Row.UserName,$Row.CredentialIdentity)
+        SearchText=($Row.ServerName+' '+$Row.ShareName+' '+$Row.UserName+' '+$Row.CredentialIdentity)
+        Data=$Row
+    }
+}
+function Start-PcSmbConnections {
+    $snapshot=Get-PcSmbConnections;$state=@{}
+    while($true){
+        $menu=@(foreach($row in $snapshot.Rows){New-PcSmbConnectionMenuItem $row})
+        $result=if($snapshot.Status -ne 'OK'){$snapshot.Status+': '+$snapshot.Issue}elseif(-not $snapshot.Rows.Count){'No SMB client connections returned in this logon/elevation context.'}else{'Connections: '+$snapshot.Rows.Count}
+        $description=('{0:HH:mm:ss} snapshot | {1} | Local SMB client only; C: scope and collection notes' -f $snapshot.CollectedAt,$result)
+        $choice=Show-PcMenu -Title 'Windows > Network > SMB client connections' -Items $menu -State $state -Filterable -Refreshable -Description $description -Commands @{C='Scope and collection notes'}
+        switch($choice.Action){
+            'Back'{return}
+            'Refresh'{$snapshot=Get-PcSmbConnections}
+            'Select'{Show-PcListDetails ($choice.Item.Data | Select-Object ServerName,ShareName,SharePath,UserName,CredentialIdentity,Dialect,NumOpens,Encrypted,ContinuouslyAvailable) 'SMB client connection (cached snapshot)'}
+            'Command'{if($choice.Command -eq 'C'){
+                Show-PcListDetails ([pscustomobject]@{
+                    CollectedAt=$snapshot.CollectedAt;Status=$snapshot.Status;CollectionIssue=$snapshot.Issue
+                    Scope='Outbound SMB connections from this Windows client, visible to the current logon/elevation context. An elevated console may see a different set; an access error may require an Administrator session.'
+                    Identity='UserName is the logon identity. CredentialIdentity is the account used for the share connection, which can differ. No password or credential object is displayed.'
+                    Limitations='NumOpens is an aggregate count, not a list of filenames or locks. This does not enumerate NAS-wide sessions, other clients, server-side open files, share ACLs or effective write permissions. Zero opens/empty results do not prove a document is unlocked.'
+                    Actions='Read-only snapshot; filter by server, share or identity, select for full details, and use R to refresh. No connections are created, disconnected or modified.'
+                }) 'SMB collection notes'
+            }}
+        }
+    }
+}
 # END NETWORK CONNECTIONS
 
 function Get-NetworkChecks {
     # Add entries here. Requirements are evaluated before displaying AND running a check.
     @(
         [pscustomobject]@{Key='connections';Id='connections';Name='Network connections (TCP/UDP, PID and process)';MinPS='5.0';Commands=@('Get-NetTCPConnection','Get-CimInstance');Admin=$false;Action={param($t,$p) Start-PcNetworkConnections}}
+        [pscustomobject]@{Key='smb-connections';Id='smb-connections';Name='SMB client connections (shares and identities)';MinPS='5.0';Commands=@('Get-SmbConnection');Admin=$false;Action={param($t,$p) Start-PcSmbConnections}}
         [pscustomobject]@{Key='discovery';Id='discovery';Name='Discover network devices / TCP ports';MinPS='5.0';Commands=@();Admin=$false;Action={param($t,$p) Start-NetworkDiscovery}}
         [pscustomobject]@{Key='printers';Id='printers';Name='Installed printers and status';MinPS='5.0';Commands=@('Get-CimInstance');Admin=$false;Action={param($t,$p) Get-PcPrinters}}
         [pscustomobject]@{Key='print-jobs';Id='print-jobs';Name='Print queues and jobs';MinPS='5.0';Commands=@('Get-Printer','Get-PrintJob');Admin=$false;Action={param($t,$p) Get-PcPrintJobs}}
@@ -2089,7 +2165,7 @@ function Invoke-NetworkCheck {
 function Get-NetworkCategories {
     @(
         [pscustomobject]@{Key='1'; Id='overview'; Name='Overview and quick diagnosis'; Checks=@('overview','quick'); AdChecks=@(); Repairs=@()}
-        [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview','discovery','connections'); AdChecks=@(); Repairs=@('renew-dhcp')}
+        [pscustomobject]@{Key='2'; Id='connectivity'; Name='Connectivity and adapters'; Checks=@('connectivity','tcp','overview','discovery','connections','smb-connections'); AdChecks=@(); Repairs=@('renew-dhcp')}
         [pscustomobject]@{Key='3'; Id='dns'; Name='DNS'; Checks=@('dns'); AdChecks=@(); Repairs=@('flush-dns')}
         [pscustomobject]@{Key='4'; Id='ad'; Name='Active Directory and time'; Checks=@(); AdChecks=@('ad-context','ad-discovery','ad-dns','ad-secure','ad-time','ad-shares','ad-identity','ad-ports','ad-rootdse','ad-fsmo','ad-replication','ad-dcdiag','ad-events','ad-site-subnet','ad-user','ad-computer','ad-spn','ad-spn-duplicates','ad-dns-quality'); Repairs=@('repair-trust','resync-time')}
         [pscustomobject]@{Key='5'; Id='routing'; Name='Routing and proxy'; Checks=@('routes','proxy'); AdChecks=@(); Repairs=@()}
@@ -2192,7 +2268,7 @@ function Start-NetworkCategory {
             if(-not $availability.Available){throw $availability.Reason}
             Invoke-InteractiveCheck $item | Format-List | Out-Host
         }catch [OperationCanceledException]{continue}catch{Write-Warning $_.Exception.Message}
-        if($item.Entry.Id -in @('disk','disk-helper','event-browser','discovery','connections')){continue}
+        if($item.Entry.Id -in @('disk','disk-helper','event-browser','discovery','connections','smb-connections')){continue}
         $null=Read-Host 'Press Enter to return'
     }
 }

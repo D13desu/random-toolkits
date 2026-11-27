@@ -48,3 +48,60 @@ $source=Get-Content (Join-Path $PSScriptRoot '../win/Windows-Toolkit.ps1') -Raw
 $embedded=($source -split '# BEGIN NETWORK CONNECTIONS',2)[1] -split '# END NETWORK CONNECTIONS',2
 $module=Get-Content (Join-Path $PSScriptRoot '../win/modules/Network-Connections.ps1') -Raw
 Assert ($embedded[0].Replace("`r`n","`n").Trim() -eq $module.Replace("`r`n","`n").Trim()) 'Embedded connections module matches source'
+
+# BEGIN SMB CONNECTION TESTS
+$script:SmbMode='Rows';$script:SmbQueries=0;$script:SmbMissing=$false
+function Get-SmbConnection {
+    [CmdletBinding()]param()
+    $script:SmbQueries++
+    if($script:SmbMode -eq 'Fail'){throw 'SMB access denied fixture'}
+    if($script:SmbMode -eq 'Empty'){return}
+    $row=[pscustomobject]@{ServerName='NAS test';ShareName='Share with spaces';UserName='DOMAIN\LocalUser';Credential='OTHER\ShareUser';Dialect='3.1.1';NumOpens=0;Encrypted=$false;ContinuouslyAvailable=$false}
+    $row;$row
+    if($script:SmbMode -eq 'Partial'){throw 'SMB interrupted fixture'}
+    [pscustomobject]@{ServerName='NAS2';ShareName='Data';UserName='DOMAIN\User';Credential=[Management.Automation.PSCredential]::new('DOMAIN\ObjectIdentity',[Security.SecureString]::new());NumOpens=2}
+}
+function Get-Command {
+    param($Name,$ErrorAction)
+    if($Name -eq 'Get-SmbConnection'){
+        if(-not $script:SmbMissing){[pscustomobject]@{Name=$Name}}
+    }else{Microsoft.PowerShell.Core\Get-Command -Name $Name -ErrorAction $ErrorAction}
+}
+$smb=Get-PcSmbConnections
+Assert ($smb.Status -eq 'OK' -and $smb.Rows.Count -eq 3 -and $script:SmbQueries -eq 1) 'SMB collection queries the cmdlet once'
+Assert (@($smb.Rows.Id | Select-Object -Unique).Count -eq 3) 'Identical server/share records retain distinct menu IDs'
+Assert ($smb.Rows[0].UserName -eq 'DOMAIN\LocalUser' -and $smb.Rows[0].CredentialIdentity -eq 'OTHER\ShareUser') 'Logon identity and share credential identity remain separate'
+Assert ($smb.Rows[0].NumOpens -eq 0 -and $smb.Rows[0].Encrypted -ceq $false) 'Zero opens and false encryption are preserved'
+Assert ($smb.Rows[2].CredentialIdentity -eq 'DOMAIN\ObjectIdentity' -and $smb.Rows[2].Dialect -eq 'Unavailable') 'Credential objects expose only the account name; missing metadata stays unavailable'
+Assert (($smb.Rows[2] | ConvertTo-Json) -notmatch 'Password|SecureString') 'Snapshot contains no credential object or password property'
+$item=New-PcSmbConnectionMenuItem $smb.Rows[0]
+Assert ($item.Label -like '*\\NAS test\Share with spaces*' -and $item.SearchText -like '*OTHER\ShareUser*') 'Spaced share paths and alternate identities remain searchable'
+$script:SmbMode='Empty';$empty=Get-PcSmbConnections
+Assert ($empty.Status -eq 'OK' -and $empty.Rows.Count -eq 0 -and -not $empty.Issue) 'Successful empty SMB query is distinct from failure'
+$script:SmbMode='Fail';$failed=Get-PcSmbConnections
+Assert ($failed.Status -eq 'Failed' -and $failed.Rows.Count -eq 0 -and $failed.Issue -like '*access denied*') 'SMB query errors remain visible and do not reuse cached rows'
+$script:SmbMode='Partial';$failed=Get-PcSmbConnections
+Assert ($failed.Status -eq 'Failed' -and $failed.Rows.Count -eq 0) 'Interrupted SMB enumeration is not presented as complete'
+$script:SmbMissing=$true;$before=$script:SmbQueries;$missing=Get-PcSmbConnections
+Assert ($missing.Status -eq 'Unavailable' -and $script:SmbQueries -eq $before) 'Missing SMB cmdlet is reported before execution'
+$script:SmbMissing=$false;$script:SmbMode='Rows'
+$script:SmbSteps=New-Object 'Collections.Generic.Queue[string]'
+foreach($step in @('Select','Notes','Refresh','Back')){$script:SmbSteps.Enqueue($step)}
+$script:SmbDetails=New-Object 'Collections.Generic.List[object]'
+function Show-PcMenu {
+    param($Title,$Items,$State,[switch]$Filterable,[switch]$Refreshable,$Description,$Commands)
+    Assert ($Filterable -and $Refreshable) 'SMB view enables shared search and refresh controls' | Out-Host
+    switch($script:SmbSteps.Dequeue()){
+        'Select'{[pscustomobject]@{Action='Select';Item=$Items[0]}}
+        'Notes'{[pscustomobject]@{Action='Command';Command='C'}}
+        'Refresh'{[pscustomobject]@{Action='Refresh'}}
+        'Back'{[pscustomobject]@{Action='Back'}}
+    }
+}
+function Show-PcListDetails {param($Row,$Title);$script:SmbDetails.Add($Row)}
+$before=$script:SmbQueries
+Start-PcSmbConnections
+Assert ($script:SmbQueries -eq $before+2 -and $script:SmbSteps.Count -eq 0) 'SMB details and notes reuse the snapshot; only refresh re-queries'
+Assert ($script:SmbDetails[1].Limitations -like '*not a list of filenames or locks*') 'SMB notes explain aggregate open counts and client-only scope'
+# END SMB CONNECTION TESTS
+Assert ('smb-connections' -in (Get-NetworkMenuItems (Get-NetworkCategories | Where-Object Id -EQ connectivity)).Entry.Id) 'SMB view is reachable from Connectivity and adapters'

@@ -37,6 +37,7 @@ Requires Windows PowerShell 5.0 or later; PowerShell 5.1 or 7 is recommended. Th
 - Gateway/host connectivity and TCP port checks.
 - IPv4 device and TCP-port discovery with numbered interface selection, automatic multi-interface scopes, manual ranges, and optional IEEE vendor lookup.
 - Active TCP/UDP connections with PID, process, and executable path.
+- **Network > Connectivity and adapters > SMB client connections**: read-only `Get-SmbConnection` snapshot with server/share, UNC share path, logon user, credential account identity, SMB dialect, open count, encryption and continuous availability when provided. Filter/search, select for full details, and refresh with R. Missing cmdlet, failed collection and successful empty results are distinguished. This is client/logon-context visibility, not NAS-wide sessions or individual file locks; no passwords are displayed and no connections are changed. Elevation can change which connections are visible.
 - DNS lookup, routing table, proxy, and firewall status.
 - Active Directory membership, DC discovery, DNS, secure channel, time, SYSVOL/NETLOGON, Kerberos identity, DC service ports, LDAP RootDSE, FSMO roles, replication, selected DCDiag tests, recent DC events, site/subnet mapping, targeted user/computer diagnostics, SPN queries, and per-resolver AD DNS checks.
 - Confirmed repairs: renew DHCP, flush DNS, repair member trust, and resync time.
