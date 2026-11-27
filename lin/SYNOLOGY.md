@@ -1,4 +1,4 @@
-# Synology NAS Troubleshooting — Linux Toolkit 0.5.0
+# Synology NAS Troubleshooting — Linux Toolkit 0.6.0
 
 Run the existing Linux launcher under **Bash 4+**, then choose **13**. This module does not assume that DSM's default login shell is Bash. Review/download the script first; use an existing root session for protected checks or file moves. The toolkit never invokes sudo, installs packages, requires Entware, changes PATH, disconnects sessions, edits ACLs, restarts services, runs SMART tests or modifies storage configuration.
 
