@@ -1,4 +1,4 @@
-# Linux Toolkit v0.5.0
+# Linux Toolkit v0.6.0
 
 Portable Linux diagnostics and carefully confirmed maintenance actions in one Bash menu.
 
@@ -38,8 +38,6 @@ Interactive terminals use semantic colours for navigation, read-only checks, war
 - PostgreSQL readiness, clusters, selected effective settings, and database sizes when local authentication is already available.
 - Expiry and subject summaries for certificates referenced by Apache, Nginx, or Let's Encrypt.
 - Docker/Podman container state, health, published ports, disk use, Compose projects, networks, volumes, and selected-container details including environment values.
-- A Sysinternals-style menu covering processes, sockets, open files, tracing readiness, startup entries, memory maps, dump readiness, and selected-PID details.
-- Detection of Microsoft's ProcDump, ProcMon, and Sysmon Linux ports with native fallbacks such as `ps`, `ss`, `lsof`, `strace`, `systemctl`, and `pmap`.
 
 Friendly summaries retain access to the underlying evidence. Press `R` from a supported interactive screen or use:
 
@@ -48,8 +46,6 @@ bash Linux-Toolkit.sh --check storage --raw
 bash Linux-Toolkit.sh --check network --raw
 bash Linux-Toolkit.sh --check nginx --raw
 bash Linux-Toolkit.sh --check containers --raw
-bash Linux-Toolkit.sh --check sysinternals
-bash Linux-Toolkit.sh --check processes
 ```
 
 Run a single read-only check without the menu:
