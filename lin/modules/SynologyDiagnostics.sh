@@ -131,7 +131,7 @@ syn_guided() {
     checks+='Assessment: findings are snapshots. Suspected causes remain unconfirmed; ACL checks do not establish end-to-end SMB access.'$'\n'
     SYN_LAST_GUIDED="Target: $path"$'\n'"User: $user"$'\n'"$checks"
     syn_emit "$checks"
-    syn_emit 'Windows: Get-SmbConnection | Format-Table ServerName,ShareName,UserName,Credential'
+    printf '%s\n' 'Windows: Get-SmbConnection | Format-Table ServerName,ShareName,UserName,Credential'
     syn_emit 'Windows: Get-Item "\\NAS\Share\document.xlsx" | Select-Object Name,Attributes,IsReadOnly'
     syn_emit 'Do not export authentication tokens, passwords or private configuration. No original document has been modified.'
 }
